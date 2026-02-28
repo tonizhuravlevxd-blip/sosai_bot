@@ -4,7 +4,7 @@ import time
 import base64
 from io import BytesIO
 from flask import Flask, request
-from telegram import Update
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
@@ -24,7 +24,7 @@ flask_app = Flask(__name__)
 telegram_app = ApplicationBuilder().token(TG_TOKEN).build()
 
 # === SETTINGS ===
-FREE_IMAGE_LIMIT = 25
+FREE_IMAGE_LIMIT = 10
 WEEK_SECONDS = 7 * 24 * 60 * 60
 
 user_mode = {}
@@ -32,16 +32,22 @@ waiting_for_image_prompt = {}
 user_image_data = {}
 chat_mode_users = {}
 
+# === КНОПОЧНОЕ МЕНЮ ===
+main_keyboard = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("🖼 Создать изображение"), KeyboardButton("💬 Чат GPT (/uu)")],
+        [KeyboardButton("👤 Профиль")]
+    ],
+    resize_keyboard=True
+)
+
 # ================= HELPERS =================
 
 def get_user_image_data(user_id):
     now = time.time()
 
     if user_id not in user_image_data:
-        user_image_data[user_id] = {
-            "count": 0,
-            "week_start": now
-        }
+        user_image_data[user_id] = {"count": 0, "week_start": now}
 
     data = user_image_data[user_id]
 
@@ -55,13 +61,8 @@ def get_user_image_data(user_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🚀 Бот работает!\n\n"
-        "Команды:\n"
-        "/nano — быстрый режим\n"
-        "/pro — мощный режим\n"
-        "/photo — создать изображение\n"
-        "/account — профиль\n"
-        "/uu — начать диалог с ChatGPT"
+        "🚀 Добро пожаловать!\n\nВыбери действие ниже 👇",
+        reply_markup=main_keyboard
     )
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -72,26 +73,17 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"👤 Профиль\n\n"
         f"ID: {user.id}\n"
-        f"Имя: {user.first_name}\n"
-        f"Режим: {user_mode.get(user.id, 'nano')}\n\n"
+        f"Имя: {user.first_name}\n\n"
         f"🖼 Осталось генераций: {remaining}/{FREE_IMAGE_LIMIT}"
     )
 
-async def set_nano(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_mode[update.effective_user.id] = "gpt-4o-mini"
-    await update.message.reply_text("Режим nano включён")
-
-async def set_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_mode[update.effective_user.id] = "gpt-4o"
-    await update.message.reply_text("Режим pro включён")
-
 async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     waiting_for_image_prompt[update.effective_user.id] = True
-    await update.message.reply_text("Опиши изображение, которое хочешь создать 🎨")
+    await update.message.reply_text("Опиши изображение 🎨")
 
 async def chat_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_mode_users[update.effective_user.id] = True
-    await update.message.reply_text("💬 Режим диалога включён. Пиши сообщение.")
+    await update.message.reply_text("💬 Режим чата включён. Пиши сообщение.")
 
 # ================= MESSAGE HANDLER =================
 
@@ -99,7 +91,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    # ===== ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ =====
+    # === НАЖАТИЯ КНОПОК ===
+    if text == "🖼 Создать изображение":
+        await photo_command(update, context)
+        return
+
+    if text == "💬 Чат GPT (/uu)":
+        await chat_mode(update, context)
+        return
+
+    if text == "👤 Профиль":
+        await account(update, context)
+        return
+
+    # === ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ===
     if waiting_for_image_prompt.get(user_id):
         waiting_for_image_prompt[user_id] = False
 
@@ -107,8 +112,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if data["count"] >= FREE_IMAGE_LIMIT:
             await update.message.reply_text(
-                "❌ Лимит 25 бесплатных генераций в неделю исчерпан.\n"
-                "Попробуй снова через 7 дней 💎"
+                "❌ Лимит 10 картинок в неделю исчерпан."
             )
             return
 
@@ -118,7 +122,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             img = client.images.generate(
                 model="gpt-image-1",
                 prompt=text,
-                size="1024x1024"
+                size="512x512"  # дешевле
             )
 
             image_base64 = img.data[0].b64_json
@@ -133,13 +137,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # ===== РЕЖИМ ЧАТА =====
+    # === РЕЖИМ ЧАТА ===
     if chat_mode_users.get(user_id):
-        model = user_mode.get(user_id, "gpt-4o-mini")
-
         try:
             response = client.chat.completions.create(
-                model=model,
+                model="gpt-4o-mini",
                 messages=[{"role": "user", "content": text}]
             )
 
@@ -153,8 +155,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # === REGISTER HANDLERS ===
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("account", account))
-telegram_app.add_handler(CommandHandler("nano", set_nano))
-telegram_app.add_handler(CommandHandler("pro", set_pro))
 telegram_app.add_handler(CommandHandler("photo", photo_command))
 telegram_app.add_handler(CommandHandler("uu", chat_mode))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
