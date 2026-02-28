@@ -6,9 +6,9 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
-TG_TOKEN = os.getenv("8673164640:AAHtnXq7rcAP7HMOYxZbsurzXiF-TFSwkTg")
-OPENAI_KEY = os.getenv("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")
-WEBHOOK_URL = os.getenv("https://sosai-bot-6.onrender.com")
+TG_TOKEN = os.getenv("TG_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 client = OpenAI(api_key=OPENAI_KEY)
 
