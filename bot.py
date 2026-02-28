@@ -5,18 +5,20 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
+# === ENV VARIABLES ===
 TG_TOKEN = os.getenv("TG_TOKEN")
-print("TG_TOKEN VALUE:", TG_TOKEN)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# === APPS ===
 flask_app = Flask(__name__)
 telegram_app = ApplicationBuilder().token(TG_TOKEN).build()
 
 user_mode = {}
 
+# === TELEGRAM HANDLERS ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот работает 🚀 Используй /nano или /pro")
 
@@ -44,16 +46,22 @@ telegram_app.add_handler(CommandHandler("nano", set_nano))
 telegram_app.add_handler(CommandHandler("pro", set_pro))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
+# === FLASK ROUTES ===
 @flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
-def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    asyncio.run(telegram_app.process_update(update))
+async def webhook():
+    update = Update.de_json(await request.get_json(force=True), telegram_app.bot)
+    await telegram_app.process_update(update)
     return "ok"
 
 @flask_app.route("/")
 def home():
     return "Bot is running"
 
+# === STARTUP ===
+async def setup_webhook():
+    await telegram_app.initialize()
+    await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TG_TOKEN}")
+
 if __name__ == "__main__":
-    telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TG_TOKEN}")
+    asyncio.run(setup_webhook())
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
