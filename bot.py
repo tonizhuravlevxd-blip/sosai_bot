@@ -10,7 +10,7 @@ print("TG_TOKEN VALUE:", TG_TOKEN)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-client = OpenAI(api_key=OPENAI_KEY)
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 flask_app = Flask(__name__)
 telegram_app = ApplicationBuilder().token(TG_TOKEN).build()
