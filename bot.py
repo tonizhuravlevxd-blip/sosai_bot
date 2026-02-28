@@ -48,9 +48,14 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 
 # === FLASK ROUTES ===
 @flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
-async def webhook():
-    update = Update.de_json(await request.get_json(force=True), telegram_app.bot)
-    await telegram_app.process_update(update)
+def webhook():
+    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(telegram_app.process_update(update))
+    loop.close()
+
     return "ok"
 
 @flask_app.route("/")
@@ -58,10 +63,10 @@ def home():
     return "Bot is running"
 
 # === STARTUP ===
-async def setup_webhook():
+async def setup():
     await telegram_app.initialize()
     await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TG_TOKEN}")
 
 if __name__ == "__main__":
-    asyncio.run(setup_webhook())
+    asyncio.run(setup())
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
