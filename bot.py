@@ -1,11 +1,12 @@
 import os
+print("TG_TOKEN VALUE:", TG_TOKEN)
 import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
-TG_TOKEN = os.getenv("8673164640:AAHtnXq7rcAP7HMOYxZbsurzXiF-TFSwkTg") print("TG_TOKEN VALUE:", TG_TOKEN)
+TG_TOKEN = os.getenv("8673164640:AAHtnXq7rcAP7HMOYxZbsurzXiF-TFSwkTg")
 OPENAI_KEY = os.getenv("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")
 WEBHOOK_URL = os.getenv("https://sosai-bot-6.onrender.com")
 
