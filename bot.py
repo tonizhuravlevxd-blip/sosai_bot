@@ -1,6 +1,8 @@
 import os
 import asyncio
 import time
+import base64
+from io import BytesIO
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -28,6 +30,7 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 user_mode = {}
 waiting_for_image_prompt = {}
 user_image_data = {}
+chat_mode_users = {}
 
 # ================= HELPERS =================
 
@@ -42,7 +45,6 @@ def get_user_image_data(user_id):
 
     data = user_image_data[user_id]
 
-    # сброс если прошла неделя
     if now - data["week_start"] > WEEK_SECONDS:
         data["count"] = 0
         data["week_start"] = now
@@ -58,13 +60,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/nano — быстрый режим\n"
         "/pro — мощный режим\n"
         "/photo — создать изображение\n"
-        "/account — профиль"
+        "/account — профиль\n"
+        "/uu — начать диалог с ChatGPT"
     )
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     data = get_user_image_data(user.id)
-
     remaining = FREE_IMAGE_LIMIT - data["count"]
 
     await update.message.reply_text(
@@ -87,11 +89,17 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     waiting_for_image_prompt[update.effective_user.id] = True
     await update.message.reply_text("Опиши изображение, которое хочешь создать 🎨")
 
+async def chat_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_mode_users[update.effective_user.id] = True
+    await update.message.reply_text("💬 Режим диалога включён. Пиши сообщение.")
+
+# ================= MESSAGE HANDLER =================
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    # ===== ЕСЛИ ЖДЁМ ОПИСАНИЕ КАРТИНКИ =====
+    # ===== ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ =====
     if waiting_for_image_prompt.get(user_id):
         waiting_for_image_prompt[user_id] = False
 
@@ -113,26 +121,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 size="1024x1024"
             )
 
-            image_url = img.data[0].url
+            image_base64 = img.data[0].b64_json
+            image_bytes = base64.b64decode(image_base64)
 
             data["count"] += 1
 
-            await update.message.reply_photo(image_url)
+            await update.message.reply_photo(photo=BytesIO(image_bytes))
 
-        except Exception:
-            await update.message.reply_text("Ошибка при создании изображения 😢")
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка: {str(e)}")
 
         return
 
-    # ===== GPT ТЕКСТ =====
-    model = user_mode.get(user_id, "gpt-4o-mini")
+    # ===== РЕЖИМ ЧАТА =====
+    if chat_mode_users.get(user_id):
+        model = user_mode.get(user_id, "gpt-4o-mini")
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": text}]
-    )
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": text}]
+            )
 
-    await update.message.reply_text(response.choices[0].message.content)
+            await update.message.reply_text(response.choices[0].message.content)
+
+        except Exception as e:
+            await update.message.reply_text(f"Ошибка: {str(e)}")
+
+        return
 
 # === REGISTER HANDLERS ===
 telegram_app.add_handler(CommandHandler("start", start))
@@ -140,6 +156,7 @@ telegram_app.add_handler(CommandHandler("account", account))
 telegram_app.add_handler(CommandHandler("nano", set_nano))
 telegram_app.add_handler(CommandHandler("pro", set_pro))
 telegram_app.add_handler(CommandHandler("photo", photo_command))
+telegram_app.add_handler(CommandHandler("uu", chat_mode))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 # === FLASK ROUTES ===
