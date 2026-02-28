@@ -5,7 +5,8 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from openai import OpenAI
 
-TG_TOKEN = os.getenv("TG_TOKEN") print("TG_TOKEN VALUE:", TG_TOKEN)
+TG_TOKEN = os.getenv("TG_TOKEN")
+print("TG_TOKEN VALUE:", TG_TOKEN)
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
