@@ -135,20 +135,20 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 
 # ================= WEBHOOK =================
 
+event_loop = None  # глобальный loop
+
 @flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
 def webhook():
+    global event_loop
+
     update = Update.de_json(request.get_json(force=True), telegram_app.bot)
 
-    # ВАЖНО: создаём задачу в текущем event loop
-    asyncio.get_event_loop().create_task(
+    # используем созданный loop
+    event_loop.create_task(
         telegram_app.process_update(update)
     )
 
     return "ok"
-
-@flask_app.route("/")
-def index():
-    return "Bot is running!"
 
 # ================= START =================
 
@@ -160,8 +160,11 @@ if __name__ == "__main__":
         await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TG_TOKEN}")
         print("🚀 Webhook установлен")
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(startup())
+    # СОЗДАЁМ LOOP ВРУЧНУЮ (для Python 3.14)
+    event_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(event_loop)
+
+    event_loop.run_until_complete(startup())
 
     flask_app.run(
         host="0.0.0.0",
