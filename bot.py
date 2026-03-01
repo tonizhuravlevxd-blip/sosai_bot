@@ -120,17 +120,6 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 
 # ================= START BOT =================
 
-import asyncio
-
-async def main():
-    print("🚀 Бот запущен (polling)")
-
-    await telegram_app.initialize()
-    await telegram_app.start()
-    await telegram_app.updater.start_polling()
-
-    # держим приложение живым
-    await asyncio.Event().wait()
-
 if __name__ == "__main__":
-    asyncio.run(main())
+    print("🚀 Бот запущен (polling)")
+    telegram_app.run_polling()
