@@ -13,6 +13,19 @@ from openai import OpenAI
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# === ПРОВЕРКА ENV (чтобы Render не падал молча) ===
+if not TG_TOKEN:
+    raise ValueError("❌ TG_TOKEN не установлен в Render (Environment Variables)")
+
+if not OPENAI_API_KEY:
+    raise ValueError("❌ OPENAI_API_KEY не установлен в Render (Environment Variables)")
+
+if not WEBHOOK_URL:
+    raise ValueError("❌ WEBHOOK_URL не установлен в Render (Environment Variables)")
+
+print("✅ TG_TOKEN найден")
+print("✅ OPENAI_API_KEY найден")
+print("✅ WEBHOOK_URL найден")
 
 # === ДОКУМЕНТЫ (вставь публичные ссылки!) ===
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
