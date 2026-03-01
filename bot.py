@@ -9,6 +9,7 @@ from openai import OpenAI
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+print("TOKEN:", os.getenv("TG_TOKEN"))
 
 if not TG_TOKEN:
     raise ValueError("❌ TG_TOKEN не установлен")
