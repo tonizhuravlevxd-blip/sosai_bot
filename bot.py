@@ -117,7 +117,6 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 
 # ================= START BOT =================
 
-
-   if __name__ == "__main__":
+if __name__ == "__main__":
     print("🚀 Бот запущен (polling)")
     telegram_app.run_polling()
