@@ -17,15 +17,9 @@ if not TG_TOKEN:
 if not OPENAI_API_KEY:
     raise ValueError("❌ OPENAI_API_KEY не установлен")
 
-print("✅ ENV загружены")
-
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
-OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
-
 FREE_LIMIT = 5
-REF_BONUS = 3
 WEEK_SECONDS = 7 * 24 * 60 * 60
 
 # ================= DATABASE =================
@@ -41,10 +35,10 @@ CREATE TABLE IF NOT EXISTS users (
     accepted_terms INTEGER DEFAULT 0,
     referrals INTEGER DEFAULT 0,
     bonus_images INTEGER DEFAULT 0,
-    ref_by INTEGER
+    ref_by INTEGER,
+    is_active INTEGER DEFAULT 0
 )
 """)
-
 conn.commit()
 
 # ================= TELEGRAM =================
@@ -79,6 +73,23 @@ def reset_week_if_needed(user):
         )
         conn.commit()
 
+def activate_user_if_needed(user):
+    # если пользователь впервые стал активным
+    if user[7] == 0:
+        cursor.execute(
+            "UPDATE users SET is_active=1 WHERE user_id=?",
+            (user[0],)
+        )
+        conn.commit()
+
+        # начисляем бонус пригласившему
+        if user[6]:
+            cursor.execute(
+                "UPDATE users SET bonus_images=bonus_images+1, referrals=referrals+1 WHERE user_id=?",
+                (user[6],)
+            )
+            conn.commit()
+
 # ================= HANDLERS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -100,20 +111,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
 
-        if ref_id and ref_id != user.id:
-            cursor.execute(
-                "UPDATE users SET referrals=referrals+1, bonus_images=bonus_images+? WHERE user_id=?",
-                (REF_BONUS, ref_id)
-            )
-            conn.commit()
-
     db_user = get_user(user.id)
 
     if db_user[3] == 0:
         await update.message.reply_text(
-            f"📜 Пользовательское соглашение:\n{USER_AGREEMENT_URL}\n\n"
-            f"💰 Оферта:\n{OFFER_URL}\n\n"
-            "Нажмите «Продолжить»",
+            "📜 Примите условия для продолжения",
             reply_markup=terms_keyboard
         )
         return
@@ -138,53 +140,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_week_if_needed(user)
     user = get_user(user_id)
 
+    # ================= ПРОФИЛЬ =================
+
     if text == "👤 Профиль":
-        remaining = FREE_LIMIT + user[6] - user[2]
+        used = user[2]
+        bonus = user[5]
+        remaining = FREE_LIMIT + bonus - used
+
         await update.message.reply_text(
             f"👤 Ваш профиль\n\n"
-            f"🖼 Использовано: {user[2]}\n"
-            f"🎁 Бонусы: {user[6]}\n"
-            f"📦 Осталось генераций: {remaining}\n"
-            f"👥 Приглашено: {user[4]}"
+            f"🆓 Бесплатно в неделю: {FREE_LIMIT}\n"
+            f"🖼 Использовано: {used}\n"
+            f"🎁 Бонусные генерации: {bonus}\n"
+            f"📦 Доступно сейчас: {remaining}\n"
+            f"👥 Активных рефералов: {user[4]}"
         )
         return
+
+    # ================= РЕФЕРАЛКА =================
 
     if text == "🎁 Реферальная программа":
         link = f"https://t.me/{context.bot.username}?start={user_id}"
         await update.message.reply_text(
-            f"🎁 Приглашай друзей!\n\n"
-            f"За каждого — +{REF_BONUS} генерации\n\n"
-            f"🔗 Твоя ссылка:\n{link}"
+            "🎁 Реферальная программа\n\n"
+            "Вы получаете +1 генерацию\n"
+            "за каждого приглашённого пользователя,\n"
+            "который реально что-то написал или создал.\n\n"
+            f"🔗 Ваша ссылка:\n{link}"
         )
         return
 
+    # ================= GPT =================
+
     if text == "💬 Чат GPT":
-        await update.message.reply_text("Напиши сообщение для GPT 👇")
+        await update.message.reply_text("Напишите сообщение 👇")
         context.user_data["chat_mode"] = True
         return
 
-    if text == "🖼 Создать изображение":
-        await update.message.reply_text("Опиши изображение 👇")
-        context.user_data["image_mode"] = True
-        return
-
-    # GPT CHAT
     if context.user_data.get("chat_mode"):
+        activate_user_if_needed(user)
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": text}]
         )
+
         await update.message.reply_text(response.choices[0].message.content)
         return
 
-    # IMAGE GENERATION
+    # ================= IMAGE =================
+
+    if text == "🖼 Создать изображение":
+        await update.message.reply_text("Опишите изображение 👇")
+        context.user_data["image_mode"] = True
+        return
+
     if context.user_data.get("image_mode"):
-        remaining = FREE_LIMIT + user[6] - user[2]
+        remaining = FREE_LIMIT + user[5] - user[2]
+
         if remaining <= 0:
             await update.message.reply_text("❌ Лимит исчерпан.")
             return
 
-        await update.message.reply_text("🎨 Генерирую изображение...")
+        activate_user_if_needed(user)
+
+        await update.message.reply_text("🎨 Генерирую...")
 
         img = client.images.generate(
             model="gpt-image-1",
@@ -193,7 +213,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         image_bytes = base64.b64decode(img.data[0].b64_json)
-
         await update.message.reply_photo(photo=image_bytes)
 
         cursor.execute(
@@ -204,12 +223,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-# ================= REGISTER =================
+# ================= START =================
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-# ================= START =================
 
 if __name__ == "__main__":
     print("🚀 Бот запущен")
