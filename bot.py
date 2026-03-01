@@ -63,9 +63,7 @@ try:
 except sqlite3.OperationalError:
     pass
 
-# === GLOBAL EVENT LOOP ===
-loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+
 
 # === APPS ===
 flask_app = Flask(__name__)
@@ -195,9 +193,14 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 # ================= WEBHOOK =================
 
 @flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
+async def process_update_async(update_json):
+    update = Update.de_json(update_json, telegram_app.bot)
+    await telegram_app.process_update(update)
+
+
+@flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
-    loop.run_until_complete(telegram_app.process_update(update))
+    asyncio.run(process_update_async(request.get_json(force=True)))
     return "ok"
 
 
