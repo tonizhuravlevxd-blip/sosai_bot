@@ -212,13 +212,19 @@ def index():
 # ================= START =================
 
 if __name__ == "__main__":
+
     async def startup():
         await telegram_app.initialize()
         await telegram_app.start()
         await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TG_TOKEN}")
         print("🚀 Webhook установлен")
 
-    loop.run_until_complete(startup())
+    asyncio.run(startup())
+
+    flask_app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000))
+    )
 
     # ВАЖНО: Flask держит процесс живым для Render
     flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
