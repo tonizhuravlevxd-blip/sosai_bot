@@ -1,9 +1,7 @@
 import os
 import asyncio
 import time
-import base64
 import sqlite3
-from io import BytesIO
 from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -13,21 +11,19 @@ from openai import OpenAI
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-# === ПРОВЕРКА ENV (чтобы Render не падал молча) ===
+
 if not TG_TOKEN:
-    raise ValueError("❌ TG_TOKEN не установлен в Render (Environment Variables)")
+    raise ValueError("❌ TG_TOKEN не установлен")
 
 if not OPENAI_API_KEY:
-    raise ValueError("❌ OPENAI_API_KEY не установлен в Render (Environment Variables)")
+    raise ValueError("❌ OPENAI_API_KEY не установлен")
 
 if not WEBHOOK_URL:
-    raise ValueError("❌ WEBHOOK_URL не установлен в Render (Environment Variables)")
+    raise ValueError("❌ WEBHOOK_URL не установлен")
 
-print("✅ TG_TOKEN найден")
-print("✅ OPENAI_API_KEY найден")
-print("✅ WEBHOOK_URL найден")
+print("✅ ENV переменные загружены")
 
-# === ДОКУМЕНТЫ (вставь публичные ссылки!) ===
+# === ДОКУМЕНТЫ ===
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
@@ -56,15 +52,6 @@ CREATE TABLE IF NOT EXISTS referrals (
 
 conn.commit()
 
-# === ВАЖНО: ОБНОВЛЕНИЕ СТРУКТУРЫ ЕСЛИ БАЗА СТАРАЯ ===
-try:
-    cursor.execute("ALTER TABLE users ADD COLUMN accepted_terms INTEGER DEFAULT 0")
-    conn.commit()
-except sqlite3.OperationalError:
-    pass
-
-
-
 # === APPS ===
 flask_app = Flask(__name__)
 telegram_app = ApplicationBuilder().token(TG_TOKEN).build()
@@ -72,10 +59,6 @@ telegram_app = ApplicationBuilder().token(TG_TOKEN).build()
 # === SETTINGS ===
 FREE_IMAGE_LIMIT = 10
 WEEK_SECONDS = 7 * 24 * 60 * 60
-
-waiting_for_image_prompt = {}
-chat_mode_users = {}
-selected_image_model = {}
 
 # === КЛАВИАТУРЫ ===
 main_keyboard = ReplyKeyboardMarkup(
@@ -90,37 +73,6 @@ terms_keyboard = ReplyKeyboardMarkup(
     [[KeyboardButton("✅ Продолжить")]],
     resize_keyboard=True
 )
-
-# ================= HELPERS =================
-
-def get_user_image_data(user_id):
-    now = int(time.time())
-    cursor.execute("SELECT week_start, image_count FROM users WHERE user_id=?", (user_id,))
-    row = cursor.fetchone()
-
-    if not row:
-        cursor.execute(
-            "INSERT INTO users (user_id, week_start, image_count, accepted_terms) VALUES (?, ?, 0, 0)",
-            (user_id, now)
-        )
-        conn.commit()
-        return {"week_start": now, "count": 0}
-
-    week_start, image_count = row
-
-    if now - week_start > WEEK_SECONDS:
-        cursor.execute(
-            "UPDATE users SET week_start=?, image_count=0 WHERE user_id=?",
-            (now, user_id)
-        )
-        conn.commit()
-        return {"week_start": now, "count": 0}
-
-    return {"week_start": week_start, "count": image_count}
-
-def get_referrals_count(user_id):
-    cursor.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id=?", (user_id,))
-    return cursor.fetchone()[0]
 
 # ================= HANDLERS =================
 
@@ -142,17 +94,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if accepted == 0:
         await update.message.reply_text(
-            f"📜 Перед началом использования бота необходимо ознакомиться с документами:\n\n"
+            f"📜 Перед началом использования бота:\n\n"
             f"📄 Пользовательское соглашение:\n{USER_AGREEMENT_URL}\n\n"
             f"💰 Публичная оферта:\n{OFFER_URL}\n\n"
-            f"Нажимая «Продолжить», вы подтверждаете согласие с условиями.",
+            f"Нажимая «Продолжить», вы соглашаетесь с условиями.",
             reply_markup=terms_keyboard,
             disable_web_page_preview=True
         )
         return
 
     await update.message.reply_text(
-        "🚀 Добро пожаловать!\n\nВыбери действие ниже 👇",
+        "🚀 Добро пожаловать!\n\nВыберите действие 👇",
         reply_markup=main_keyboard
     )
 
@@ -169,45 +121,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
 
             await update.message.reply_text(
-                "✅ Спасибо! Теперь вы можете пользоваться ботом 🚀",
+                "✅ Спасибо! Теперь бот доступен 🚀",
                 reply_markup=main_keyboard
             )
             return
 
         await update.message.reply_text(
-            f"📜 Для использования бота необходимо принять условия:\n\n"
-            f"{USER_AGREEMENT_URL}\n\n"
-            f"{OFFER_URL}",
-            reply_markup=terms_keyboard,
-            disable_web_page_preview=True
+            "❗ Сначала необходимо принять условия.",
+            reply_markup=terms_keyboard
         )
         return
 
-    # остальная логика остаётся без изменений
 # ================= REGISTRATION =================
 
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-
 # ================= WEBHOOK =================
 
 @flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
-async def process_update_async(update_json):
-    update = Update.de_json(update_json, telegram_app.bot)
-    await telegram_app.process_update(update)
-
-
-@flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
 def webhook():
-    asyncio.run(process_update_async(request.get_json(force=True)))
-    return "ok"
+    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
 
+    async def process():
+        await telegram_app.process_update(update)
+
+    asyncio.run(process())
+
+    return "ok"
 
 @flask_app.route("/")
 def index():
     return "Bot is running!"
-
 
 # ================= START =================
 
@@ -226,5 +171,3 @@ if __name__ == "__main__":
         port=int(os.environ.get("PORT", 10000))
     )
 
-    # ВАЖНО: Flask держит процесс живым для Render
-    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
