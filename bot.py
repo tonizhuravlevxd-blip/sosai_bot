@@ -52,8 +52,9 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 
 waiting_for_image_prompt = {}
 chat_mode_users = {}
+selected_image_model = {}
 
-# === КНОПОЧНОЕ МЕНЮ ===
+# === MAIN MENU ===
 main_keyboard = ReplyKeyboardMarkup(
     [
         [KeyboardButton("🖼 Создать изображение"), KeyboardButton("💬 Чат GPT (/uu)")],
@@ -100,11 +101,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
 
-    # фиксируем реферала
     if args:
         try:
             referrer_id = int(args[0])
-
             if referrer_id != user.id:
                 cursor.execute(
                     "INSERT OR IGNORE INTO referrals (invited_id, referrer_id) VALUES (?, ?)",
@@ -137,7 +136,6 @@ async def referral_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     bot_username = (await context.bot.get_me()).username
     invited = get_referrals_count(user_id)
-
     link = f"https://t.me/{bot_username}?start={user_id}"
 
     await update.message.reply_text(
@@ -148,8 +146,19 @@ async def referral_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    waiting_for_image_prompt[update.effective_user.id] = True
-    await update.message.reply_text("Опиши изображение 🎨")
+    keyboard = ReplyKeyboardMarkup(
+        [
+            [KeyboardButton("⚡ Nano")],
+            [KeyboardButton("🍌 Nano Banano 2")],
+            [KeyboardButton("💎 Pro")]
+        ],
+        resize_keyboard=True
+    )
+
+    await update.message.reply_text(
+        "Выбери модель генерации изображения 👇",
+        reply_markup=keyboard
+    )
 
 async def chat_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_mode_users[update.effective_user.id] = True
@@ -161,6 +170,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
+    # === MENU BUTTONS ===
     if text == "🖼 Создать изображение":
         await photo_command(update, context)
         return
@@ -177,7 +187,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await referral_program(update, context)
         return
 
-    # === ГЕНЕРАЦИЯ ===
+    # === MODEL SELECT ===
+    if text == "⚡ Nano":
+        selected_image_model[user_id] = "gpt-image-1"
+        waiting_for_image_prompt[user_id] = True
+        await update.message.reply_text("Опиши изображение 🎨", reply_markup=main_keyboard)
+        return
+
+    if text == "🍌 Nano Banano 2":
+        selected_image_model[user_id] = "gpt-image-1"
+        waiting_for_image_prompt[user_id] = True
+        await update.message.reply_text("Опиши изображение 🎨", reply_markup=main_keyboard)
+        return
+
+    if text == "💎 Pro":
+        selected_image_model[user_id] = "gpt-image-1"
+        waiting_for_image_prompt[user_id] = True
+        await update.message.reply_text("Опиши изображение 🎨", reply_markup=main_keyboard)
+        return
+
+    # === IMAGE GENERATION ===
     if waiting_for_image_prompt.get(user_id):
         waiting_for_image_prompt[user_id] = False
         data = get_user_image_data(user_id)
@@ -189,8 +218,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Создаю изображение... ⏳")
 
         try:
+            model_name = selected_image_model.get(user_id, "gpt-image-1")
+
             img = client.images.generate(
-                model="gpt-image-1",
+                model=model_name,
                 prompt=text,
                 size="512x512"
             )
@@ -204,29 +235,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             conn.commit()
 
-            # === НАГРАДА РЕФЕРАЛУ ===
-            cursor.execute(
-                "SELECT referrer_id, rewarded FROM referrals WHERE invited_id=?",
-                (user_id,)
-            )
-            row = cursor.fetchone()
-
-            if row:
-                referrer_id, rewarded = row
-
-                if rewarded == 0:
-                    cursor.execute(
-                        "UPDATE referrals SET rewarded=1 WHERE invited_id=?",
-                        (user_id,)
-                    )
-
-                    cursor.execute(
-                        "UPDATE users SET image_count = MAX(image_count - 1, 0) WHERE user_id=?",
-                        (referrer_id,)
-                    )
-
-                    conn.commit()
-
             await update.message.reply_photo(photo=BytesIO(image_bytes))
 
         except Exception as e:
@@ -234,7 +242,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # === ЧАТ ===
+    # === CHAT ===
     if chat_mode_users.get(user_id):
         try:
             response = client.chat.completions.create(
