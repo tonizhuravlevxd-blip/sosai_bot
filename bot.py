@@ -23,6 +23,9 @@ OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # === DATABASE ===
+
+os.makedirs("/var/data", exist_ok=True)
+
 conn = sqlite3.connect("/var/data/bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
