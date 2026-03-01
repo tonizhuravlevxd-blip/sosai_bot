@@ -74,7 +74,6 @@ def reset_week_if_needed(user):
         conn.commit()
 
 def activate_user_if_needed(user):
-    # если пользователь впервые стал активным
     if user[7] == 0:
         cursor.execute(
             "UPDATE users SET is_active=1 WHERE user_id=?",
@@ -82,7 +81,6 @@ def activate_user_if_needed(user):
         )
         conn.commit()
 
-        # начисляем бонус пригласившему
         if user[6]:
             cursor.execute(
                 "UPDATE users SET bonus_images=bonus_images+1, referrals=referrals+1 WHERE user_id=?",
@@ -124,7 +122,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    tg_user = update.effective_user
+    user_id = tg_user.id
     text = update.message.text
     user = get_user(user_id)
 
@@ -147,8 +146,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bonus = user[5]
         remaining = FREE_LIMIT + bonus - used
 
+        username = f"@{tg_user.username}" if tg_user.username else tg_user.first_name
+
         await update.message.reply_text(
             f"👤 Ваш профиль\n\n"
+            f"🆔 ID: {user_id}\n"
+            f"👤 Имя: {username}\n\n"
             f"🆓 Бесплатно в неделю: {FREE_LIMIT}\n"
             f"🖼 Использовано: {used}\n"
             f"🎁 Бонусные генерации: {bonus}\n"
@@ -164,8 +167,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "🎁 Реферальная программа\n\n"
             "Вы получаете +1 генерацию\n"
-            "за каждого приглашённого пользователя,\n"
-            "который реально что-то написал или создал.\n\n"
+            "за каждого активного пользователя.\n\n"
             f"🔗 Ваша ссылка:\n{link}"
         )
         return
