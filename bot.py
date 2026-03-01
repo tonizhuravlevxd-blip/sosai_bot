@@ -2,8 +2,21 @@ import os
 import time
 import sqlite3
 import base64
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    KeyboardButton,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters,
+)
 from openai import OpenAI
 
 # ================= ENV =================
@@ -21,6 +34,9 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 FREE_LIMIT = 5
 WEEK_SECONDS = 7 * 24 * 60 * 60
+
+USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
+OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
 # ================= DATABASE =================
 
@@ -53,10 +69,11 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-terms_keyboard = ReplyKeyboardMarkup(
-    [[KeyboardButton("✅ Продолжить")]],
-    resize_keyboard=True
-)
+terms_keyboard = InlineKeyboardMarkup([
+    [InlineKeyboardButton("📄 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
+    [InlineKeyboardButton("💰 Публичная оферта", url=OFFER_URL)],
+    [InlineKeyboardButton("✅ Продолжить", callback_data="accept_terms")]
+])
 
 # ================= HELPERS =================
 
@@ -113,13 +130,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if db_user[3] == 0:
         await update.message.reply_text(
-            "📜 Примите условия для продолжения",
-            reply_markup=terms_keyboard
+            "📜 Перед началом использования бота необходимо принять условия.\n\n"
+            "Ознакомьтесь с документами и нажмите «Продолжить».",
+            reply_markup=terms_keyboard,
+            disable_web_page_preview=True
         )
         return
 
     await update.message.reply_text("🚀 Добро пожаловать!", reply_markup=main_keyboard)
 
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "accept_terms":
+        user_id = query.from_user.id
+
+        cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (user_id,))
+        conn.commit()
+
+        await query.edit_message_text("✅ Условия приняты.")
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="🚀 Теперь бот доступен!",
+            reply_markup=main_keyboard
+        )
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user = update.effective_user
@@ -128,12 +165,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(user_id)
 
     if user[3] == 0:
-        if text == "✅ Продолжить":
-            cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (user_id,))
-            conn.commit()
-            await update.message.reply_text("✅ Доступ открыт!", reply_markup=main_keyboard)
-        else:
-            await update.message.reply_text("❗ Примите условия", reply_markup=terms_keyboard)
+        await update.message.reply_text(
+            "❗ Для продолжения необходимо принять условия.",
+            reply_markup=terms_keyboard
+        )
         return
 
     reset_week_if_needed(user)
@@ -228,6 +263,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= START =================
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 if __name__ == "__main__":
