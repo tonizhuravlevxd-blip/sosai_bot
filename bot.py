@@ -2,10 +2,11 @@ import os
 import time
 import sqlite3
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from openai import OpenAI
 
-# === ENV VARIABLES ===
+# ================= ENV =================
+
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
@@ -22,11 +23,12 @@ OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# === DATABASE ===
+# ================= DATABASE =================
 
+DB_PATH = "/var/data/bot.db"
 os.makedirs("/var/data", exist_ok=True)
 
-conn = sqlite3.connect("/var/data/bot.db", check_same_thread=False)
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -40,10 +42,12 @@ CREATE TABLE IF NOT EXISTS users (
 
 conn.commit()
 
-# === TELEGRAM APP ===
+# ================= TELEGRAM APP =================
+
 telegram_app = ApplicationBuilder().token(TG_TOKEN).build()
 
-# === КЛАВИАТУРЫ ===
+# ================= KEYBOARDS =================
+
 main_keyboard = ReplyKeyboardMarkup(
     [
         [KeyboardButton("🖼 Создать изображение"), KeyboardButton("💬 Чат GPT (/uu)")],
@@ -115,6 +119,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+# ================= REGISTER HANDLERS =================
+
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -122,4 +128,4 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 
 if __name__ == "__main__":
     print("🚀 Бот запущен (polling)")
-    telegram_app.run_polling()
+    telegram_app.run_polling(drop_pending_updates=True)
