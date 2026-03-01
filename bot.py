@@ -186,3 +186,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # остальная логика остаётся без изменений
+# ================= REGISTRATION =================
+
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+
+# ================= WEBHOOK =================
+
+@flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), telegram_app.bot)
+    loop.run_until_complete(telegram_app.process_update(update))
+    return "ok"
+
+
+@flask_app.route("/")
+def index():
+    return "Bot is running!"
+
+
+# ================= START =================
+
+if __name__ == "__main__":
+    async def startup():
+        await telegram_app.initialize()
+        await telegram_app.start()
+        await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TG_TOKEN}")
+        print("🚀 Webhook установлен")
+
+    loop.run_until_complete(startup())
+
+    # ВАЖНО: Flask держит процесс живым для Render
+    flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
