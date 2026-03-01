@@ -17,7 +17,7 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # === DATABASE ===
-conn = sqlite3.connect("bot.db", check_same_thread=False)
+conn = sqlite3.connect("/var/data/bot.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
