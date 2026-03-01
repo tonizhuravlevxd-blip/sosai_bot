@@ -14,6 +14,10 @@ TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
+# === ДОКУМЕНТЫ (вставь свои ссылки) ===
+USER_AGREEMENT_URL = "https://disk.yandex.ru/edit/disk/disk%2F%D0%9F%D0%BE%D0%BB%D1%8C%D0%B7%D0%BE%D0%B2%D0%B0%D1%82%D0%B5%D0%BB%D1%8C%D1%81%D0%BA%D0%BE%D0%B5%20%D1%81%D0%BE%D0%B3%D0%BB%D0%B0%D1%88%D0%B5%D0%BD%D0%B8%D0%B5.docx"
+OFFER_URL = "https://disk.yandex.ru/edit/disk/disk%2F%D0%9E%D1%84%D0%B5%D1%80%D1%82%D0%B0.docx"
+
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 # === DATABASE ===
@@ -24,7 +28,8 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
     week_start INTEGER,
-    image_count INTEGER DEFAULT 0
+    image_count INTEGER DEFAULT 0,
+    accepted_terms INTEGER DEFAULT 0
 )
 """)
 
@@ -54,7 +59,7 @@ waiting_for_image_prompt = {}
 chat_mode_users = {}
 selected_image_model = {}
 
-# === MAIN MENU ===
+# === КЛАВИАТУРЫ ===
 main_keyboard = ReplyKeyboardMarkup(
     [
         [KeyboardButton("🖼 Создать изображение"), KeyboardButton("💬 Чат GPT (/uu)")],
@@ -63,17 +68,21 @@ main_keyboard = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+terms_keyboard = ReplyKeyboardMarkup(
+    [[KeyboardButton("✅ Продолжить")]],
+    resize_keyboard=True
+)
+
 # ================= HELPERS =================
 
 def get_user_image_data(user_id):
     now = int(time.time())
-
     cursor.execute("SELECT week_start, image_count FROM users WHERE user_id=?", (user_id,))
     row = cursor.fetchone()
 
     if not row:
         cursor.execute(
-            "INSERT INTO users (user_id, week_start, image_count) VALUES (?, ?, 0)",
+            "INSERT INTO users (user_id, week_start, image_count, accepted_terms) VALUES (?, ?, 0, 0)",
             (user_id, now)
         )
         conn.commit()
@@ -99,19 +108,30 @@ def get_referrals_count(user_id):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    args = context.args
 
-    if args:
-        try:
-            referrer_id = int(args[0])
-            if referrer_id != user.id:
-                cursor.execute(
-                    "INSERT OR IGNORE INTO referrals (invited_id, referrer_id) VALUES (?, ?)",
-                    (user.id, referrer_id)
-                )
-                conn.commit()
-        except:
-            pass
+    cursor.execute("SELECT accepted_terms FROM users WHERE user_id=?", (user.id,))
+    row = cursor.fetchone()
+
+    if not row:
+        cursor.execute(
+            "INSERT INTO users (user_id, week_start, image_count, accepted_terms) VALUES (?, ?, 0, 0)",
+            (user.id, int(time.time()))
+        )
+        conn.commit()
+        accepted = 0
+    else:
+        accepted = row[0]
+
+    if accepted == 0:
+        await update.message.reply_text(
+            f"📜 Перед началом использования бота необходимо ознакомиться с документами:\n\n"
+            f"📄 Пользовательское соглашение:\n{USER_AGREEMENT_URL}\n\n"
+            f"💰 Публичная оферта:\n{OFFER_URL}\n\n"
+            f"Нажимая «Продолжить», вы подтверждаете согласие с условиями.",
+            reply_markup=terms_keyboard,
+            disable_web_page_preview=True
+        )
+        return
 
     await update.message.reply_text(
         "🚀 Добро пожаловать!\n\nВыбери действие ниже 👇",
@@ -154,7 +174,6 @@ async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ],
         resize_keyboard=True
     )
-
     await update.message.reply_text(
         "Выбери модель генерации изображения 👇",
         reply_markup=keyboard
@@ -170,7 +189,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    # === MENU BUTTONS ===
+    # === ПРОВЕРКА ПРИНЯТИЯ УСЛОВИЙ ===
+    cursor.execute("SELECT accepted_terms FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
+
+    if not row or row[0] == 0:
+        if text == "✅ Продолжить":
+            cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (user_id,))
+            conn.commit()
+
+            await update.message.reply_text(
+                "✅ Спасибо! Теперь вы можете пользоваться ботом 🚀",
+                reply_markup=main_keyboard
+            )
+            return
+
+        await update.message.reply_text(
+            f"📜 Для использования бота необходимо принять условия:\n\n"
+            f"{USER_AGREEMENT_URL}\n\n"
+            f"{OFFER_URL}",
+            reply_markup=terms_keyboard,
+            disable_web_page_preview=True
+        )
+        return
+
+    # === МЕНЮ ===
     if text == "🖼 Создать изображение":
         await photo_command(update, context)
         return
@@ -187,26 +230,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await referral_program(update, context)
         return
 
-    # === MODEL SELECT ===
-    if text == "⚡ Nano":
+    # === ВЫБОР МОДЕЛИ ===
+    if text in ["⚡ Nano", "🍌 Nano Banano 2", "💎 Pro"]:
         selected_image_model[user_id] = "gpt-image-1"
         waiting_for_image_prompt[user_id] = True
         await update.message.reply_text("Опиши изображение 🎨", reply_markup=main_keyboard)
         return
 
-    if text == "🍌 Nano Banano 2":
-        selected_image_model[user_id] = "gpt-image-1"
-        waiting_for_image_prompt[user_id] = True
-        await update.message.reply_text("Опиши изображение 🎨", reply_markup=main_keyboard)
-        return
-
-    if text == "💎 Pro":
-        selected_image_model[user_id] = "gpt-image-1"
-        waiting_for_image_prompt[user_id] = True
-        await update.message.reply_text("Опиши изображение 🎨", reply_markup=main_keyboard)
-        return
-
-    # === IMAGE GENERATION ===
+    # === ГЕНЕРАЦИЯ ===
     if waiting_for_image_prompt.get(user_id):
         waiting_for_image_prompt[user_id] = False
         data = get_user_image_data(user_id)
@@ -218,10 +249,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Создаю изображение... ⏳")
 
         try:
-            model_name = selected_image_model.get(user_id, "gpt-image-1")
-
             img = client.images.generate(
-                model=model_name,
+                model="gpt-image-1",
                 prompt=text,
                 size="512x512"
             )
@@ -242,29 +271,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # === CHAT ===
+    # === ЧАТ ===
     if chat_mode_users.get(user_id):
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[{"role": "user", "content": text}]
             )
-
             await update.message.reply_text(response.choices[0].message.content)
-
         except Exception as e:
             await update.message.reply_text(f"Ошибка: {str(e)}")
 
         return
 
-# === REGISTER HANDLERS ===
+# === REGISTER ===
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(CommandHandler("account", account))
 telegram_app.add_handler(CommandHandler("photo", photo_command))
 telegram_app.add_handler(CommandHandler("uu", chat_mode))
 telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# === FLASK ROUTES ===
+# === FLASK ===
 @flask_app.route(f"/{TG_TOKEN}", methods=["POST"])
 def webhook():
     update = Update.de_json(request.get_json(force=True), telegram_app.bot)
@@ -275,7 +302,6 @@ def webhook():
 def home():
     return "Bot is running"
 
-# === STARTUP ===
 async def setup():
     await telegram_app.initialize()
     await telegram_app.bot.set_webhook(f"{WEBHOOK_URL}/{TG_TOKEN}")
