@@ -32,11 +32,16 @@ waiting_for_image_prompt = {}
 user_image_data = {}
 chat_mode_users = {}
 
+# === РЕФЕРАЛЬНАЯ СИСТЕМА ===
+referrer_of = {}        # invited_user_id -> referrer_id
+referrals_count = {}    # referrer_id -> сколько засчитано
+rewarded_users = set()  # кто уже засчитан
+
 # === КНОПОЧНОЕ МЕНЮ ===
 main_keyboard = ReplyKeyboardMarkup(
     [
         [KeyboardButton("🖼 Создать изображение"), KeyboardButton("💬 Чат GPT (/uu)")],
-        [KeyboardButton("👤 Профиль")]
+        [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Реферальная программа")]
     ],
     resize_keyboard=True
 )
@@ -60,6 +65,23 @@ def get_user_image_data(user_id):
 # ================= HANDLERS =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    args = context.args
+
+    # фиксируем реферала, но НЕ начисляем
+    if args:
+        try:
+            referrer_id = int(args[0])
+
+            if (
+                referrer_id != user.id
+                and not user.is_bot
+                and user.id not in referrer_of
+            ):
+                referrer_of[user.id] = referrer_id
+        except:
+            pass
+
     await update.message.reply_text(
         "🚀 Добро пожаловать!\n\nВыбери действие ниже 👇",
         reply_markup=main_keyboard
@@ -69,12 +91,28 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     data = get_user_image_data(user.id)
     remaining = FREE_IMAGE_LIMIT - data["count"]
+    invited = referrals_count.get(user.id, 0)
 
     await update.message.reply_text(
         f"👤 Профиль\n\n"
         f"ID: {user.id}\n"
         f"Имя: {user.first_name}\n\n"
-        f"🖼 Осталось генераций: {remaining}/{FREE_IMAGE_LIMIT}"
+        f"🖼 Осталось генераций: {remaining}/{FREE_IMAGE_LIMIT}\n"
+        f"🎁 Засчитано рефералов: {invited}"
+    )
+
+async def referral_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    bot_username = (await context.bot.get_me()).username
+    invited = referrals_count.get(user_id, 0)
+
+    link = f"https://t.me/{bot_username}?start={user_id}"
+
+    await update.message.reply_text(
+        f"🎁 Реферальная программа\n\n"
+        f"Засчитано рефералов: {invited}\n"
+        f"За каждого активного пользователя — +1 генерация 🖼\n\n"
+        f"Твоя ссылка:\n{link}"
     )
 
 async def photo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -104,16 +142,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await account(update, context)
         return
 
+    if text == "🎁 Реферальная программа":
+        await referral_program(update, context)
+        return
+
     # === ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ===
     if waiting_for_image_prompt.get(user_id):
         waiting_for_image_prompt[user_id] = False
-
         data = get_user_image_data(user_id)
 
         if data["count"] >= FREE_IMAGE_LIMIT:
-            await update.message.reply_text(
-                "❌ Лимит 10 картинок в неделю исчерпан."
-            )
+            await update.message.reply_text("❌ Лимит 10 картинок в неделю исчерпан.")
             return
 
         await update.message.reply_text("Создаю изображение... ⏳")
@@ -122,13 +161,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             img = client.images.generate(
                 model="gpt-image-1",
                 prompt=text,
-                size="512x512"  # дешевле
+                size="512x512"
             )
 
             image_base64 = img.data[0].b64_json
             image_bytes = base64.b64decode(image_base64)
 
             data["count"] += 1
+
+            # === РЕФЕРАЛ НАГРАДА (ПОСЛЕ ПЕРВОЙ ГЕНЕРАЦИИ) ===
+            if user_id in referrer_of and user_id not in rewarded_users:
+                referrer_id = referrer_of[user_id]
+
+                rewarded_users.add(user_id)
+                referrals_count[referrer_id] = referrals_count.get(referrer_id, 0) + 1
+
+                ref_data = get_user_image_data(referrer_id)
+                ref_data["count"] = max(0, ref_data["count"] - 1)
 
             await update.message.reply_photo(photo=BytesIO(image_bytes))
 
@@ -146,7 +195,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             await update.message.reply_text(response.choices[0].message.content)
-
         except Exception as e:
             await update.message.reply_text(f"Ошибка: {str(e)}")
 
