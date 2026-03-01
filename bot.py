@@ -143,16 +143,9 @@ telegram_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_
 def webhook():
     update = Update.de_json(request.get_json(force=True), telegram_app.bot)
 
-    async def process():
-        await telegram_app.process_update(update)
-
-    asyncio.run(process())
+    telegram_app.update_queue.put_nowait(update)
 
     return "ok"
-
-@flask_app.route("/")
-def index():
-    return "Bot is running!"
 
 # ================= START =================
 
