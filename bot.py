@@ -2,6 +2,7 @@ import os
 import asyncio
 import time
 import base64
+import sqlite3
 from io import BytesIO
 from flask import Flask, request
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
@@ -15,6 +16,28 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# === DATABASE ===
+conn = sqlite3.connect("bot.db", check_same_thread=False)
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    week_start INTEGER,
+    image_count INTEGER DEFAULT 0
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS referrals (
+    invited_id INTEGER PRIMARY KEY,
+    referrer_id INTEGER,
+    rewarded INTEGER DEFAULT 0
+)
+""")
+
+conn.commit()
+
 # === GLOBAL EVENT LOOP ===
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
@@ -27,15 +50,8 @@ telegram_app = ApplicationBuilder().token(TG_TOKEN).build()
 FREE_IMAGE_LIMIT = 10
 WEEK_SECONDS = 7 * 24 * 60 * 60
 
-user_mode = {}
 waiting_for_image_prompt = {}
-user_image_data = {}
 chat_mode_users = {}
-
-# === РЕФЕРАЛЬНАЯ СИСТЕМА ===
-referrer_of = {}        # invited_user_id -> referrer_id
-referrals_count = {}    # referrer_id -> сколько засчитано
-rewarded_users = set()  # кто уже засчитан
 
 # === КНОПОЧНОЕ МЕНЮ ===
 main_keyboard = ReplyKeyboardMarkup(
@@ -49,18 +65,34 @@ main_keyboard = ReplyKeyboardMarkup(
 # ================= HELPERS =================
 
 def get_user_image_data(user_id):
-    now = time.time()
+    now = int(time.time())
 
-    if user_id not in user_image_data:
-        user_image_data[user_id] = {"count": 0, "week_start": now}
+    cursor.execute("SELECT week_start, image_count FROM users WHERE user_id=?", (user_id,))
+    row = cursor.fetchone()
 
-    data = user_image_data[user_id]
+    if not row:
+        cursor.execute(
+            "INSERT INTO users (user_id, week_start, image_count) VALUES (?, ?, 0)",
+            (user_id, now)
+        )
+        conn.commit()
+        return {"week_start": now, "count": 0}
 
-    if now - data["week_start"] > WEEK_SECONDS:
-        data["count"] = 0
-        data["week_start"] = now
+    week_start, image_count = row
 
-    return data
+    if now - week_start > WEEK_SECONDS:
+        cursor.execute(
+            "UPDATE users SET week_start=?, image_count=0 WHERE user_id=?",
+            (now, user_id)
+        )
+        conn.commit()
+        return {"week_start": now, "count": 0}
+
+    return {"week_start": week_start, "count": image_count}
+
+def get_referrals_count(user_id):
+    cursor.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id=?", (user_id,))
+    return cursor.fetchone()[0]
 
 # ================= HANDLERS =================
 
@@ -68,17 +100,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
 
-    # фиксируем реферала, но НЕ начисляем
+    # фиксируем реферала
     if args:
         try:
             referrer_id = int(args[0])
 
-            if (
-                referrer_id != user.id
-                and not user.is_bot
-                and user.id not in referrer_of
-            ):
-                referrer_of[user.id] = referrer_id
+            if referrer_id != user.id:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO referrals (invited_id, referrer_id) VALUES (?, ?)",
+                    (user.id, referrer_id)
+                )
+                conn.commit()
         except:
             pass
 
@@ -91,7 +123,7 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     data = get_user_image_data(user.id)
     remaining = FREE_IMAGE_LIMIT - data["count"]
-    invited = referrals_count.get(user.id, 0)
+    invited = get_referrals_count(user.id)
 
     await update.message.reply_text(
         f"👤 Профиль\n\n"
@@ -104,7 +136,7 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def referral_program(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     bot_username = (await context.bot.get_me()).username
-    invited = referrals_count.get(user_id, 0)
+    invited = get_referrals_count(user_id)
 
     link = f"https://t.me/{bot_username}?start={user_id}"
 
@@ -129,7 +161,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
 
-    # === НАЖАТИЯ КНОПОК ===
     if text == "🖼 Создать изображение":
         await photo_command(update, context)
         return
@@ -146,7 +177,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await referral_program(update, context)
         return
 
-    # === ГЕНЕРАЦИЯ ИЗОБРАЖЕНИЯ ===
+    # === ГЕНЕРАЦИЯ ===
     if waiting_for_image_prompt.get(user_id):
         waiting_for_image_prompt[user_id] = False
         data = get_user_image_data(user_id)
@@ -167,17 +198,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             image_base64 = img.data[0].b64_json
             image_bytes = base64.b64decode(image_base64)
 
-            data["count"] += 1
+            cursor.execute(
+                "UPDATE users SET image_count = image_count + 1 WHERE user_id=?",
+                (user_id,)
+            )
+            conn.commit()
 
-            # === РЕФЕРАЛ НАГРАДА (ПОСЛЕ ПЕРВОЙ ГЕНЕРАЦИИ) ===
-            if user_id in referrer_of and user_id not in rewarded_users:
-                referrer_id = referrer_of[user_id]
+            # === НАГРАДА РЕФЕРАЛУ ===
+            cursor.execute(
+                "SELECT referrer_id, rewarded FROM referrals WHERE invited_id=?",
+                (user_id,)
+            )
+            row = cursor.fetchone()
 
-                rewarded_users.add(user_id)
-                referrals_count[referrer_id] = referrals_count.get(referrer_id, 0) + 1
+            if row:
+                referrer_id, rewarded = row
 
-                ref_data = get_user_image_data(referrer_id)
-                ref_data["count"] = max(0, ref_data["count"] - 1)
+                if rewarded == 0:
+                    cursor.execute(
+                        "UPDATE referrals SET rewarded=1 WHERE invited_id=?",
+                        (user_id,)
+                    )
+
+                    cursor.execute(
+                        "UPDATE users SET image_count = MAX(image_count - 1, 0) WHERE user_id=?",
+                        (referrer_id,)
+                    )
+
+                    conn.commit()
 
             await update.message.reply_photo(photo=BytesIO(image_bytes))
 
@@ -186,7 +234,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # === РЕЖИМ ЧАТА ===
+    # === ЧАТ ===
     if chat_mode_users.get(user_id):
         try:
             response = client.chat.completions.create(
@@ -195,6 +243,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
             await update.message.reply_text(response.choices[0].message.content)
+
         except Exception as e:
             await update.message.reply_text(f"Ошибка: {str(e)}")
 
