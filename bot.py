@@ -7,9 +7,10 @@ from openai import OpenAI
 
 # ================= ENV =================
 
+print("🔄 Starting bot...")
+
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-print("TOKEN:", os.getenv("TG_TOKEN"))
 
 if not TG_TOKEN:
     raise ValueError("❌ TG_TOKEN не установлен")
@@ -26,8 +27,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 # ================= DATABASE =================
 
-DB_PATH = "/var/data/bot.db"
-os.makedirs("/var/data", exist_ok=True)
+DB_PATH = "bot.db"   # ⚠️ убираем /var/data (на free плане может не работать)
 
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 
 conn.commit()
+print("✅ База данных подключена")
 
 # ================= TELEGRAM APP =================
 
@@ -119,6 +120,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=terms_keyboard
         )
         return
+
+    await update.message.reply_text(
+        "🤖 Бот работает. Выберите действие 👇",
+        reply_markup=main_keyboard
+    )
 
 # ================= REGISTER HANDLERS =================
 
