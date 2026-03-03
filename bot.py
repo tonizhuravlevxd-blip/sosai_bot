@@ -130,33 +130,61 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if db_user[3] == 0:
         await update.message.reply_text(
-            "📜 Перед началом использования бота необходимо принять условия.\n\n"
-            "Ознакомьтесь с документами и нажмите «Продолжить».",
+            "📜 Перед началом использования бота необходимо принять условия.",
             reply_markup=terms_keyboard,
-            disable_web_page_preview=True
         )
         return
 
     await update.message.reply_text("🚀 Добро пожаловать!", reply_markup=main_keyboard)
 
+# ================= CALLBACK =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "accept_terms":
-        user_id = query.from_user.id
+    user_id = query.from_user.id
 
+    if query.data == "accept_terms":
         cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (user_id,))
         conn.commit()
-
         await query.edit_message_text("✅ Условия приняты.")
+        await context.bot.send_message(user_id, "🚀 Теперь бот доступен!", reply_markup=main_keyboard)
 
-        await context.bot.send_message(
-            chat_id=user_id,
-            text="🚀 Теперь бот доступен!",
-            reply_markup=main_keyboard
+    # выбор модели
+    elif query.data.startswith("model_"):
+        model = query.data.replace("model_", "")
+        context.user_data["selected_model"] = model
+
+        await query.edit_message_text(
+            f"✅ Вы выбрали модель: {model}\n\nТеперь выберите разрешение."
         )
+
+        resolution_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📱 9:16", callback_data="size_9_16")],
+            [InlineKeyboardButton("💻 Компьютер (16:9)", callback_data="size_16_9")],
+            [InlineKeyboardButton("⬜ 1:1", callback_data="size_1_1")]
+        ])
+
+        await context.bot.send_message(user_id, "Выберите формат:", reply_markup=resolution_keyboard)
+
+    # выбор размера
+    elif query.data.startswith("size_"):
+        size_map = {
+            "size_9_16": "1024x1792",
+            "size_16_9": "1792x1024",
+            "size_1_1": "1024x1024"
+        }
+
+        context.user_data["selected_size"] = size_map[query.data]
+
+        await query.edit_message_text(
+            "📩 Теперь отправьте описание изображения."
+        )
+
+        context.user_data["image_mode"] = True
+
+# ================= MESSAGE =================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user = update.effective_user
@@ -165,71 +193,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(user_id)
 
     if user[3] == 0:
-        await update.message.reply_text(
-            "❗ Для продолжения необходимо принять условия.",
-            reply_markup=terms_keyboard
-        )
+        await update.message.reply_text("❗ Примите условия.", reply_markup=terms_keyboard)
         return
 
     reset_week_if_needed(user)
     user = get_user(user_id)
 
-    # ================= ПРОФИЛЬ =================
-
-    if text == "👤 Профиль":
-        used = user[2]
-        bonus = user[5]
-        remaining = FREE_LIMIT + bonus - used
-
-        username = f"@{tg_user.username}" if tg_user.username else tg_user.first_name
-
-        await update.message.reply_text(
-            f"👤 Ваш профиль\n\n"
-            f"🆔 ID: {user_id}\n"
-            f"👤 Имя: {username}\n\n"
-            f"🆓 Бесплатно в неделю: {FREE_LIMIT}\n"
-            f"🖼 Использовано: {used}\n"
-            f"🎁 Бонусные генерации: {bonus}\n"
-            f"📦 Доступно сейчас: {remaining}\n"
-            f"👥 Активных рефералов: {user[4]}"
-        )
-        return
-
-    # ================= РЕФЕРАЛКА =================
-
-    if text == "🎁 Реферальная программа":
-        link = f"https://t.me/{context.bot.username}?start={user_id}"
-        await update.message.reply_text(
-            "🎁 Реферальная программа\n\n"
-            "Вы получаете +1 генерацию\n"
-            "за каждого активного пользователя.\n\n"
-            f"🔗 Ваша ссылка:\n{link}"
-        )
-        return
-
-    # ================= GPT =================
-
-    if text == "💬 Чат GPT":
-        await update.message.reply_text("Напишите сообщение 👇")
-        context.user_data["chat_mode"] = True
-        return
-
-    if context.user_data.get("chat_mode"):
-        activate_user_if_needed(user)
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": text}]
-        )
-
-        await update.message.reply_text(response.choices[0].message.content)
-        return
-
     # ================= IMAGE =================
 
     if text == "🖼 Создать изображение":
-        await update.message.reply_text("Опишите изображение 👇")
-        context.user_data["image_mode"] = True
+        model_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("⚡ Flash 3.1", callback_data="model_Flash 3.1")],
+            [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_Nano Banana 2")]
+        ])
+
+        await update.message.reply_text(
+            "Выберите модель генерации:",
+            reply_markup=model_keyboard
+        )
         return
 
     if context.user_data.get("image_mode"):
@@ -241,12 +222,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         activate_user_if_needed(user)
 
-        await update.message.reply_text("🎨 Генерирую...")
+        selected_model = context.user_data.get("selected_model", "Nano Banana 2")
+        selected_size = context.user_data.get("selected_size", "1024x1024")
+
+        await update.message.reply_text(
+            f"{selected_model} создает шедевр, пожалуйста подождите..."
+        )
 
         img = client.images.generate(
             model="gpt-image-1",
             prompt=text,
-            size="1024x1024"
+            size=selected_size
         )
 
         image_bytes = base64.b64decode(img.data[0].b64_json)
@@ -257,8 +243,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (user_id,)
         )
         conn.commit()
-        return
 
+        context.user_data["image_mode"] = False
+        return
 
 # ================= START =================
 
