@@ -8,6 +8,7 @@ from telegram import (
     KeyboardButton,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    BotCommand
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -61,20 +62,6 @@ conn.commit()
 
 app = ApplicationBuilder().token(TG_TOKEN).build()
 
-main_keyboard = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton("🖼 Создать изображение"), KeyboardButton("💬 Чат GPT")],
-        [KeyboardButton("👤 Профиль"), KeyboardButton("🎁 Реферальная программа")]
-    ],
-    resize_keyboard=True
-)
-
-terms_keyboard = InlineKeyboardMarkup([
-    [InlineKeyboardButton("📄 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
-    [InlineKeyboardButton("💰 Публичная оферта", url=OFFER_URL)],
-    [InlineKeyboardButton("✅ Продолжить", callback_data="accept_terms")]
-])
-
 # ================= HELPERS =================
 
 def get_user(user_id):
@@ -92,10 +79,7 @@ def reset_week_if_needed(user):
 
 def activate_user_if_needed(user):
     if user[7] == 0:
-        cursor.execute(
-            "UPDATE users SET is_active=1 WHERE user_id=?",
-            (user[0],)
-        )
+        cursor.execute("UPDATE users SET is_active=1 WHERE user_id=?", (user[0],))
         conn.commit()
 
         if user[6]:
@@ -105,7 +89,7 @@ def activate_user_if_needed(user):
             )
             conn.commit()
 
-# ================= HANDLERS =================
+# ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -129,110 +113,112 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = get_user(user.id)
 
     if db_user[3] == 0:
+        terms_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📄 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
+            [InlineKeyboardButton("💰 Публичная оферта", url=OFFER_URL)],
+            [InlineKeyboardButton("✅ Продолжить", callback_data="accept_terms")]
+        ])
+
         await update.message.reply_text(
             "📜 Перед началом использования бота необходимо принять условия.",
             reply_markup=terms_keyboard,
         )
         return
 
-    await update.message.reply_text("🚀 Добро пожаловать!", reply_markup=main_keyboard)
+    await update.message.reply_text("🚀 Добро пожаловать!")
 
 # ================= CALLBACK =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = query.from_user.id
 
     if query.data == "accept_terms":
         cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (user_id,))
         conn.commit()
-        await query.edit_message_text("✅ Условия приняты.")
-        await context.bot.send_message(user_id, "🚀 Теперь бот доступен!", reply_markup=main_keyboard)
+        await query.edit_message_text("✅ Условия приняты.\nТеперь используйте меню слева.")
 
-    # выбор модели
-    elif query.data.startswith("model_"):
-        model = query.data.replace("model_", "")
-        context.user_data["selected_model"] = model
+# ================= ACCOUNT =================
 
-        await query.edit_message_text(
-            f"✅ Вы выбрали модель: {model}\n\nТеперь выберите разрешение."
-        )
-
-        resolution_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📱 9:16", callback_data="size_9_16")],
-            [InlineKeyboardButton("💻 Компьютер (16:9)", callback_data="size_16_9")],
-            [InlineKeyboardButton("⬜ 1:1", callback_data="size_1_1")]
-        ])
-
-        await context.bot.send_message(user_id, "Выберите формат:", reply_markup=resolution_keyboard)
-
-    # выбор размера
-    elif query.data.startswith("size_"):
-        size_map = {
-            "size_9_16": "1024x1792",
-            "size_16_9": "1792x1024",
-            "size_1_1": "1024x1024"
-        }
-
-        context.user_data["selected_size"] = size_map[query.data]
-
-        await query.edit_message_text(
-            "📩 Теперь отправьте описание изображения."
-        )
-
-        context.user_data["image_mode"] = True
-
-# ================= MESSAGE =================
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user = update.effective_user
-    user_id = tg_user.id
-    text = update.message.text
-    user = get_user(user_id)
-
-    if user[3] == 0:
-        await update.message.reply_text("❗ Примите условия.", reply_markup=terms_keyboard)
-        return
+    user = get_user(tg_user.id)
 
     reset_week_if_needed(user)
-    user = get_user(user_id)
+    user = get_user(tg_user.id)
 
-    # ================= IMAGE =================
+    used = user[2]
+    bonus = user[5]
+    remaining = FREE_LIMIT + bonus - used
 
-    if text == "🖼 Создать изображение":
-        model_keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⚡ Flash 3.1", callback_data="model_Flash 3.1")],
-            [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_Nano Banana 2")]
-        ])
+    await update.message.reply_text(
+        f"👤 Ваш профиль\n\n"
+        f"🆔 ID: {tg_user.id}\n"
+        f"👤 Username: @{tg_user.username}\n\n"
+        f"🆓 Бесплатно: {FREE_LIMIT}\n"
+        f"🎁 Бонусы: {bonus}\n"
+        f"📦 Доступно: {remaining}\n"
+        f"👥 Рефералов: {user[4]}"
+    )
 
-        await update.message.reply_text(
-            "Выберите модель генерации:",
-            reply_markup=model_keyboard
+# ================= REF =================
+
+async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    link = f"https://t.me/{context.bot.username}?start={user_id}"
+
+    await update.message.reply_text(
+        "🎁 Реферальная программа\n\n"
+        "За каждого активного пользователя вы получаете +1 генерацию.\n\n"
+        f"Ваша ссылка:\n{link}"
+    )
+
+# ================= GPT =================
+
+async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("💬 Напишите сообщение для ChatGPT")
+    context.user_data["chat_mode"] = True
+
+# ================= IMAGE =================
+
+async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🖼 Отправьте описание изображения")
+    context.user_data["image_mode"] = True
+
+# ================= TEXT =================
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user = get_user(update.effective_user.id)
+
+    if context.user_data.get("chat_mode"):
+        activate_user_if_needed(user)
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": text}]
         )
+
+        await update.message.reply_text(response.choices[0].message.content)
         return
 
     if context.user_data.get("image_mode"):
         remaining = FREE_LIMIT + user[5] - user[2]
-
         if remaining <= 0:
             await update.message.reply_text("❌ Лимит исчерпан.")
             return
 
         activate_user_if_needed(user)
 
-        selected_model = context.user_data.get("selected_model", "Nano Banana 2")
-        selected_size = context.user_data.get("selected_size", "1024x1024")
-
         await update.message.reply_text(
-            f"{selected_model} создает шедевр, пожалуйста подождите..."
+            "Nano Banana 2 создает шедевр, пожалуйста подождите..."
         )
 
         img = client.images.generate(
             model="gpt-image-1",
             prompt=text,
-            size=selected_size
+            size="1024x1024"
         )
 
         image_bytes = base64.b64decode(img.data[0].b64_json)
@@ -240,18 +226,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         cursor.execute(
             "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-            (user_id,)
+            (update.effective_user.id,)
         )
         conn.commit()
-
-        context.user_data["image_mode"] = False
         return
 
-# ================= START =================
+# ================= REGISTER =================
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("account", account))
+app.add_handler(CommandHandler("ref", ref))
+app.add_handler(CommandHandler("uu", uu))
+app.add_handler(CommandHandler("photo", photo))
+
 app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+# ================= SET MENU =================
+
+async def set_commands(app):
+    await app.bot.set_my_commands([
+        BotCommand("start", "Запуск бота"),
+        BotCommand("account", "Мой профиль"),
+        BotCommand("ref", "Реферальная программа"),
+        BotCommand("uu", "Чат GPT"),
+        BotCommand("photo", "Создать изображение"),
+    ])
+
+app.post_init = set_commands
+
+# ================= START =================
 
 if __name__ == "__main__":
     print("🚀 Бот запущен")
