@@ -2,6 +2,7 @@ import os
 import time
 import sqlite3
 import base64
+import asyncio
 from telegram import (
     Update,
     InlineKeyboardMarkup,
@@ -113,7 +114,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text("🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к NANO BANANA 2,Видео и АУДИО ботам|Создание вашей песни и мультфильмов.\nИспользуйте меню слева.")
+    await update.message.reply_text(
+        "🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к NANO BANANA 2, Видео и АУДИО ботам."
+    )
 
 # ================= CALLBACK =================
 
@@ -138,8 +141,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
 
         await query.edit_message_text(
-            f"✅ Вы выбрали модель: {model}\n\nТеперь выберите формат:",
-            reply_markup=size_keyboard
+            f"✅ Вы выбрали модель:\n<b>{model}</b>\n\nТеперь выберите формат:",
+            reply_markup=size_keyboard,
+            parse_mode="HTML"
         )
 
     elif query.data.startswith("size_"):
@@ -229,9 +233,23 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_model = context.user_data.get("model", "Nano Banana 2")
         selected_size = context.user_data.get("size", "1024x1024")
 
-        await update.message.reply_text(
-            f"{selected_model} создает шедевр, пожалуйста подождите..."
+        # Эффект отправки фото
+        await context.bot.send_chat_action(
+            chat_id=update.effective_chat.id,
+            action="upload_photo"
         )
+
+        status_message = await update.message.reply_text(
+            f"{selected_model} создает шедевр, пожалуйста подождите."
+        )
+
+        # Анимация точек (премиум вариант)
+        for i in range(6):
+            await asyncio.sleep(0.5)
+            dots = "." * ((i % 3) + 1)
+            await status_message.edit_text(
+                f"{selected_model} создает шедевр, пожалуйста подождите{dots}"
+            )
 
         img = client.images.generate(
             model="gpt-image-1",
@@ -240,6 +258,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         image_bytes = base64.b64decode(img.data[0].b64_json)
+
+        await status_message.delete()
         await update.message.reply_photo(photo=image_bytes)
 
         cursor.execute(
