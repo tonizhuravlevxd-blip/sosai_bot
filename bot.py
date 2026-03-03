@@ -4,8 +4,6 @@ import sqlite3
 import base64
 from telegram import (
     Update,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     BotCommand
@@ -24,12 +22,6 @@ from openai import OpenAI
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-if not TG_TOKEN:
-    raise ValueError("❌ TG_TOKEN не установлен")
-
-if not OPENAI_API_KEY:
-    raise ValueError("❌ OPENAI_API_KEY не установлен")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -57,10 +49,6 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 conn.commit()
-
-# ================= TELEGRAM =================
-
-app = ApplicationBuilder().token(TG_TOKEN).build()
 
 # ================= HELPERS =================
 
@@ -121,11 +109,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "📜 Перед началом использования бота необходимо принять условия.",
-            reply_markup=terms_keyboard,
+            reply_markup=terms_keyboard
         )
         return
 
-    await update.message.reply_text("🚀 Добро пожаловать!")
+    await update.message.reply_text("🚀 Бот готов к работе.\nИспользуйте меню слева.")
 
 # ================= CALLBACK =================
 
@@ -137,9 +125,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == "accept_terms":
         cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (user_id,))
         conn.commit()
-        await query.edit_message_text("✅ Условия приняты.\nТеперь используйте меню слева.")
+        await query.edit_message_text("✅ Условия приняты.")
 
-# ================= ACCOUNT =================
+    elif query.data.startswith("model_"):
+        model = query.data.replace("model_", "")
+        context.user_data["model"] = model
+
+        size_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📱 9:16", callback_data="size_9_16")],
+            [InlineKeyboardButton("💻 16:9 (Компьютер)", callback_data="size_16_9")],
+            [InlineKeyboardButton("⬜ 1:1", callback_data="size_1_1")]
+        ])
+
+        await query.edit_message_text(
+            f"✅ Вы выбрали модель: {model}\n\nТеперь выберите формат:",
+            reply_markup=size_keyboard
+        )
+
+    elif query.data.startswith("size_"):
+        size_map = {
+            "size_9_16": "1024x1792",
+            "size_16_9": "1792x1024",
+            "size_1_1": "1024x1024"
+        }
+
+        context.user_data["size"] = size_map[query.data]
+        context.user_data["image_mode"] = True
+
+        await query.edit_message_text("📩 Теперь отправьте описание изображения.")
+
+# ================= COMMANDS =================
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg_user = update.effective_user
@@ -153,38 +168,38 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     remaining = FREE_LIMIT + bonus - used
 
     await update.message.reply_text(
-        f"👤 Ваш профиль\n\n"
+        f"👤 Профиль\n\n"
         f"🆔 ID: {tg_user.id}\n"
         f"👤 Username: @{tg_user.username}\n\n"
-        f"🆓 Бесплатно: {FREE_LIMIT}\n"
         f"🎁 Бонусы: {bonus}\n"
         f"📦 Доступно: {remaining}\n"
         f"👥 Рефералов: {user[4]}"
     )
-
-# ================= REF =================
 
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     link = f"https://t.me/{context.bot.username}?start={user_id}"
 
     await update.message.reply_text(
-        "🎁 Реферальная программа\n\n"
-        "За каждого активного пользователя вы получаете +1 генерацию.\n\n"
+        f"🎁 Реферальная программа\n\n"
+        f"За активного пользователя вы получаете +1 генерацию.\n\n"
         f"Ваша ссылка:\n{link}"
     )
 
-# ================= GPT =================
-
 async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💬 Напишите сообщение для ChatGPT")
     context.user_data["chat_mode"] = True
-
-# ================= IMAGE =================
+    await update.message.reply_text("💬 Напишите сообщение для ChatGPT")
 
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🖼 Отправьте описание изображения")
-    context.user_data["image_mode"] = True
+    model_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Flash 3.1", callback_data="model_Flash 3.1")],
+        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_Nano Banana 2")]
+    ])
+
+    await update.message.reply_text(
+        "Выберите модель генерации:",
+        reply_markup=model_keyboard
+    )
 
 # ================= TEXT =================
 
@@ -211,14 +226,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         activate_user_if_needed(user)
 
+        selected_model = context.user_data.get("model", "Nano Banana 2")
+        selected_size = context.user_data.get("size", "1024x1024")
+
         await update.message.reply_text(
-            "Nano Banana 2 создает шедевр, пожалуйста подождите..."
+            f"{selected_model} создает шедевр, пожалуйста подождите..."
         )
 
         img = client.images.generate(
             model="gpt-image-1",
             prompt=text,
-            size="1024x1024"
+            size=selected_size
         )
 
         image_bytes = base64.b64decode(img.data[0].b64_json)
@@ -229,9 +247,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             (update.effective_user.id,)
         )
         conn.commit()
-        return
+
+        context.user_data["image_mode"] = False
 
 # ================= REGISTER =================
+
+app = ApplicationBuilder().token(TG_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("account", account))
@@ -242,20 +263,16 @@ app.add_handler(CommandHandler("photo", photo))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-# ================= SET MENU =================
-
 async def set_commands(app):
     await app.bot.set_my_commands([
-        BotCommand("start", "Запуск бота"),
-        BotCommand("account", "Мой профиль"),
+        BotCommand("start", "Запуск"),
+        BotCommand("account", "Профиль"),
         BotCommand("ref", "Реферальная программа"),
         BotCommand("uu", "Чат GPT"),
         BotCommand("photo", "Создать изображение"),
     ])
 
 app.post_init = set_commands
-
-# ================= START =================
 
 if __name__ == "__main__":
     print("🚀 Бот запущен")
