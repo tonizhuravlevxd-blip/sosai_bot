@@ -32,6 +32,10 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
+# ====== АНТИ СПАМ ======
+RATE_LIMIT_SECONDS = 2
+user_last_message = {}
+
 # ================= DATABASE =================
 
 conn = sqlite3.connect("bot.db", check_same_thread=False)
@@ -78,6 +82,14 @@ def activate_user_if_needed(user):
             )
             conn.commit()
 
+def check_rate_limit(user_id):
+    now = time.time()
+    last = user_last_message.get(user_id, 0)
+    if now - last < RATE_LIMIT_SECONDS:
+        return False
+    user_last_message[user_id] = now
+    return True
+
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,7 +127,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к NANO BANANA 2, Видео и АУДИО ботам."
+        "🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к NANO BANANA 2."
     )
 
 # ================= CALLBACK =================
@@ -123,10 +135,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    user_id = query.from_user.id
 
     if query.data == "accept_terms":
-        cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (user_id,))
+        cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (query.from_user.id,))
         conn.commit()
         await query.edit_message_text("✅ Условия приняты.")
 
@@ -136,7 +147,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         size_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📱 9:16", callback_data="size_9_16")],
-            [InlineKeyboardButton("💻 16:9 (Компьютер)", callback_data="size_16_9")],
+            [InlineKeyboardButton("💻 16:9", callback_data="size_16_9")],
             [InlineKeyboardButton("⬜ 1:1", callback_data="size_1_1")]
         ])
 
@@ -158,77 +169,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text("📩 Теперь отправьте описание изображения.")
 
-# ================= COMMANDS =================
-
-async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_user = update.effective_user
-    user = get_user(tg_user.id)
-
-    reset_week_if_needed(user)
-    user = get_user(tg_user.id)
-
-    used = user[2]
-    bonus = user[5]
-    remaining = FREE_LIMIT + bonus - used
-
-    await update.message.reply_text(
-        f"👤 Профиль\n\n"
-        f"🆔 ID: {tg_user.id}\n"
-        f"👤 Username: @{tg_user.username}\n\n"
-        f"🎁 Бонусы: {bonus}\n"
-        f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user[4]}"
-    )
-
-async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    link = f"https://t.me/{context.bot.username}?start={user_id}"
-
-    await update.message.reply_text(
-        f"🎁 Реферальная программа\n\n"
-        f"За активного пользователя вы получаете +1 генерацию.\n\n"
-        f"Ваша ссылка:\n{link}"
-    )
-
-async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["chat_mode"] = True
-    await update.message.reply_text("💬 Напишите сообщение для ChatGPT")
-
-async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    model_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Flash 3.1", callback_data="model_Flash 3.1")],
-        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_Nano Banana 2")]
-    ])
-
-    await update.message.reply_text(
-        "Выберите модель генерации:",
-        reply_markup=model_keyboard
-    )
-
 # ================= TEXT =================
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text
-    user = get_user(update.effective_user.id)
+    user_id = update.effective_user.id
 
-    if context.user_data.get("chat_mode"):
-        activate_user_if_needed(user)
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": text}]
-        )
-
-        await update.message.reply_text(response.choices[0].message.content)
+    # ===== АНТИ СПАМ =====
+    if not check_rate_limit(user_id):
+        await update.message.reply_text("⏳ Не так быстро. Подождите пару секунд.")
         return
 
+    # ===== БЛОК ОТ ПОВТОРНОЙ ГЕНЕРАЦИИ =====
+    if context.user_data.get("generating"):
+        await update.message.reply_text("⚠ Подождите завершения текущей генерации.")
+        return
+
+    text = update.message.text
+    user = get_user(user_id)
+
     if context.user_data.get("image_mode"):
+
         remaining = FREE_LIMIT + user[5] - user[2]
         if remaining <= 0:
             await update.message.reply_text("❌ Лимит исчерпан.")
             return
 
-        activate_user_if_needed(user)
+        context.user_data["generating"] = True
 
         selected_model = context.user_data.get("model", "Nano Banana 2")
         selected_size = context.user_data.get("size", "1024x1024")
@@ -274,10 +240,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         cursor.execute(
             "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-            (update.effective_user.id,)
+            (user_id,)
         )
         conn.commit()
 
+        context.user_data["generating"] = False
         context.user_data["image_mode"] = False
 
 # ================= REGISTER =================
@@ -285,25 +252,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TG_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("account", account))
-app.add_handler(CommandHandler("ref", ref))
-app.add_handler(CommandHandler("uu", uu))
-app.add_handler(CommandHandler("photo", photo))
-
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-async def set_commands(app):
-    await app.bot.set_my_commands([
-        BotCommand("start", "Запуск"),
-        BotCommand("account", "Профиль"),
-        BotCommand("ref", "Реферальная программа"),
-        BotCommand("uu", "Чат GPT"),
-        BotCommand("photo", "Создать изображение"),
-    ])
-
-app.post_init = set_commands
-
 if __name__ == "__main__":
-    print("🚀 Бот запущен")
+    print("🚀 Бот запущен с анти-спам защитой")
     app.run_polling(drop_pending_updates=True)
