@@ -113,7 +113,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await update.message.reply_text("🚀 Бот готов к работе.\nИспользуйте меню слева.")
+    await update.message.reply_text("🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к NANO BANANA 2,Видео и АУДИО ботам|Создание вашей песни и мультфильмов.\nИспользуйте меню слева.")
 
 # ================= CALLBACK =================
 
