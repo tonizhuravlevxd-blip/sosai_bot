@@ -233,29 +233,39 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_model = context.user_data.get("model", "Nano Banana 2")
         selected_size = context.user_data.get("size", "1024x1024")
 
-        # Эффект отправки фото
         await context.bot.send_chat_action(
             chat_id=update.effective_chat.id,
             action="upload_photo"
         )
 
         status_message = await update.message.reply_text(
-            f"{selected_model} создает шедевр, пожалуйста подождите."
+            f"<b>{selected_model}</b>\nсоздает шедевр, пожалуйста подождите.",
+            parse_mode="HTML"
         )
 
-        # Анимация точек (премиум вариант)
-        for i in range(6):
-            await asyncio.sleep(0.5)
-            dots = "." * ((i % 3) + 1)
-            await status_message.edit_text(
-                f"{selected_model} создает шедевр, пожалуйста подождите{dots}"
+        async def animate():
+            dots = 0
+            while True:
+                dots = (dots % 3) + 1
+                await asyncio.sleep(0.6)
+                try:
+                    await status_message.edit_text(
+                        f"<b>{selected_model}</b>\nсоздает шедевр, пожалуйста подождите{'.' * dots}",
+                        parse_mode="HTML"
+                    )
+                except:
+                    break
+
+        animation_task = asyncio.create_task(animate())
+
+        try:
+            img = client.images.generate(
+                model="gpt-image-1",
+                prompt=text,
+                size=selected_size
             )
-
-        img = client.images.generate(
-            model="gpt-image-1",
-            prompt=text,
-            size=selected_size
-        )
+        finally:
+            animation_task.cancel()
 
         image_bytes = base64.b64decode(img.data[0].b64_json)
 
