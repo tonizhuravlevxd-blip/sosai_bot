@@ -724,13 +724,26 @@ async def set_commands(app):
         BotCommand("restart", "Перезапустить")
     ])
 
+async def start_worker():
+
+    while True:
+
+        try:
+
+            await generation_worker()
+
+        except Exception as e:
+
+            logging.error(f"Worker crashed: {e}")
+
+            await asyncio.sleep(2)
 
 async def post_init(app):
 
     await set_commands(app)
 
     for _ in range(MAX_WORKERS):
-        asyncio.create_task(generation_worker())
+        asyncio.create_task(start_worker())
 
     asyncio.create_task(cache_cleaner())
 
