@@ -87,7 +87,6 @@ conn.commit()
 # ================= HELPERS =================
 
 def get_user(user_id):
-
     cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
     return cursor.fetchone()
 
@@ -138,37 +137,37 @@ async def generation_worker():
         update = job["update"]
         prompt = job["prompt"]
         size = job["size"]
+        model = job["model"]
         images = job["images"]
         user_id = job["user_id"]
         status = job["status"]
 
         try:
 
-            # ===== IMAGE TO IMAGE =====
+            style = ""
 
-            if images:
+            if model == "banana1":
+                style = "high quality cinematic render"
 
-                img = client.images.generate(
-                    model="gpt-image-1",
-                    prompt=prompt,
-                    size=size
-                )
+            elif model == "banana2":
+                style = "ultra detailed masterpiece"
 
-            else:
+            elif model == "flash":
+                style = "fast simple render"
 
-                img = client.images.generate(
-                    model="gpt-image-1",
-                    prompt=prompt,
-                    size=size
-                )
+            prompt = style + " " + prompt
+
+            img = client.images.generate(
+                model="gpt-image-1",
+                prompt=prompt,
+                size=size
+            )
 
             image_bytes = base64.b64decode(img.data[0].b64_json)
 
             await status.delete()
 
-            await update.message.reply_photo(
-                photo=image_bytes
-            )
+            await update.message.reply_photo(photo=image_bytes)
 
         except Exception:
 
@@ -179,7 +178,6 @@ async def generation_worker():
         finally:
 
             active_generations.pop(user_id, None)
-
             generation_queue.task_done()
 
 
@@ -225,9 +223,62 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    await update.message.reply_text(
-        "🚀 Sosai bot дает вам бесплатные генерации."
-    )
+    await update.message.reply_text("🚀 Sosai bot готов к генерации.")
+
+
+# ================= CALLBACK =================
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "accept_terms":
+
+        cursor.execute(
+            "UPDATE users SET accepted_terms=1 WHERE user_id=?",
+            (query.from_user.id,)
+        )
+
+        conn.commit()
+
+        await query.edit_message_text("✅ Условия приняты.")
+
+    elif query.data.startswith("model_"):
+
+        model_map = {
+            "model_flash": "flash",
+            "model_banana1": "banana1",
+            "model_banana2": "banana2"
+        }
+
+        context.user_data["model"] = model_map.get(query.data)
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("📱 9:16", callback_data="size_9_16")],
+            [InlineKeyboardButton("💻 16:9", callback_data="size_16_9")],
+            [InlineKeyboardButton("⬜ 1:1", callback_data="size_1_1")]
+        ])
+
+        await query.edit_message_text(
+            "📐 Выберите формат изображения:",
+            reply_markup=keyboard
+        )
+
+    elif query.data.startswith("size_"):
+
+        size_map = {
+            "size_9_16": "1024x1792",
+            "size_16_9": "1792x1024",
+            "size_1_1": "1024x1024"
+        }
+
+        context.user_data["size"] = size_map[query.data]
+        context.user_data["image_mode"] = True
+
+        await query.edit_message_text(
+            "✏ Отправьте описание или изображения."
+        )
 
 
 # ================= PHOTO INPUT =================
@@ -235,7 +286,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if "input_images" not in context.user_data:
-
         context.user_data["input_images"] = []
 
     if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
@@ -247,15 +297,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     photo = update.message.photo[-1]
-
     file = await photo.get_file()
-
     image_bytes = await file.download_as_bytearray()
 
     context.user_data["input_images"].append(image_bytes)
 
     await update.message.reply_text(
-        f"📷 Загружено: {len(context.user_data['input_images'])}\n"
+        f"📷 Загружено изображений: {len(context.user_data['input_images'])}\n"
         f"Теперь отправьте описание."
     )
 
@@ -265,16 +313,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tg_user = update.effective_user
-
     user = get_user(tg_user.id)
 
     reset_week_if_needed(user)
-
     user = get_user(tg_user.id)
 
     used = user[2]
     bonus = user[5]
-
     remaining = FREE_LIMIT + bonus - used
 
     await update.message.reply_text(
@@ -290,7 +335,6 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
-
     link = f"https://t.me/{context.bot.username}?start={user_id}"
 
     await update.message.reply_text(
@@ -311,10 +355,15 @@ async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    context.user_data["image_mode"] = True
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Flash", callback_data="model_flash")],
+        [InlineKeyboardButton("🍌 Nano Banana 1", callback_data="model_banana1")],
+        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_banana2")]
+    ])
 
     await update.message.reply_text(
-        "✏ Отправьте описание или изображения."
+        "Выберите модель генерации:",
+        reply_markup=keyboard
     )
 
 
@@ -326,14 +375,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not check_rate_limit(user_id):
 
-        await update.message.reply_text(
-            "⏳ Подождите 2 секунды."
-        )
-
+        await update.message.reply_text("⏳ Подождите 2 секунды.")
         return
 
     text = update.message.text
-
     user = get_user(user_id)
 
     if context.user_data.get("chat_mode"):
@@ -355,27 +400,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if remaining <= 0:
 
-            await update.message.reply_text(
-                "❌ Лимит исчерпан."
-            )
-
+            await update.message.reply_text("❌ Лимит исчерпан.")
             return
 
         if user_id in active_generations:
 
-            await update.message.reply_text(
-                "⚠ Генерация уже выполняется."
-            )
-
+            await update.message.reply_text("⚠ Генерация уже выполняется.")
             return
 
         activate_user_if_needed(user)
 
         size = context.user_data.get("size", "1024x1024")
+        model = context.user_data.get("model", "banana2")
 
-        status = await update.message.reply_text(
-            "🎨 Генерация..."
-        )
+        status = await update.message.reply_text("🎨 Генерация...")
 
         active_generations[user_id] = True
 
@@ -386,6 +424,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "update": update,
             "prompt": text,
             "size": size,
+            "model": model,
             "images": images,
             "user_id": user_id,
             "status": status
@@ -413,6 +452,8 @@ app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("photo", photo))
 
+app.add_handler(CallbackQueryHandler(button_handler))
+
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
@@ -424,7 +465,7 @@ async def set_commands(app):
         BotCommand("account", "Профиль"),
         BotCommand("ref", "Реферальная программа"),
         BotCommand("uu", "Чат GPT"),
-        BotCommand("photo", "Создать изображение")
+        BotCommand("photo", "Создать изображение"),
     ])
 
 
