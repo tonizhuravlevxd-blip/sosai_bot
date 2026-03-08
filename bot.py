@@ -232,7 +232,6 @@ async def generation_worker():
                     "image": image_bytes,
                     "time": time.time()
                 }
-                
 
                 keyboard = InlineKeyboardMarkup([
                     [
@@ -264,34 +263,34 @@ async def generation_worker():
 
             except Exception as e:
 
-    logging.error(f"Generation error: {e}")
+                logging.error(f"Generation error: {e}")
 
-    error_text = str(e)
+                error_text = str(e)
 
-    if "moderation" in error_text or "safety" in error_text:
+                if "moderation" in error_text or "safety" in error_text:
 
-        await update.message.reply_text(
-            "🚫 Запрос отклонён системой безопасности.\n"
-            "Попробуйте изменить текст или изображение."
-        )
+                    await update.message.reply_text(
+                        "🚫 Запрос отклонён системой безопасности.\n"
+                        "Попробуйте изменить текст или изображение."
+                    )
 
-    else:
+                else:
 
-        await update.message.reply_text(
-            "⚠ Ошибка генерации. Попробуйте позже."
-        )
+                    await update.message.reply_text(
+                        "⚠ Ошибка генерации. Попробуйте позже."
+                    )
 
-finally:
+            finally:
 
-    generation_queue.task_done()
+                generation_queue.task_done()
 
-    if user_id in active_generations:
-        active_generations.remove(user_id)
+                if user_id in active_generations:
+                    active_generations.remove(user_id)
 
-    if user_id in user_generation_count:
-        user_generation_count[user_id] -= 1
-        if user_generation_count[user_id] <= 0:
-            del user_generation_count[user_id]
+                if user_id in user_generation_count:
+                    user_generation_count[user_id] -= 1
+                    if user_generation_count[user_id] <= 0:
+                        del user_generation_count[user_id]
 
 
 # ================= START =================
