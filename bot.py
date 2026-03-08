@@ -233,7 +233,7 @@ async def generation_worker():
     image=upload_images,
     prompt=prompt,
     size=size,
-    quality="standard"
+    
 )
 
                 else:
@@ -242,7 +242,7 @@ async def generation_worker():
     model="gpt-image-1",
     prompt=prompt,
     size=size,
-    quality="standard"
+    
 )
 
                 image_base64 = result.data[0].b64_json
