@@ -224,6 +224,10 @@ async def generation_worker():
                     "image": image_bytes,
                     "time": time.time()
                 }
+                active_generations = set()
+user_generation_count = {}
+
+MAX_USER_GENERATIONS = 2
 
                 keyboard = InlineKeyboardMarkup([
                     [
@@ -273,12 +277,16 @@ async def generation_worker():
                     )
 
             finally:
+    generation_queue.task_done()
 
-                generation_queue.task_done()
+    # снимаем блокировку генерации
+    if user_id in active_generations:
+        active_generations.remove(user_id)
 
-                images.clear()
-
-                gc.collect()
+    if user_id in user_generation_count:
+        user_generation_count[user_id] -= 1
+        if user_generation_count[user_id] <= 0:
+            del user_generation_count[user_id]
 
 
 # ================= START =================
@@ -511,6 +519,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
+    # защита от двойной генерации
+if user_id in active_generations:
+    await update.message.reply_text("⏳ Ваша генерация уже выполняется")
+    return
+
+# ограничение генераций пользователя
+count = user_generation_count.get(user_id, 0)
+if count >= MAX_USER_GENERATIONS:
+    await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
+    return
+
+user_generation_count[user_id] = count + 1
+active_generations.add(user_id)
 
     user = get_user(user_id)
 
