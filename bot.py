@@ -45,9 +45,7 @@ MAX_WORKERS = 4
 
 generation_queue = asyncio.Queue(maxsize=200)
 
-active_generations = set()
-user_generation_count = {}
-MAX_USER_GENERATIONS = 2
+
 
 SIZE_CONFIG = {
     "square": "1024x1024",
@@ -57,6 +55,12 @@ SIZE_CONFIG = {
 
 generation_cache = {}
 CACHE_TIME = 3600
+
+# защита генераций
+active_generations = set()
+user_generation_count = {}
+
+MAX_USER_GENERATIONS = 2
 
 
 # ================= CACHE CLEANER =================
@@ -526,12 +530,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Ваша генерация уже выполняется")
         return
 
-    # ограничение генераций пользователя
     count = user_generation_count.get(user_id, 0)
 
     if count >= MAX_USER_GENERATIONS:
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
+
+    user_generation_count[user_id] = count + 1
+    active_generations.add(user_id)
+
+    prompt = update.message.text
+
+    await update.message.reply_text("🎨 Генерация...")
+
+    await generation_queue.put({
+        "type": "text",
+        "prompt": prompt,
+        "update": update,
+        "context": context,
+        "user_id": user_id
+    })
 
     user_generation_count[user_id] = count + 1
     active_generations.add(user_id)
