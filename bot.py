@@ -56,11 +56,7 @@ def check_rate_limit(user_id):
     user_last_message[user_id] = now
     return True
 
-conn = sqlite3.connect(
-    "bot.db",
-    check_same_thread=False,
-    timeout=30
-)
+conn = sqlite3.connect("bot.db", check_same_thread=False, timeout=30)
 
 conn.execute("PRAGMA journal_mode=WAL")
 conn.execute("PRAGMA synchronous=NORMAL")
@@ -94,6 +90,8 @@ def reset_week_if_needed(user):
             (now, user[0])
         )
         conn.commit()
+
+# ================= WORKER =================
 
 async def generation_worker():
 
@@ -172,6 +170,9 @@ async def generation_worker():
                 reply_markup=keyboard
             )
 
+            # очистка изображений после генерации
+            context.user_data["input_images"] = []
+
         except Exception as e:
 
             logging.error(f"Generation error: {e}")
@@ -182,10 +183,11 @@ async def generation_worker():
 
             generation_queue.task_done()
 
+# ================= START =================
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = update.effective_user
-
     db_user = get_user(user.id)
 
     if not db_user:
@@ -215,6 +217,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text("🚀 Sosai bot готов к генерации.")
+
+# ================= CALLBACK =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -285,14 +289,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "restart":
 
         context.user_data.clear()
-
         await query.message.reply_text("🔄 Сначала выберите модель через /photo")
 
     elif data == "finish":
 
         context.user_data.clear()
-
         await query.message.reply_text("✅ Сессия завершена")
+
+# ================= PHOTO =================
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -309,17 +313,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
 
-    photo = update.message.photo[-1]
+    if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
+        return
 
+    photo = update.message.photo[-1]
     file = await photo.get_file()
 
     image_bytes = bytes(await file.download_as_bytearray())
-
     context.user_data["input_images"].append(image_bytes)
 
     caption = update.message.caption
 
     if caption:
+
+        context.user_data["last_prompt"] = caption
+        context.user_data["last_images"] = context.user_data["input_images"]
 
         status = await update.message.reply_text("🎨 Генерация...")
 
@@ -334,14 +342,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "status": status
         })
 
-        context.user_data["input_images"] = []
-
-    else:
-
-        await update.message.reply_text(
-            f"📷 Загружено изображений: {len(context.user_data['input_images'])}\n"
-            "Теперь отправьте текст."
-        )
+# ================= TEXT =================
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -375,6 +376,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "user_id": user_id,
         "status": status
     })
+
+# ================= COMMANDS =================
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -417,6 +420,8 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎨 Выберите модель генерации:",
         reply_markup=keyboard
     )
+
+# ================= REGISTER =================
 
 app = ApplicationBuilder().token(TG_TOKEN).build()
 
