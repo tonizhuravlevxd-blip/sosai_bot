@@ -84,6 +84,8 @@ async def cache_cleaner():
         gc.collect()
 
 
+# ================= DB LOCK =================
+
 db_lock = asyncio.Lock()
 
 RATE_LIMIT_SECONDS = 2
@@ -94,6 +96,7 @@ generation_semaphore = asyncio.Semaphore(GENERATION_LIMIT)
 
 
 def check_rate_limit(user_id):
+
     now = time.time()
     last = user_last_message.get(user_id, 0)
 
@@ -108,7 +111,10 @@ def get_queue_position():
     return generation_queue.qsize()
 
 
+# ================= DATABASE =================
+
 conn = sqlite3.connect("bot.db", check_same_thread=False, timeout=30)
+
 conn.execute("PRAGMA journal_mode=WAL")
 conn.execute("PRAGMA synchronous=NORMAL")
 
@@ -131,7 +137,12 @@ conn.commit()
 
 
 def get_user(user_id):
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+
+    cursor.execute(
+        "SELECT * FROM users WHERE user_id=?",
+        (user_id,)
+    )
+
     return cursor.fetchone()
 
 
@@ -141,12 +152,19 @@ def reset_week_if_needed(user):
 
     if now - user[1] > WEEK_SECONDS:
 
-        cursor.execute(
-            "UPDATE users SET week_start=?, image_count=0 WHERE user_id=?",
-            (now, user[0])
-        )
+        # защита от database locked
+        async def update():
 
-        conn.commit()
+            async with db_lock:
+
+                cursor.execute(
+                    "UPDATE users SET week_start=?, image_count=0 WHERE user_id=?",
+                    (now, user[0])
+                )
+
+                conn.commit()
+
+        asyncio.create_task(update())
 
 
 # ================= WORKER =================
@@ -248,18 +266,27 @@ async def generation_worker():
                 except:
                     pass
 
-                await update.message.reply_photo(
-                    photo=image_bytes,
-                    reply_markup=keyboard
+                await asyncio.wait_for(
+                    update.message.reply_photo(
+                        photo=image_bytes,
+                        reply_markup=keyboard
+                    ),
+                    timeout=30
                 )
 
-                cursor.execute(
-                    "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-                    (user_id,)
-                )
-                conn.commit()
+                # безопасное обновление БД
+                async with db_lock:
 
+                    cursor.execute(
+                        "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
+                        (user_id,)
+                    )
+
+                    conn.commit()
+
+                # очистка изображений
                 context.user_data["input_images"] = []
+                context.user_data["last_images"] = []
 
             except Exception as e:
 
