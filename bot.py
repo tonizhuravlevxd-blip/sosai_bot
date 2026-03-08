@@ -535,24 +535,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
 
-    user_generation_count[user_id] = count + 1
-    active_generations.add(user_id)
-
-    prompt = update.message.text
-
-    await update.message.reply_text("🎨 Генерация...")
-
-    await generation_queue.put({
-        "type": "text",
-        "prompt": prompt,
-        "update": update,
-        "context": context,
-        "user_id": user_id
-    })
-
-    user_generation_count[user_id] = count + 1
-    active_generations.add(user_id)
-
     user = get_user(user_id)
 
     reset_week_if_needed(user)
@@ -568,7 +550,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Бесплатные генерации закончились.\n"
             "Пригласите друзей через /ref"
         )
-
         return
 
     if not check_rate_limit(user_id):
@@ -576,10 +557,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⏳ Подождите 2 секунды")
         return
 
+    if generation_queue.full():
+
+        await update.message.reply_text(
+            "⚠️ Сервер перегружен. Попробуйте через несколько секунд."
+        )
+        return
+
+    # блокируем генерацию
+    user_generation_count[user_id] = count + 1
+    active_generations.add(user_id)
+
     text = update.message.text
 
     context.user_data["last_prompt"] = text
-    context.user_data["last_images"] = context.user_data.get("input_images",[])
+    context.user_data["last_images"] = context.user_data.get("input_images", [])
 
     position = get_queue_position() + 1
 
@@ -591,13 +583,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "update": update,
         "context": context,
         "prompt": text,
-        "size": context.user_data.get("size","1024x1024"),
-        "model": context.user_data.get("model","banana2"),
-        "images": context.user_data.get("input_images",[]),
+        "size": context.user_data.get("size", "1024x1024"),
+        "model": context.user_data.get("model", "banana2"),
+        "images": context.user_data.get("input_images", []),
         "user_id": user_id,
         "status": status
     })
-
 
 # ================= COMMANDS =================
 
