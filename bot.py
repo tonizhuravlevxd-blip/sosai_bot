@@ -24,12 +24,7 @@ from telegram.ext import (
 from openai import OpenAI
 
 
-# ================= LOG =================
-
 logging.basicConfig(level=logging.INFO)
-
-
-# ================= ENV =================
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -41,18 +36,18 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 
 FREE_LIMIT = 5
 WEEK_SECONDS = 7 * 24 * 60 * 60
-
 MAX_INPUT_IMAGES = 4
 
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
 
-# ================= PRO =================
+# ================= PERFORMANCE =================
 
 MAX_WORKERS = 4
 generation_queue = asyncio.Queue()
 active_generations = {}
+db_lock = asyncio.Lock()
 
 
 # ================= RATE LIMIT =================
@@ -74,7 +69,15 @@ def check_rate_limit(user_id):
 
 # ================= DATABASE =================
 
-conn = sqlite3.connect("bot.db", check_same_thread=False)
+conn = sqlite3.connect(
+    "bot.db",
+    check_same_thread=False,
+    timeout=30
+)
+
+conn.execute("PRAGMA journal_mode=WAL")
+conn.execute("PRAGMA synchronous=NORMAL")
+
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -114,25 +117,27 @@ def reset_week_if_needed(user):
         conn.commit()
 
 
-def activate_user_if_needed(user):
+async def activate_user_if_needed(user):
 
     if user[7] == 0:
 
-        cursor.execute(
-            "UPDATE users SET is_active=1 WHERE user_id=?",
-            (user[0],)
-        )
-
-        conn.commit()
-
-        if user[6]:
+        async with db_lock:
 
             cursor.execute(
-                "UPDATE users SET bonus_images=bonus_images+1, referrals=referrals+1 WHERE user_id=?",
-                (user[6],)
+                "UPDATE users SET is_active=1 WHERE user_id=?",
+                (user[0],)
             )
 
             conn.commit()
+
+            if user[6]:
+
+                cursor.execute(
+                    "UPDATE users SET bonus_images=bonus_images+1, referrals=referrals+1 WHERE user_id=?",
+                    (user[6],)
+                )
+
+                conn.commit()
 
 
 # ================= WORKER =================
@@ -156,30 +161,25 @@ async def generation_worker():
             style = ""
 
             if model == "banana1":
-                style = "cinematic lighting, ultra realistic, 8k"
+                style = "cinematic lighting ultra realistic 8k"
 
             elif model == "banana2":
-                style = "hyper detailed masterpiece, artstation quality"
+                style = "hyper detailed masterpiece artstation quality"
 
             elif model == "flash":
                 style = "fast simple render"
 
-            prompt = style + " " + prompt
+            prompt = f"{style} {prompt}"
 
-            # ================= IMAGE EDIT =================
+            images = images[:MAX_INPUT_IMAGES]
+
+            # ===== IMAGE EDIT =====
 
             if images:
 
-                encoded_images = []
-
-                for img_bytes in images:
-                    encoded_images.append(
-                        base64.b64encode(img_bytes).decode()
-                    )
-
                 result = client.images.edit(
                     model="gpt-image-1",
-                    image=encoded_images,
+                    image=images,
                     prompt=prompt,
                     size=size
                 )
@@ -197,17 +197,23 @@ async def generation_worker():
             image_base64 = result.data[0].b64_json
             image_bytes = base64.b64decode(image_base64)
 
-            await status.delete()
+            try:
+                await status.delete()
+            except:
+                pass
 
             await update.message.reply_photo(photo=image_bytes)
 
         except Exception as e:
 
-            logging.error(e)
+            logging.error(f"Generation error: {e}")
 
-            await update.message.reply_text(
-                "⚠ Ошибка генерации."
-            )
+            try:
+                await update.message.reply_text(
+                    "⚠ Ошибка генерации."
+                )
+            except:
+                pass
 
         finally:
 
@@ -327,7 +333,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "❌ Можно загрузить максимум 4 изображения."
         )
-
         return
 
     photo = update.message.photo[-1]
@@ -408,7 +413,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not check_rate_limit(user_id):
-
         await update.message.reply_text("⏳ Подождите 2 секунды.")
         return
 
@@ -436,16 +440,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         remaining = FREE_LIMIT + user[5] - user[2]
 
         if remaining <= 0:
-
             await update.message.reply_text("❌ Лимит исчерпан.")
             return
 
         if user_id in active_generations:
-
             await update.message.reply_text("⚠ Генерация уже выполняется.")
             return
 
-        activate_user_if_needed(user)
+        await activate_user_if_needed(user)
 
         size = context.user_data.get("size", "1024x1024")
         model = context.user_data.get("model", "banana2")
@@ -468,12 +470,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         })
 
-        cursor.execute(
-            "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-            (user_id,)
-        )
+        async with db_lock:
 
-        conn.commit()
+            cursor.execute(
+                "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
+                (user_id,)
+            )
+
+            conn.commit()
 
         context.user_data["image_mode"] = False
         context.user_data["input_images"] = []
@@ -511,10 +515,7 @@ async def post_init(app):
     await set_commands(app)
 
     for _ in range(MAX_WORKERS):
-
-        asyncio.create_task(
-            generation_worker()
-        )
+        asyncio.create_task(generation_worker())
 
 
 app.post_init = post_init
