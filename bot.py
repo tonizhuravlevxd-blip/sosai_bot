@@ -99,7 +99,7 @@ def activate_user_if_needed(user):
             )
             conn.commit()
 
-# ================= GENERATION WORKER =================
+# ================= WORKER =================
 
 async def generation_worker():
 
@@ -111,7 +111,7 @@ async def generation_worker():
         prompt = job["prompt"]
         size = job["size"]
         user_id = job["user_id"]
-        status_message = job["status"]
+        status = job["status"]
 
         try:
 
@@ -123,14 +123,11 @@ async def generation_worker():
 
             image_bytes = base64.b64decode(img.data[0].b64_json)
 
-            await status_message.delete()
+            await status.delete()
             await update.message.reply_photo(photo=image_bytes)
 
-        except Exception as e:
-
-            await update.message.reply_text(
-                "⚠ Ошибка генерации. Попробуйте еще раз."
-            )
+        except Exception:
+            await update.message.reply_text("⚠ Ошибка генерации.")
 
         finally:
 
@@ -176,7 +173,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к Nano Banana."
+        "🚀 Sosai bot дает вам бесплатные генерации."
     )
 
 # ================= CALLBACK =================
@@ -210,7 +207,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
 
         await query.edit_message_text(
-            "📐 Выберите формат изображения:",
+            "📐 Выберите формат:",
             reply_markup=size_keyboard
         )
 
@@ -228,6 +225,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✏ Отправьте описание изображения.")
 
 # ================= COMMANDS =================
+
+async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    tg_user = update.effective_user
+    user = get_user(tg_user.id)
+
+    reset_week_if_needed(user)
+    user = get_user(tg_user.id)
+
+    used = user[2]
+    bonus = user[5]
+    remaining = FREE_LIMIT + bonus - used
+
+    await update.message.reply_text(
+        f"👤 Профиль\n\n"
+        f"🆔 ID: {tg_user.id}\n"
+        f"👤 Username: @{tg_user.username}\n\n"
+        f"🎁 Бонусы: {bonus}\n"
+        f"📦 Доступно: {remaining}\n"
+        f"👥 Рефералов: {user[4]}"
+    )
+
+async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+    link = f"https://t.me/{context.bot.username}?start={user_id}"
+
+    await update.message.reply_text(
+        f"🎁 Реферальная программа\n\n"
+        f"За активного пользователя вы получаете +1 генерацию.\n\n"
+        f"Ваша ссылка:\n{link}"
+    )
+
+async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["chat_mode"] = True
+    await update.message.reply_text("💬 Напишите сообщение для ChatGPT")
 
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -255,6 +289,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user = get_user(user_id)
 
+    if context.user_data.get("chat_mode"):
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": text}]
+        )
+
+        await update.message.reply_text(response.choices[0].message.content)
+        return
+
     if context.user_data.get("image_mode"):
 
         remaining = FREE_LIMIT + user[5] - user[2]
@@ -271,9 +315,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         size = context.user_data.get("size", "1024x1024")
 
-        status_message = await update.message.reply_text(
-            "🎨 Генерация изображения..."
-        )
+        status = await update.message.reply_text("🎨 Генерация изображения...")
 
         active_generations[user_id] = True
 
@@ -282,7 +324,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "prompt": text,
             "size": size,
             "user_id": user_id,
-            "status": status_message
+            "status": status
         })
 
         cursor.execute(
@@ -298,7 +340,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TG_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("account", account))
+app.add_handler(CommandHandler("ref", ref))
+app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("photo", photo))
+
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
@@ -306,6 +352,9 @@ async def set_commands(app):
 
     await app.bot.set_my_commands([
         BotCommand("start", "Запуск"),
+        BotCommand("account", "Профиль"),
+        BotCommand("ref", "Реферальная программа"),
+        BotCommand("uu", "Чат GPT"),
         BotCommand("photo", "Создать изображение"),
     ])
 
