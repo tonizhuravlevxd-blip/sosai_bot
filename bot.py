@@ -32,6 +32,12 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
+# ================= PRO =================
+
+MAX_WORKERS = 3
+generation_queue = asyncio.Queue()
+active_generations = {}
+
 # ================= АНТИ-СПАМ =================
 
 RATE_LIMIT_SECONDS = 2
@@ -93,9 +99,48 @@ def activate_user_if_needed(user):
             )
             conn.commit()
 
+# ================= GENERATION WORKER =================
+
+async def generation_worker():
+
+    while True:
+
+        job = await generation_queue.get()
+
+        update = job["update"]
+        prompt = job["prompt"]
+        size = job["size"]
+        user_id = job["user_id"]
+        status_message = job["status"]
+
+        try:
+
+            img = client.images.generate(
+                model="gpt-image-1",
+                prompt=prompt,
+                size=size
+            )
+
+            image_bytes = base64.b64decode(img.data[0].b64_json)
+
+            await status_message.delete()
+            await update.message.reply_photo(photo=image_bytes)
+
+        except Exception as e:
+
+            await update.message.reply_text(
+                "⚠ Ошибка генерации. Попробуйте еще раз."
+            )
+
+        finally:
+
+            active_generations.pop(user_id, None)
+            generation_queue.task_done()
+
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
     ref_id = None
 
@@ -117,6 +162,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = get_user(user.id)
 
     if db_user[3] == 0:
+
         terms_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📄 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
             [InlineKeyboardButton("💰 Публичная оферта", url=OFFER_URL)],
@@ -130,23 +176,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к NANO BANANA 2."
+        "🚀 Sosai bot дает вам БЕСПЛАТНЫЕ генерации и доступ к Nano Banana."
     )
 
 # ================= CALLBACK =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
     await query.answer()
 
     if query.data == "accept_terms":
+
         cursor.execute("UPDATE users SET accepted_terms=1 WHERE user_id=?", (query.from_user.id,))
         conn.commit()
+
         await query.edit_message_text("✅ Условия приняты.")
 
     elif query.data.startswith("model_"):
-        model = query.data.replace("model_", "")
-        context.user_data["model"] = model
+
+        model_map = {
+            "model_flash": "flash",
+            "model_banana1": "banana1",
+            "model_banana2": "banana2"
+        }
+
+        context.user_data["model"] = model_map.get(query.data, "banana2")
 
         size_keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📱 9:16", callback_data="size_9_16")],
@@ -155,12 +210,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
 
         await query.edit_message_text(
-            f"✅ Вы выбрали модель:\n<b>{model}</b>\n\nТеперь выберите формат:",
-            reply_markup=size_keyboard,
-            parse_mode="HTML"
+            "📐 Выберите формат изображения:",
+            reply_markup=size_keyboard
         )
 
     elif query.data.startswith("size_"):
+
         size_map = {
             "size_9_16": "1024x1792",
             "size_16_9": "1792x1024",
@@ -170,48 +225,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["size"] = size_map[query.data]
         context.user_data["image_mode"] = True
 
-        await query.edit_message_text("📩 Теперь отправьте описание изображения.")
+        await query.edit_message_text("✏ Отправьте описание изображения.")
 
 # ================= COMMANDS =================
 
-async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    tg_user = update.effective_user
-    user = get_user(tg_user.id)
-
-    reset_week_if_needed(user)
-    user = get_user(tg_user.id)
-
-    used = user[2]
-    bonus = user[5]
-    remaining = FREE_LIMIT + bonus - used
-
-    await update.message.reply_text(
-        f"👤 Профиль\n\n"
-        f"🆔 ID: {tg_user.id}\n"
-        f"👤 Username: @{tg_user.username}\n\n"
-        f"🎁 Бонусы: {bonus}\n"
-        f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user[4]}"
-    )
-
-async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    link = f"https://t.me/{context.bot.username}?start={user_id}"
-
-    await update.message.reply_text(
-        f"🎁 Реферальная программа\n\n"
-        f"За активного пользователя вы получаете +1 генерацию.\n\n"
-        f"Ваша ссылка:\n{link}"
-    )
-
-async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["chat_mode"] = True
-    await update.message.reply_text("💬 Напишите сообщение для ChatGPT")
-
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     model_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Flash 3.1", callback_data="model_Flash 3.1")],
-        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_Nano Banana 2")]
+        [InlineKeyboardButton("⚡ Flash 3.1", callback_data="model_flash")],
+        [InlineKeyboardButton("🍌 Nano Banana 1", callback_data="model_banana1")],
+        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_banana2")]
     ])
 
     await update.message.reply_text(
@@ -226,83 +249,41 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     if not check_rate_limit(user_id):
-        await update.message.reply_text("⏳ Не так быстро. Подождите 2 секунды.")
-        return
-
-    if context.user_data.get("generating"):
-        await update.message.reply_text("⚠ Подождите завершения текущей генерации.")
+        await update.message.reply_text("⏳ Подождите 2 секунды.")
         return
 
     text = update.message.text
     user = get_user(user_id)
 
-    # ===== CHAT =====
-    if context.user_data.get("chat_mode"):
-        context.user_data["generating"] = True
-        activate_user_if_needed(user)
-
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": text}]
-        )
-
-        await update.message.reply_text(response.choices[0].message.content)
-
-        context.user_data["generating"] = False
-        return
-
-    # ===== IMAGE =====
     if context.user_data.get("image_mode"):
 
         remaining = FREE_LIMIT + user[5] - user[2]
+
         if remaining <= 0:
             await update.message.reply_text("❌ Лимит исчерпан.")
             return
 
-        context.user_data["generating"] = True
+        if user_id in active_generations:
+            await update.message.reply_text("⚠ Генерация уже выполняется.")
+            return
+
         activate_user_if_needed(user)
 
-        selected_model = context.user_data.get("model", "Nano Banana 2")
-        selected_size = context.user_data.get("size", "1024x1024")
-
-        await context.bot.send_chat_action(
-            chat_id=update.effective_chat.id,
-            action="upload_photo"
-        )
+        size = context.user_data.get("size", "1024x1024")
 
         status_message = await update.message.reply_text(
-            f"<b>{selected_model}</b>\nсоздает шедевр, пожалуйста подождите.",
-            parse_mode="HTML"
+            "🎨 Генерация изображения..."
         )
 
-        async def animate():
-            dots = 0
-            while True:
-                dots = (dots % 3) + 1
-                await asyncio.sleep(0.6)
-                try:
-                    await status_message.edit_text(
-                        f"<b>{selected_model}</b>\nсоздает шедевр, пожалуйста подождите{'.' * dots}",
-                        parse_mode="HTML"
-                    )
-                except:
-                    break
+        active_generations[user_id] = True
 
-        animation_task = asyncio.create_task(animate())
-
-        try:
-            img = client.images.generate(
-                model="gpt-image-1",
-                prompt=text,
-                size=selected_size
-            )
-        finally:
-            animation_task.cancel()
-
-        image_bytes = base64.b64decode(img.data[0].b64_json)
-
-        await status_message.delete()
-        await update.message.reply_photo(photo=image_bytes)
+        await generation_queue.put({
+            "update": update,
+            "prompt": text,
+            "size": size,
+            "user_id": user_id,
+            "status": status_message
+        })
 
         cursor.execute(
             "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
@@ -310,7 +291,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         conn.commit()
 
-        context.user_data["generating"] = False
         context.user_data["image_mode"] = False
 
 # ================= REGISTER =================
@@ -318,24 +298,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = ApplicationBuilder().token(TG_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("account", account))
-app.add_handler(CommandHandler("ref", ref))
-app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("photo", photo))
-
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
 async def set_commands(app):
+
     await app.bot.set_my_commands([
         BotCommand("start", "Запуск"),
-        BotCommand("account", "Профиль"),
-        BotCommand("ref", "Реферальная программа"),
-        BotCommand("uu", "Чат GPT"),
         BotCommand("photo", "Создать изображение"),
     ])
 
-app.post_init = set_commands
+async def post_init(app):
+
+    await set_commands(app)
+
+    for _ in range(MAX_WORKERS):
+        asyncio.create_task(generation_worker())
+
+app.post_init = post_init
 
 if __name__ == "__main__":
     print("🚀 Бот запущен")
