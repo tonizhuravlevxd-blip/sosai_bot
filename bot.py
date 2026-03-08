@@ -591,6 +591,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
+    # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
+
+    if "model" not in context.user_data:
+
+        await update.message.reply_text(
+            "⚠ Сначала выберите модель.\n\nВведите /photo"
+        )
+
+        return
+
     # ================= GENERATION MODE =================
 
     # защита от двойной генерации
