@@ -43,7 +43,7 @@ OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 # ================= PERFORMANCE =================
 
 MAX_WORKERS = 4
-generation_queue = asyncio.Queue()
+generation_queue = asyncio.Queue(maxsize=200)
 active_generations = {}
 db_lock = asyncio.Lock()
 
@@ -53,13 +53,10 @@ RATE_LIMIT_SECONDS = 2
 user_last_message = {}
 
 def check_rate_limit(user_id):
-
     now = time.time()
     last = user_last_message.get(user_id, 0)
-
     if now - last < RATE_LIMIT_SECONDS:
         return False
-
     user_last_message[user_id] = now
     return True
 
@@ -94,51 +91,37 @@ conn.commit()
 # ================= HELPERS =================
 
 def get_user(user_id):
-
     try:
         cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
         return cursor.fetchone()
-
     except sqlite3.OperationalError:
         time.sleep(0.1)
         cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
         return cursor.fetchone()
 
-
 def reset_week_if_needed(user):
-
     now = int(time.time())
-
     if now - user[1] > WEEK_SECONDS:
-
         cursor.execute(
             "UPDATE users SET week_start=?, image_count=0 WHERE user_id=?",
             (now, user[0])
         )
-
         conn.commit()
 
-
 async def activate_user_if_needed(user):
-
     if user[7] == 0:
-
         async with db_lock:
-
             cursor.execute(
                 "UPDATE users SET is_active=1 WHERE user_id=?",
                 (user[0],)
             )
-
             conn.commit()
 
             if user[6]:
-
                 cursor.execute(
                     "UPDATE users SET bonus_images=bonus_images+1, referrals=referrals+1 WHERE user_id=?",
                     (user[6],)
                 )
-
                 conn.commit()
 
 # ================= WORKER =================
@@ -150,6 +133,7 @@ async def generation_worker():
         job = await generation_queue.get()
 
         update = job["update"]
+        context = job["context"]
         prompt = job["prompt"]
         size = job["size"]
         model = job["model"]
@@ -163,10 +147,8 @@ async def generation_worker():
 
             if model == "banana1":
                 style = "cinematic lighting ultra realistic 8k"
-
             elif model == "banana2":
                 style = "hyper detailed masterpiece artstation quality"
-
             elif model == "flash":
                 style = "fast simple render"
 
@@ -175,9 +157,7 @@ async def generation_worker():
             images = images[:MAX_INPUT_IMAGES]
 
             if images:
-
                 upload_images = []
-
                 for img in images:
                     upload_images.append(("image.png", img))
 
@@ -187,39 +167,41 @@ async def generation_worker():
                     prompt=prompt,
                     size=size
                 )
-
             else:
-
                 result = client.images.generate(
                     model="gpt-image-1",
                     prompt=prompt,
-                    size=size,
-                    n=1
+                    size=size
                 )
 
             image_base64 = result.data[0].b64_json
             image_bytes = base64.b64decode(image_base64)
+
+            keyboard = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                    InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
+                ],
+                [
+                    InlineKeyboardButton("❌ Закончить", callback_data="finish")
+                ]
+            ])
 
             try:
                 await status.delete()
             except:
                 pass
 
-            await update.message.reply_photo(photo=image_bytes)
+            await update.message.reply_photo(
+                photo=image_bytes,
+                reply_markup=keyboard
+            )
 
         except Exception as e:
-
             logging.error(f"Generation error: {e}")
-
-            try:
-                await update.message.reply_text(
-                    "⚠ Ошибка генерации."
-                )
-            except:
-                pass
+            await update.message.reply_text("⚠ Ошибка генерации.")
 
         finally:
-
             active_generations.pop(user_id, None)
             generation_queue.task_done()
 
@@ -231,7 +213,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ref_id = None
 
     if context.args:
-
         try:
             ref_id = int(context.args[0])
         except:
@@ -240,12 +221,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db_user = get_user(user.id)
 
     if not db_user:
-
         cursor.execute(
             "INSERT INTO users (user_id, week_start, accepted_terms, ref_by) VALUES (?, ?, 0, ?)",
             (user.id, int(time.time()), ref_id)
         )
-
         conn.commit()
 
     db_user = get_user(user.id)
@@ -262,7 +241,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📜 Перед началом использования бота необходимо принять условия.",
             reply_markup=keyboard
         )
-
         return
 
     await update.message.reply_text("🚀 Sosai bot готов к генерации.")
@@ -280,46 +258,43 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "UPDATE users SET accepted_terms=1 WHERE user_id=?",
             (query.from_user.id,)
         )
-
         conn.commit()
 
         await query.edit_message_text("✅ Условия приняты.")
 
-    elif query.data.startswith("model_"):
+    elif query.data == "repeat":
 
-        model_map = {
-            "model_flash": "flash",
-            "model_banana1": "banana1",
-            "model_banana2": "banana2"
-        }
+        prompt = context.user_data.get("last_prompt")
+        images = context.user_data.get("last_images", [])
 
-        context.user_data["model"] = model_map.get(query.data)
+        if not prompt:
+            await query.message.reply_text("Нет прошлой генерации.")
+            return
 
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("📱 9:16", callback_data="size_9_16")],
-            [InlineKeyboardButton("💻 16:9", callback_data="size_16_9")],
-            [InlineKeyboardButton("⬜ 1:1", callback_data="size_1_1")]
-        ])
+        status = await query.message.reply_text("🎨 Генерация...")
 
-        await query.edit_message_text(
-            "📐 Выберите формат изображения:",
-            reply_markup=keyboard
-        )
+        await generation_queue.put({
+            "update": update,
+            "context": context,
+            "prompt": prompt,
+            "size": context.user_data.get("size","1024x1024"),
+            "model": context.user_data.get("model","banana2"),
+            "images": images,
+            "user_id": query.from_user.id,
+            "status": status
+        })
 
-    elif query.data.startswith("size_"):
+    elif query.data == "restart":
 
-        size_map = {
-            "size_9_16": "1024x1792",
-            "size_16_9": "1792x1024",
-            "size_1_1": "1024x1024"
-        }
+        context.user_data.clear()
 
-        context.user_data["size"] = size_map[query.data]
-        context.user_data["image_mode"] = True
+        await query.message.reply_text("🔄 Начните заново. Отправьте фото и описание.")
 
-        await query.edit_message_text(
-            "✏ Отправьте описание или изображения."
-        )
+    elif query.data == "finish":
+
+        context.user_data.clear()
+
+        await query.message.reply_text("✅ Сессия завершена.")
 
 # ================= PHOTO INPUT =================
 
@@ -329,23 +304,82 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["input_images"] = []
 
     if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
-
-        await update.message.reply_text(
-            "❌ Можно загрузить максимум 4 изображения."
-        )
+        await update.message.reply_text("❌ Можно загрузить максимум 4 изображения.")
         return
 
     photo = update.message.photo[-1]
     file = await photo.get_file()
 
     image_bytes = bytes(await file.download_as_bytearray())
-
     context.user_data["input_images"].append(image_bytes)
 
-    await update.message.reply_text(
-        f"📷 Загружено изображений: {len(context.user_data['input_images'])}\n"
-        f"Теперь отправьте описание."
-    )
+    caption = update.message.caption
+
+    if caption:
+
+        user_id = update.effective_user.id
+
+        context.user_data["last_prompt"] = caption
+        context.user_data["last_images"] = context.user_data["input_images"]
+
+        status = await update.message.reply_text("🎨 Генерация...")
+
+        await generation_queue.put({
+            "update": update,
+            "context": context,
+            "prompt": caption,
+            "size": context.user_data.get("size","1024x1024"),
+            "model": context.user_data.get("model","banana2"),
+            "images": context.user_data["input_images"],
+            "user_id": user_id,
+            "status": status
+        })
+
+        context.user_data["input_images"] = []
+
+    else:
+        await update.message.reply_text(
+            f"📷 Загружено изображений: {len(context.user_data['input_images'])}\nТеперь отправьте описание."
+        )
+
+# ================= TEXT =================
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    if not check_rate_limit(user_id):
+        await update.message.reply_text("⏳ Подождите 2 секунды.")
+        return
+
+    text = update.message.text
+    user = get_user(user_id)
+
+    if context.user_data.get("image_mode") or context.user_data.get("input_images"):
+
+        remaining = FREE_LIMIT + user[5] - user[2]
+
+        if remaining <= 0:
+            await update.message.reply_text("❌ Лимит исчерпан.")
+            return
+
+        context.user_data["last_prompt"] = text
+        context.user_data["last_images"] = context.user_data.get("input_images",[])
+
+        status = await update.message.reply_text("🎨 Генерация...")
+
+        await generation_queue.put({
+            "update": update,
+            "context": context,
+            "prompt": text,
+            "size": context.user_data.get("size","1024x1024"),
+            "model": context.user_data.get("model","banana2"),
+            "images": context.user_data.get("input_images",[]),
+            "user_id": user_id,
+            "status": status
+        })
+
+        context.user_data["input_images"] = []
 
 # ================= COMMANDS =================
 
@@ -375,22 +409,18 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
-
     link = f"https://t.me/{context.bot.username}?start={user_id}"
 
     await update.message.reply_text(
         f"🎁 Реферальная программа\n\n"
-        f"За активного пользователя вы получаете +1 генерацию.\n\n"
-        f"{link}"
+        f"За активного пользователя вы получаете +1 генерацию.\n\n{link}"
     )
 
 async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["chat_mode"] = True
 
-    await update.message.reply_text(
-        "💬 Напишите сообщение для ChatGPT"
-    )
+    await update.message.reply_text("💬 Напишите сообщение для ChatGPT")
 
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -404,86 +434,6 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Выберите модель генерации:",
         reply_markup=keyboard
     )
-
-# ================= TEXT =================
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user_id = update.effective_user.id
-
-    if not check_rate_limit(user_id):
-
-        await update.message.reply_text("⏳ Подождите 2 секунды.")
-        return
-
-    text = update.message.text
-
-    user = get_user(user_id)
-
-    if context.user_data.get("chat_mode"):
-
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": "Ты полезный AI ассистент."},
-                {"role": "user", "content": text}
-            ]
-        )
-
-        await update.message.reply_text(
-            response.choices[0].message.content
-        )
-
-        return
-
-    if context.user_data.get("image_mode") or context.user_data.get("input_images"):
-
-        remaining = FREE_LIMIT + user[5] - user[2]
-
-        if remaining <= 0:
-
-            await update.message.reply_text("❌ Лимит исчерпан.")
-            return
-
-        if user_id in active_generations:
-
-            await update.message.reply_text(
-                "⚠ Генерация уже выполняется."
-            )
-            return
-
-        await activate_user_if_needed(user)
-
-        size = context.user_data.get("size", "1024x1024")
-        model = context.user_data.get("model", "banana2")
-
-        status = await update.message.reply_text("🎨 Генерация...")
-
-        active_generations[user_id] = True
-
-        images = context.user_data.get("input_images", [])
-
-        await generation_queue.put({
-            "update": update,
-            "prompt": text,
-            "size": size,
-            "model": model,
-            "images": images,
-            "user_id": user_id,
-            "status": status
-        })
-
-        async with db_lock:
-
-            cursor.execute(
-                "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-                (user_id,)
-            )
-
-            conn.commit()
-
-        context.user_data["image_mode"] = False
-        context.user_data["input_images"] = []
 
 # ================= REGISTER =================
 
