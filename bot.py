@@ -173,13 +173,15 @@ async def generation_worker():
 
             images = images[:MAX_INPUT_IMAGES]
 
-            # ===== IMAGE EDIT =====
-
             if images:
+
+                upload_images = []
+                for i, img in enumerate(images):
+                    upload_images.append((f"image{i}.png", img))
 
                 result = client.images.edit(
                     model="gpt-image-1",
-                    image=images,
+                    image=upload_images,
                     prompt=prompt,
                     size=size
                 )
@@ -190,7 +192,6 @@ async def generation_worker():
                     model="gpt-image-1",
                     prompt=prompt,
                     size=size,
-                    quality="high",
                     n=1
                 )
 
@@ -337,194 +338,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    image_bytes = await file.download_as_bytearray()
+
+    image_bytes = bytes(await file.download_as_bytearray())
 
     context.user_data["input_images"].append(image_bytes)
 
     await update.message.reply_text(
         f"📷 Загружено изображений: {len(context.user_data['input_images'])}\n"
         f"Теперь отправьте описание."
-    )
-
-
-# ================= COMMANDS =================
-
-async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    tg_user = update.effective_user
-    user = get_user(tg_user.id)
-
-    reset_week_if_needed(user)
-    user = get_user(tg_user.id)
-
-    used = user[2]
-    bonus = user[5]
-    remaining = FREE_LIMIT + bonus - used
-
-    await update.message.reply_text(
-        f"👤 Профиль\n\n"
-        f"🆔 ID: {tg_user.id}\n"
-        f"👤 Username: @{tg_user.username}\n\n"
-        f"🎁 Бонусы: {bonus}\n"
-        f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user[4]}"
-    )
-
-
-async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user_id = update.effective_user.id
-    link = f"https://t.me/{context.bot.username}?start={user_id}"
-
-    await update.message.reply_text(
-        f"🎁 Реферальная программа\n\n"
-        f"За активного пользователя вы получаете +1 генерацию.\n\n"
-        f"{link}"
-    )
-
-
-async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    context.user_data["chat_mode"] = True
-
-    await update.message.reply_text(
-        "💬 Напишите сообщение для ChatGPT"
-    )
-
-
-async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Flash", callback_data="model_flash")],
-        [InlineKeyboardButton("🍌 Nano Banana 1", callback_data="model_banana1")],
-        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_banana2")]
-    ])
-
-    await update.message.reply_text(
-        "Выберите модель генерации:",
-        reply_markup=keyboard
-    )
-
-
-# ================= TEXT =================
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user_id = update.effective_user.id
-
-    if not check_rate_limit(user_id):
-        await update.message.reply_text("⏳ Подождите 2 секунды.")
-        return
-
-    text = update.message.text
-    user = get_user(user_id)
-
-    if context.user_data.get("chat_mode"):
-
-        response = client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[
-                {"role": "system", "content": "Ты полезный AI ассистент."},
-                {"role": "user", "content": text}
-            ]
-        )
-
-        await update.message.reply_text(
-            response.choices[0].message.content
-        )
-
-        return
-
-    if context.user_data.get("image_mode") or context.user_data.get("input_images"):
-
-        remaining = FREE_LIMIT + user[5] - user[2]
-
-        if remaining <= 0:
-            await update.message.reply_text("❌ Лимит исчерпан.")
-            return
-
-        if user_id in active_generations:
-            await update.message.reply_text("⚠ Генерация уже выполняется.")
-            return
-
-        await activate_user_if_needed(user)
-
-        size = context.user_data.get("size", "1024x1024")
-        model = context.user_data.get("model", "banana2")
-
-        status = await update.message.reply_text("🎨 Генерация...")
-
-        active_generations[user_id] = True
-
-        images = context.user_data.get("input_images", [])
-
-        await generation_queue.put({
-
-            "update": update,
-            "prompt": text,
-            "size": size,
-            "model": model,
-            "images": images,
-            "user_id": user_id,
-            "status": status
-
-        })
-
-        async with db_lock:
-
-            cursor.execute(
-                "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-                (user_id,)
-            )
-
-            conn.commit()
-
-        context.user_data["image_mode"] = False
-        context.user_data["input_images"] = []
-
-
-# ================= REGISTER =================
-
-app = ApplicationBuilder().token(TG_TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("account", account))
-app.add_handler(CommandHandler("ref", ref))
-app.add_handler(CommandHandler("uu", uu))
-app.add_handler(CommandHandler("photo", photo))
-
-app.add_handler(CallbackQueryHandler(button_handler))
-
-app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-
-
-async def set_commands(app):
-
-    await app.bot.set_my_commands([
-        BotCommand("start", "Запуск"),
-        BotCommand("account", "Профиль"),
-        BotCommand("ref", "Реферальная программа"),
-        BotCommand("uu", "Чат GPT"),
-        BotCommand("photo", "Создать изображение"),
-    ])
-
-
-async def post_init(app):
-
-    await set_commands(app)
-
-    for _ in range(MAX_WORKERS):
-        asyncio.create_task(generation_worker())
-
-
-app.post_init = post_init
-
-
-if __name__ == "__main__":
-
-    print("🚀 Бот запущен")
-
-    app.run_polling(
-        drop_pending_updates=True
     )
