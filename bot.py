@@ -3,6 +3,7 @@ import time
 import sqlite3
 import base64
 import asyncio
+import logging
 
 from telegram import (
     Update,
@@ -23,10 +24,18 @@ from telegram.ext import (
 from openai import OpenAI
 
 
+# ================= LOG =================
+
+logging.basicConfig(level=logging.INFO)
+
+
 # ================= ENV =================
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY не установлен")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
@@ -41,7 +50,7 @@ OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
 # ================= PRO =================
 
-MAX_WORKERS = 3
+MAX_WORKERS = 4
 generation_queue = asyncio.Queue()
 active_generations = {}
 
@@ -147,29 +156,54 @@ async def generation_worker():
             style = ""
 
             if model == "banana1":
-                style = "high quality cinematic render"
+                style = "cinematic lighting, ultra realistic, 8k"
 
             elif model == "banana2":
-                style = "ultra detailed masterpiece"
+                style = "hyper detailed masterpiece, artstation quality"
 
             elif model == "flash":
                 style = "fast simple render"
 
             prompt = style + " " + prompt
 
-            img = client.images.generate(
-                model="gpt-image-1",
-                prompt=prompt,
-                size=size
-            )
+            # ================= IMAGE EDIT =================
 
-            image_bytes = base64.b64decode(img.data[0].b64_json)
+            if images:
+
+                encoded_images = []
+
+                for img_bytes in images:
+                    encoded_images.append(
+                        base64.b64encode(img_bytes).decode()
+                    )
+
+                result = client.images.edit(
+                    model="gpt-image-1",
+                    image=encoded_images,
+                    prompt=prompt,
+                    size=size
+                )
+
+            else:
+
+                result = client.images.generate(
+                    model="gpt-image-1",
+                    prompt=prompt,
+                    size=size,
+                    quality="high",
+                    n=1
+                )
+
+            image_base64 = result.data[0].b64_json
+            image_bytes = base64.b64decode(image_base64)
 
             await status.delete()
 
             await update.message.reply_photo(photo=image_bytes)
 
-        except Exception:
+        except Exception as e:
+
+            logging.error(e)
 
             await update.message.reply_text(
                 "⚠ Ошибка генерации."
@@ -384,8 +418,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.user_data.get("chat_mode"):
 
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": text}]
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "Ты полезный AI ассистент."},
+                {"role": "user", "content": text}
+            ]
         )
 
         await update.message.reply_text(
