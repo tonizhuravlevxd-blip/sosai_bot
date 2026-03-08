@@ -23,7 +23,6 @@ from telegram.ext import (
 
 from openai import OpenAI
 
-
 logging.basicConfig(level=logging.INFO)
 
 TG_TOKEN = os.getenv("TG_TOKEN")
@@ -41,14 +40,12 @@ MAX_INPUT_IMAGES = 4
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
-
 # ================= PERFORMANCE =================
 
 MAX_WORKERS = 4
 generation_queue = asyncio.Queue()
 active_generations = {}
 db_lock = asyncio.Lock()
-
 
 # ================= RATE LIMIT =================
 
@@ -65,7 +62,6 @@ def check_rate_limit(user_id):
 
     user_last_message[user_id] = now
     return True
-
 
 # ================= DATABASE =================
 
@@ -95,12 +91,18 @@ is_active INTEGER DEFAULT 0
 
 conn.commit()
 
-
 # ================= HELPERS =================
 
 def get_user(user_id):
-    cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
-    return cursor.fetchone()
+
+    try:
+        cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+        return cursor.fetchone()
+
+    except sqlite3.OperationalError:
+        time.sleep(0.1)
+        cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,))
+        return cursor.fetchone()
 
 
 def reset_week_if_needed(user):
@@ -139,7 +141,6 @@ async def activate_user_if_needed(user):
 
                 conn.commit()
 
-
 # ================= WORKER =================
 
 async def generation_worker():
@@ -176,8 +177,9 @@ async def generation_worker():
             if images:
 
                 upload_images = []
-                for i, img in enumerate(images):
-                    upload_images.append((f"image{i}.png", img))
+
+                for img in images:
+                    upload_images.append(("image.png", img))
 
                 result = client.images.edit(
                     model="gpt-image-1",
@@ -220,7 +222,6 @@ async def generation_worker():
 
             active_generations.pop(user_id, None)
             generation_queue.task_done()
-
 
 # ================= START =================
 
@@ -265,7 +266,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text("🚀 Sosai bot готов к генерации.")
-
 
 # ================= CALLBACK =================
 
@@ -321,7 +321,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✏ Отправьте описание или изображения."
         )
 
-
 # ================= PHOTO INPUT =================
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -346,4 +345,183 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"📷 Загружено изображений: {len(context.user_data['input_images'])}\n"
         f"Теперь отправьте описание."
+    )
+
+# ================= COMMANDS =================
+
+async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    tg_user = update.effective_user
+
+    user = get_user(tg_user.id)
+    reset_week_if_needed(user)
+
+    user = get_user(tg_user.id)
+
+    used = user[2]
+    bonus = user[5]
+
+    remaining = FREE_LIMIT + bonus - used
+
+    await update.message.reply_text(
+        f"👤 Профиль\n\n"
+        f"🆔 ID: {tg_user.id}\n"
+        f"👤 Username: @{tg_user.username}\n\n"
+        f"🎁 Бонусы: {bonus}\n"
+        f"📦 Доступно: {remaining}\n"
+        f"👥 Рефералов: {user[4]}"
+    )
+
+async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    link = f"https://t.me/{context.bot.username}?start={user_id}"
+
+    await update.message.reply_text(
+        f"🎁 Реферальная программа\n\n"
+        f"За активного пользователя вы получаете +1 генерацию.\n\n"
+        f"{link}"
+    )
+
+async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["chat_mode"] = True
+
+    await update.message.reply_text(
+        "💬 Напишите сообщение для ChatGPT"
+    )
+
+async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Flash", callback_data="model_flash")],
+        [InlineKeyboardButton("🍌 Nano Banana 1", callback_data="model_banana1")],
+        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_banana2")]
+    ])
+
+    await update.message.reply_text(
+        "Выберите модель генерации:",
+        reply_markup=keyboard
+    )
+
+# ================= TEXT =================
+
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    if not check_rate_limit(user_id):
+
+        await update.message.reply_text("⏳ Подождите 2 секунды.")
+        return
+
+    text = update.message.text
+
+    user = get_user(user_id)
+
+    if context.user_data.get("chat_mode"):
+
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": "Ты полезный AI ассистент."},
+                {"role": "user", "content": text}
+            ]
+        )
+
+        await update.message.reply_text(
+            response.choices[0].message.content
+        )
+
+        return
+
+    if context.user_data.get("image_mode") or context.user_data.get("input_images"):
+
+        remaining = FREE_LIMIT + user[5] - user[2]
+
+        if remaining <= 0:
+
+            await update.message.reply_text("❌ Лимит исчерпан.")
+            return
+
+        if user_id in active_generations:
+
+            await update.message.reply_text(
+                "⚠ Генерация уже выполняется."
+            )
+            return
+
+        await activate_user_if_needed(user)
+
+        size = context.user_data.get("size", "1024x1024")
+        model = context.user_data.get("model", "banana2")
+
+        status = await update.message.reply_text("🎨 Генерация...")
+
+        active_generations[user_id] = True
+
+        images = context.user_data.get("input_images", [])
+
+        await generation_queue.put({
+            "update": update,
+            "prompt": text,
+            "size": size,
+            "model": model,
+            "images": images,
+            "user_id": user_id,
+            "status": status
+        })
+
+        async with db_lock:
+
+            cursor.execute(
+                "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
+                (user_id,)
+            )
+
+            conn.commit()
+
+        context.user_data["image_mode"] = False
+        context.user_data["input_images"] = []
+
+# ================= REGISTER =================
+
+app = ApplicationBuilder().token(TG_TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("account", account))
+app.add_handler(CommandHandler("ref", ref))
+app.add_handler(CommandHandler("uu", uu))
+app.add_handler(CommandHandler("photo", photo))
+
+app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+
+async def set_commands(app):
+
+    await app.bot.set_my_commands([
+        BotCommand("start", "Запуск"),
+        BotCommand("account", "Профиль"),
+        BotCommand("ref", "Реферальная программа"),
+        BotCommand("uu", "Чат GPT"),
+        BotCommand("photo", "Создать изображение"),
+    ])
+
+async def post_init(app):
+
+    await set_commands(app)
+
+    for _ in range(MAX_WORKERS):
+        asyncio.create_task(generation_worker())
+
+app.post_init = post_init
+
+if __name__ == "__main__":
+
+    print("🚀 Бот запущен")
+
+    app.run_polling(
+        drop_pending_updates=True
     )
