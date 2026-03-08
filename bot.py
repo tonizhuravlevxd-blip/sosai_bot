@@ -553,6 +553,28 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
+    if context.user_data.get("chat_mode"):
+
+    prompt = update.message.text
+
+    try:
+
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+
+        answer = response.choices[0].message.content
+
+        await update.message.reply_text(answer)
+
+    except Exception as e:
+
+        await update.message.reply_text("⚠ Ошибка ChatGPT")
+
+    return
     # защита от двойной генерации
     if user_id in active_generations:
         await update.message.reply_text("⏳ Ваша генерация уже выполняется")
@@ -623,22 +645,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user_id = update.effective_user.id
-
-    user = get_user(user_id)
-
-    reset_week_if_needed(user)
-
-    used = user[2]
-    bonus = user[5]
-
-    remaining = FREE_LIMIT + bonus - used
+    context.user_data["chat_mode"] = True
 
     await update.message.reply_text(
-        f"📊 Лимит генераций\n\n"
-        f"Использовано: {used}\n"
-        f"Бонус: {bonus}\n"
-        f"Доступно: {remaining}"
+        "🤖 Режим ChatGPT включен\n\n"
+        "Напишите чем вам помочь."
     )
 
 
