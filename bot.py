@@ -45,19 +45,14 @@ MAX_WORKERS = 4
 
 generation_queue = asyncio.Queue(maxsize=200)
 
-# ===== РАЗМЕРЫ ИЗОБРАЖЕНИЙ =====
 SIZE_CONFIG = {
     "square": "1024x1024",
     "wide": "1792x1024",
     "phone": "1024x1792"
 }
 
-# ===== КЭШ ГЕНЕРАЦИЙ =====
-
 generation_cache = {}
 CACHE_TIME = 3600
-
-active_generations = {}
 
 db_lock = asyncio.Lock()
 
@@ -228,6 +223,12 @@ async def generation_worker():
                     reply_markup=keyboard
                 )
 
+                cursor.execute(
+                    "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
+                    (user_id,)
+                )
+                conn.commit()
+
                 context.user_data["input_images"] = []
 
             except Exception as e:
@@ -372,28 +373,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "update": update,
             "context": context,
             "prompt": prompt,
-            "size": context.user_data.get("size", "1024x1024"),
+            "size": context.user_data.get("size","1024x1024"),
             "model": context.user_data.get("model","banana2"),
             "images": images,
             "user_id": query.from_user.id,
             "status": status
         })
-
-    elif data == "restart":
-
-        context.user_data.clear()
-
-        await query.message.reply_text(
-            "🔄 Сначала выберите модель через /photo"
-        )
-
-    elif data == "finish":
-
-        context.user_data.clear()
-
-        await query.message.reply_text(
-            "✅ Сессия завершена"
-        )
 
 
 # ================= PHOTO =================
@@ -441,7 +426,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "update": update,
             "context": context,
             "prompt": caption,
-            "size": context.user_data.get("size", "1024x1024"),
+            "size": context.user_data.get("size","1024x1024"),
             "model": context.user_data.get("model","banana2"),
             "images": context.user_data["input_images"],
             "user_id": user_id,
@@ -455,20 +440,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
-    if "model" not in context.user_data:
+    user = get_user(user_id)
+
+    reset_week_if_needed(user)
+
+    used = user[2]
+    bonus = user[5]
+
+    remaining = FREE_LIMIT + bonus - used
+
+    if remaining <= 0:
 
         await update.message.reply_text(
-            "⚠ Сначала выберите модель генерации\nВведите /photo"
+            "❌ Бесплатные генерации закончились.\n"
+            "Пригласите друзей через /ref"
         )
 
         return
 
     if not check_rate_limit(user_id):
 
-        await update.message.reply_text(
-            "⏳ Подождите 2 секунды"
-        )
-
+        await update.message.reply_text("⏳ Подождите 2 секунды")
         return
 
     text = update.message.text
@@ -486,12 +478,35 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "update": update,
         "context": context,
         "prompt": text,
-        "size": context.user_data.get("size", "1024x1024"),
+        "size": context.user_data.get("size","1024x1024"),
         "model": context.user_data.get("model","banana2"),
         "images": context.user_data.get("input_images",[]),
         "user_id": user_id,
         "status": status
     })
+
+
+# ================= UU =================
+
+async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    user = get_user(user_id)
+
+    reset_week_if_needed(user)
+
+    used = user[2]
+    bonus = user[5]
+
+    remaining = FREE_LIMIT + bonus - used
+
+    await update.message.reply_text(
+        f"📊 Лимит генераций\n\n"
+        f"Использовано: {used}\n"
+        f"Бонус: {bonus}\n"
+        f"Доступно: {remaining}"
+    )
 
 
 # ================= COMMANDS =================
@@ -556,6 +571,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("account", account))
 app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
+app.add_handler(CommandHandler("uu", uu))
 
 app.add_handler(CallbackQueryHandler(button_handler))
 
@@ -570,6 +586,7 @@ async def set_commands(app):
         BotCommand("account", "Профиль"),
         BotCommand("ref", "Реферальная программа"),
         BotCommand("photo", "Создать изображение"),
+        BotCommand("uu", "Лимит генераций")
     ])
 
 
