@@ -552,18 +552,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
+    text = update.message.text
+
+    # ================= GLOBAL ANTI SPAM =================
+
+    if not check_rate_limit(user_id):
+        await update.message.reply_text("⏳ Не так быстро. Подождите 2 секунды.")
+        return
+
+    if len(text) > 800:
+        await update.message.reply_text("⚠ Слишком длинный запрос.")
+        return
 
     # ================= CHATGPT MODE =================
-    if context.user_data.get("chat_mode"):
 
-        prompt = update.message.text
+    if context.user_data.get("chat_mode"):
 
         try:
 
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": text}
                 ]
             )
 
@@ -574,11 +584,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
 
             logging.error(f"ChatGPT error: {e}")
-            await update.message.reply_text("⚠ Ошибка ChatGPT")
+
+            await update.message.reply_text(
+                "⚠ Ошибка ChatGPT. Попробуйте позже."
+            )
 
         return
 
-    # ================= Обычная генерация =================
+    # ================= GENERATION MODE =================
 
     # защита от двойной генерации
     if user_id in active_generations:
@@ -606,11 +619,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Бесплатные генерации закончились.\n"
             "Пригласите друзей через /ref"
         )
-        return
 
-    if not check_rate_limit(user_id):
-
-        await update.message.reply_text("⏳ Подождите 2 секунды")
         return
 
     if generation_queue.full():
@@ -618,13 +627,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ Сервер перегружен. Попробуйте через несколько секунд."
         )
+
         return
 
     # блокируем генерацию
     user_generation_count[user_id] = count + 1
     active_generations.add(user_id)
-
-    text = update.message.text
 
     context.user_data["last_prompt"] = text
     context.user_data["last_images"] = context.user_data.get("input_images", [])
