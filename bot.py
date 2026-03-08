@@ -49,8 +49,8 @@ generation_queue = asyncio.Queue(maxsize=200)
 
 SIZE_CONFIG = {
     "square": "1024x1024",
-    "wide": "1792x1024",
-    "phone": "1024x1792"
+    "wide": "1536x1024",
+    "phone": "1024x1536"
 }
 
 generation_cache = {}
