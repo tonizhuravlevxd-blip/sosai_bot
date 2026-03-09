@@ -173,7 +173,7 @@ def reset_week_if_needed(user):
 async def download_fal_image(session, image_url):
 
     # retry чтобы CDN успел подготовить файл
-    for _ in range(8):
+    for _ in range(12):
 
         try:
 
@@ -236,13 +236,20 @@ async def generate_banana2_edit(prompt, images):
 
         for img in images:
 
+            # правильный upload формат
+            data = aiohttp.FormData()
+            data.add_field("file", img, filename="image.png")
+
             upload = await session.post(
                 "https://storage.fal.ai/upload",
-                data=img,
+                data=data,
                 headers={"Authorization": f"Key {FAL_KEY}"}
             )
 
             upload_data = await upload.json()
+
+            if "url" not in upload_data:
+                raise Exception(f"Fal upload error: {upload_data}")
 
             image_urls.append(upload_data["url"])
 
@@ -261,8 +268,6 @@ async def generate_banana2_edit(prompt, images):
             image_url = data["images"][0]["url"]
 
             return await download_fal_image(session, image_url)
-
-
 # ================= WORKER =================
 
 async def generation_worker():
