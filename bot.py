@@ -176,7 +176,9 @@ async def generate_banana2_text(prompt, size):
 
     payload = {
         "prompt": prompt,
-        "image_size": size
+        "image_size": size,
+        "num_images": 1,
+        "output_format": "png"
     }
 
     headers = {
@@ -196,7 +198,6 @@ async def generate_banana2_text(prompt, size):
             response_url = data["response_url"]
             status_url = data["status_url"]
 
-            # ждём генерацию
             for _ in range(120):
 
                 async with session.get(status_url, headers=headers) as s:
@@ -209,14 +210,16 @@ async def generate_banana2_text(prompt, size):
 
                             result = await r.json()
 
-                            if "images" in result:
-                                image_url = result["images"][0]["url"]
+                            images = (
+                                result.get("images")
+                                or result.get("output", {}).get("images")
+                                or result.get("data", {}).get("images")
+                            )
 
-                            elif "output" in result and "images" in result["output"]:
-                                image_url = result["output"]["images"][0]["url"]
-
-                            else:
+                            if not images:
                                 raise Exception(f"Fal bad response: {result}")
+
+                            image_url = images[0]["url"]
 
                             return await download_fal_image(session, image_url)
 
@@ -241,15 +244,22 @@ async def generate_banana2_edit(prompt, images):
 
     async with aiohttp.ClientSession() as session:
 
-        image_urls = []
+        image_inputs = []
 
         for img in images:
-            telegram_file_url = f"https://api.telegram.org/file/bot{TG_TOKEN}/{img}"
-            image_urls.append(telegram_file_url)
+
+            img_base64 = base64.b64encode(img).decode()
+
+            image_inputs.append({
+                "data": img_base64,
+                "mime_type": "image/jpeg"
+            })
 
         payload = {
             "prompt": prompt,
-            "image_urls": image_urls
+            "images": image_inputs,
+            "num_images": 1,
+            "output_format": "png"
         }
 
         async with session.post(url, json=payload, headers=headers) as resp:
@@ -274,14 +284,16 @@ async def generate_banana2_edit(prompt, images):
 
                             result = await r.json()
 
-                            if "images" in result:
-                                image_url = result["images"][0]["url"]
+                            images = (
+                                result.get("images")
+                                or result.get("output", {}).get("images")
+                                or result.get("data", {}).get("images")
+                            )
 
-                            elif "output" in result and "images" in result["output"]:
-                                image_url = result["output"]["images"][0]["url"]
-
-                            else:
+                            if not images:
                                 raise Exception(f"Fal bad response: {result}")
+
+                            image_url = images[0]["url"]
 
                             return await download_fal_image(session, image_url)
 
@@ -291,170 +303,6 @@ async def generate_banana2_edit(prompt, images):
                 await asyncio.sleep(1)
 
             raise Exception("Fal generation timeout")
-
-
-# ================= WORKER =================
-
-async def generation_worker():
-
-    while True:
-
-        job = await generation_queue.get()
-
-        update = job["update"]
-        context = job["context"]
-        prompt = job["prompt"]
-        size = job["size"]
-        model = job["model"]
-        images = job["images"]
-        user_id = job["user_id"]
-        status = job["status"]
-
-        async with generation_semaphore:
-
-            try:
-
-                style = ""
-
-                if model == "banana1":
-                    style = "cinematic lighting ultra realistic 8k"
-
-                elif model == "banana2":
-                    style = "hyper detailed masterpiece artstation quality"
-
-                elif model == "flash":
-                    style = "fast simple render"
-
-                prompt = f"{style} {prompt}"
-
-                cache_key = f"{prompt}_{model}_{size}"
-
-                cached = generation_cache.get(cache_key)
-
-                if cached and time.time() - cached["time"] < CACHE_TIME:
-
-                    try:
-                        await status.delete()
-                    except:
-                        pass
-
-                    await update.message.reply_photo(
-                        photo=cached["image"]
-                    )
-
-                    generation_queue.task_done()
-                    continue
-
-                images = images[:MAX_INPUT_IMAGES]
-
-                # ================= BANANA2 через fal =================
-
-                if model == "banana2":
-
-                    if images:
-                        image_bytes = await generate_banana2_edit(prompt, images)
-                    else:
-                        image_bytes = await generate_banana2_text(prompt, size)
-
-                # ================= OPENAI MODELS =================
-
-                else:
-
-                    if images:
-
-                        upload_images = []
-
-                        for img in images:
-                            upload_images.append(("image.png", img))
-
-                        result = client.images.edit(
-                            model="gpt-image-1",
-                            image=upload_images,
-                            prompt=prompt,
-                            size=size,
-                        )
-
-                    else:
-
-                        result = client.images.generate(
-                            model="gpt-image-1",
-                            prompt=prompt,
-                            size=size,
-                        )
-
-                    image_base64 = result.data[0].b64_json
-                    image_bytes = base64.b64decode(image_base64)
-
-                generation_cache[cache_key] = {
-                    "image": image_bytes,
-                    "time": time.time()
-                }
-
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-                        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
-                    ],
-                    [
-                        InlineKeyboardButton("❌ Закончить", callback_data="finish")
-                    ]
-                ])
-
-                try:
-                    await status.delete()
-                except:
-                    pass
-
-                await asyncio.wait_for(
-                    update.message.reply_photo(
-                        photo=image_bytes,
-                        reply_markup=keyboard
-                    ),
-                    timeout=30
-                )
-
-                async with db_lock:
-
-                    cursor.execute(
-                        "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-                        (user_id,)
-                    )
-
-                    conn.commit()
-
-                context.user_data["input_images"] = []
-                context.user_data["last_images"] = []
-
-            except Exception as e:
-
-                logging.error(f"Generation error: {e}")
-
-                error_text = str(e)
-
-                if "moderation" in error_text or "safety" in error_text:
-
-                    await update.message.reply_text(
-                        "🚫 Запрос отклонён системой безопасности.\n"
-                        "Попробуйте изменить текст или изображение."
-                    )
-
-                else:
-
-                    await update.message.reply_text(
-                        "⚠ Ошибка генерации. Попробуйте позже."
-                    )
-
-            finally:
-
-                generation_queue.task_done()
-
-                if user_id in active_generations:
-                    active_generations.remove(user_id)
-
-                if user_id in user_generation_count:
-                    user_generation_count[user_id] -= 1
-                    if user_generation_count[user_id] <= 0:
-                        del user_generation_count[user_id]
                         
 
 
