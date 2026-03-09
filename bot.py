@@ -236,21 +236,10 @@ async def generate_banana2_edit(prompt, images):
 
         for img in images:
 
-            data = aiohttp.FormData()
-            data.add_field("file", img, filename="image.png")
+            # создаём URL telegram файла
+            telegram_file_url = f"https://api.telegram.org/file/bot{TG_TOKEN}/{img}"
 
-            upload = await session.post(
-                "https://fal.run/storage/upload",
-                data=data,
-                headers={"Authorization": f"Key {FAL_KEY}"}
-            )
-
-            upload_data = await upload.json()
-
-            if "url" not in upload_data:
-                raise Exception(f"Fal upload error: {upload_data}")
-
-            image_urls.append(upload_data["url"])
+            image_urls.append(telegram_file_url)
 
         payload = {
             "prompt": prompt,
