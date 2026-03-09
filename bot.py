@@ -369,33 +369,34 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
-                                # ================= VIDEO GENERATION =================
+                # ================= VIDEO GENERATION =================
 
-if job.get("mode") == "video":
+                if job.get("mode") == "video":
 
-    video_bytes = await sora_generate(prompt)
+                    video_bytes = await sora_generate(prompt)
 
-    try:
-        await status.delete()
-    except:
-        pass
+                    try:
+                        await status.delete()
+                    except:
+                        pass
 
-    await update.message.reply_video(
-        video=video_bytes,
-        caption="🎬 Видео создано (Sora)"
-    )
+                    await update.message.reply_video(
+                        video=video_bytes,
+                        caption="🎬 Видео создано (Sora)"
+                    )
 
-    context.user_data["mode"] = None
+                    context.user_data["mode"] = None
 
-    generation_queue.task_done()
-    continue
+                    generation_queue.task_done()
+                    continue
+
                 # ================= FAL MODELS =================
 
                 if model in FAL_MODELS:
 
                     image_bytes = await fal_generate(model, prompt, images)
 
-                # ================= OPENAI MODELS =================
+                # ================= OPENAI IMAGE =================
 
                 else:
 
@@ -444,12 +445,9 @@ if job.get("mode") == "video":
                 except:
                     pass
 
-                await asyncio.wait_for(
-                    update.message.reply_photo(
-                        photo=image_bytes,
-                        reply_markup=keyboard
-                    ),
-                    timeout=30
+                await update.message.reply_photo(
+                    photo=image_bytes,
+                    reply_markup=keyboard
                 )
 
                 async with db_lock:
