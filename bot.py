@@ -281,20 +281,34 @@ async def sora_generate(prompt):
 
     try:
 
-        response = client.videos.create(
+        video = client.videos.create(
             model="sora-2",
             prompt=prompt,
             size="1280x720"
         )
 
-        if hasattr(response, "b64_video") and response.b64_video:
-            return base64.b64decode(response.b64_video)
+        video_id = video.id
 
-        if hasattr(response, "url") and response.url:
-            import requests
-            return requests.get(response.url).content
+        # ждём пока видео сгенерируется
+        while True:
 
-        raise Exception("Sora returned empty video")
+            result = client.videos.retrieve(video_id)
+
+            if result.status == "completed":
+                break
+
+            if result.status == "failed":
+                raise Exception("Sora rendering failed")
+
+            await asyncio.sleep(3)
+
+        # получаем файл
+        video_url = result.url
+
+        import requests
+        video_bytes = requests.get(video_url).content
+
+        return video_bytes
 
     except Exception as e:
 
