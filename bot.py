@@ -193,7 +193,7 @@ async def download_fal_image(session, image_url):
 
 async def generate_banana2_text(prompt, size):
 
-    url = "https://fal.ai/models/fal-ai/nano-banana"
+    url = "https://fal.run/fal-ai/nano-banana"
 
     payload = {
         "prompt": prompt,
@@ -223,7 +223,7 @@ async def generate_banana2_text(prompt, size):
 
 async def generate_banana2_edit(prompt, images):
 
-    url = "https://fal.ai/models/fal-ai/nano-banana/edit"
+    url = "https://fal.run/fal-ai/nano-banana/edit"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
