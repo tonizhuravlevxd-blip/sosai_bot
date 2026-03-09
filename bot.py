@@ -170,27 +170,6 @@ def reset_week_if_needed(user):
 
 # ================= FAL BANANA2 TEXT TO IMAGE =================
 
-async def download_fal_image(session, image_url):
-
-    # retry чтобы CDN успел подготовить файл
-    for _ in range(8):
-
-        try:
-
-            async with session.get(image_url) as img:
-
-                if img.status == 200:
-                    return await img.read()
-
-        except Exception as e:
-
-            logging.info(f"fal download retry: {e}")
-
-        await asyncio.sleep(1)
-
-    raise Exception("Fal CDN image download failed")
-
-
 async def generate_banana2_text(prompt, size):
 
     url = "https://queue.fal.run/fal-ai/nano-banana"
@@ -211,38 +190,35 @@ async def generate_banana2_text(prompt, size):
 
             data = await resp.json()
 
-            # если задача попала в очередь
-            if "response_url" in data:
+            if "response_url" not in data:
+                raise Exception(f"Fal error: {data}")
 
-                response_url = data["response_url"]
+            response_url = data["response_url"]
+            status_url = data["status_url"]
 
-                for _ in range(60):
+            # ждём генерацию
+            for _ in range(120):
 
-                    async with session.get(
-                        response_url,
-                        headers={"Authorization": f"Key {FAL_KEY}"}
-                    ) as r:
+                async with session.get(status_url, headers=headers) as s:
 
-                        result = await r.json()
+                    status_data = await s.json()
 
-                        if "images" in result:
+                    if status_data.get("status") == "COMPLETED":
+
+                        async with session.get(response_url, headers=headers) as r:
+
+                            result = await r.json()
 
                             image_url = result["images"][0]["url"]
 
                             return await download_fal_image(session, image_url)
 
-                    await asyncio.sleep(2)
+                    if status_data.get("status") == "FAILED":
+                        raise Exception(f"Fal generation failed: {status_data}")
 
-                raise Exception("Fal generation timeout")
+                await asyncio.sleep(1)
 
-            # если результат пришёл сразу
-            if "images" in data:
-
-                image_url = data["images"][0]["url"]
-
-                return await download_fal_image(session, image_url)
-
-            raise Exception(f"Fal error: {data}")
+            raise Exception("Fal generation timeout")
 
 
 # ================= FAL BANANA2 IMAGE TO IMAGE =================
@@ -262,9 +238,7 @@ async def generate_banana2_edit(prompt, images):
 
         for img in images:
 
-            # создаём URL telegram файла
             telegram_file_url = f"https://api.telegram.org/file/bot{TG_TOKEN}/{img}"
-
             image_urls.append(telegram_file_url)
 
         payload = {
@@ -276,38 +250,34 @@ async def generate_banana2_edit(prompt, images):
 
             data = await resp.json()
 
-            # если задача в очереди
-            if "response_url" in data:
+            if "response_url" not in data:
+                raise Exception(f"Fal error: {data}")
 
-                response_url = data["response_url"]
+            response_url = data["response_url"]
+            status_url = data["status_url"]
 
-                for _ in range(60):
+            for _ in range(120):
 
-                    async with session.get(
-                        response_url,
-                        headers={"Authorization": f"Key {FAL_KEY}"}
-                    ) as r:
+                async with session.get(status_url, headers=headers) as s:
 
-                        result = await r.json()
+                    status_data = await s.json()
 
-                        if "images" in result:
+                    if status_data.get("status") == "COMPLETED":
+
+                        async with session.get(response_url, headers=headers) as r:
+
+                            result = await r.json()
 
                             image_url = result["images"][0]["url"]
 
                             return await download_fal_image(session, image_url)
 
-                    await asyncio.sleep(2)
+                    if status_data.get("status") == "FAILED":
+                        raise Exception(f"Fal generation failed: {status_data}")
 
-                raise Exception("Fal generation timeout")
+                await asyncio.sleep(1)
 
-            # если результат сразу
-            if "images" in data:
-
-                image_url = data["images"][0]["url"]
-
-                return await download_fal_image(session, image_url)
-
-            raise Exception(f"Fal error: {data}")
+            raise Exception("Fal generation timeout")
 
 
 # ================= WORKER =================
