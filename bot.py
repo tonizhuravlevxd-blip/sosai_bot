@@ -168,6 +168,16 @@ def reset_week_if_needed(user):
 
         asyncio.create_task(update())
 
+# ================= DOWNLOAD FAL IMAGE =================
+
+async def download_fal_image(session, url):
+
+    async with session.get(url) as resp:
+
+        if resp.status != 200:
+            raise Exception(f"Failed to download image: {resp.status}")
+
+        return await resp.read()
 # ================= FAL BANANA2 TEXT TO IMAGE =================
 
 async def generate_banana2_text(prompt, size):
