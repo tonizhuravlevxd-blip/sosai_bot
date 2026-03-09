@@ -639,16 +639,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await generation_queue.put({
-            "update": update,
-            "context": context,
-            "prompt": prompt,
-            "size": context.user_data.get("size","1024x1024"),
-            "model": context.user_data.get("model","banana2"),
-            "images": images,
-            "user_id": query.from_user.id,
-            "mode": context.user_data.get("mode"),
-            "status": status
-        })
+    "update": update,
+    "context": context,
+    "prompt": text,
+    "size": context.user_data.get("size", "1024x1024"),
+    "model": context.user_data.get("model", "banana2"),
+    "images": context.user_data.get("input_images", []),
+    "user_id": user_id,
+    "mode": context.user_data.get("mode"),  # ← ВАЖНО
+    "status": status
+})
 
 
 # ================= PHOTO / TEXT HANDLERS =================
@@ -701,6 +701,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model","banana2"),
             "images": context.user_data["input_images"],
             "user_id": user_id,
+            "mode": context.user_data.get("mode"),
             "status": status
         })
 
@@ -817,6 +818,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "model": context.user_data.get("model", "banana2"),
         "images": context.user_data.get("input_images", []),
         "user_id": user_id,
+        "mode": context.user_data.get("mode"),
         "status": status
     })
 # ================= COMMANDS =================
@@ -884,7 +886,7 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["mode"] = "video"
-    context.user_data["model"] = "sora"   # ВАЖНО
+    
 
     await update.message.reply_text(
         "🎬 Режим генерации видео включен\n\n"
