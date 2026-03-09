@@ -328,40 +328,40 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
-                # ================= FAL MODELS =================
+# ================= FAL MODELS =================
 
 if model in FAL_MODELS:
 
     image_bytes = await fal_generate(model, prompt, images)
 
-                # ================= OPENAI MODELS =================
+# ================= OPENAI MODELS =================
 
-                else:
+else:
 
-                    if images:
+    if images:
 
-                        upload_images = []
+        upload_images = []
 
-                        for img in images:
-                            upload_images.append(("image.png", img))
+        for img in images:
+            upload_images.append(("image.png", img))
 
-                        result = client.images.edit(
-                            model="gpt-image-1",
-                            image=upload_images,
-                            prompt=prompt,
-                            size=size,
-                        )
+        result = client.images.edit(
+            model="gpt-image-1",
+            image=upload_images,
+            prompt=prompt,
+            size=size,
+        )
 
-                    else:
+    else:
 
-                        result = client.images.generate(
-                            model="gpt-image-1",
-                            prompt=prompt,
-                            size=size,
-                        )
+        result = client.images.generate(
+            model="gpt-image-1",
+            prompt=prompt,
+            size=size,
+        )
 
-                    image_base64 = result.data[0].b64_json
-                    image_bytes = base64.b64decode(image_base64)
+    image_base64 = result.data[0].b64_json
+    image_bytes = base64.b64decode(image_base64)
 
                 generation_cache[cache_key] = {
                     "image": image_bytes,
