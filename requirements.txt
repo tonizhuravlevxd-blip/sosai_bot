@@ -2,3 +2,4 @@ python-telegram-bot==21.6
 openai>=1.0.0
 flask==3.0.0
 aiohttp
+requests
