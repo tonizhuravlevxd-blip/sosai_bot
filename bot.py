@@ -280,21 +280,31 @@ async def sora_generate(prompt):
 
     try:
 
-        result = client.videos.generate(
-            model="sora-2",
-            prompt=prompt,
-            duration=8,
-            size="1280x720"
+        response = client.responses.create(
+            model="gpt-4.1",
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt}
+                    ]
+                }
+            ],
+            modalities=["video"],
+            video={
+                "duration": 8,
+                "size": "1280x720"
+            }
         )
 
-        video_base64 = result.data[0].b64_video
+        video_base64 = response.output[0].content[0].video
         video_bytes = base64.b64decode(video_base64)
 
         return video_bytes
 
     except Exception as e:
 
-        raise Exception(f"Sora generation failed: {e}")
+        raise Exception(f"Sora video error: {e}")
 
 # ================= WORKER =================
 
@@ -352,7 +362,7 @@ async def generation_worker():
 
                                 # ================= VIDEO GENERATION =================
 
-                if context.user_data.get("mode") == "video":
+                if job.get("mode") == "video":
 
                     video_bytes = await sora_generate(prompt)
 
@@ -645,6 +655,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model","banana2"),
             "images": images,
             "user_id": query.from_user.id,
+            "mode": context.user_data.get("mode"),
             "status": status
         })
 
@@ -882,6 +893,7 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["mode"] = "video"
+    context.user_data["model"] = "sora"   # ВАЖНО
 
     await update.message.reply_text(
         "🎬 Режим генерации видео включен\n\n"
