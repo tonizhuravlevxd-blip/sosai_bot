@@ -193,7 +193,7 @@ async def download_fal_image(session, image_url):
 
 async def generate_banana2_text(prompt, size):
 
-    url = "https://fal.run/fal-ai/nano-banana"
+    url = "https://queue.fal.run/fal-ai/nano-banana"
 
     payload = {
         "prompt": prompt,
@@ -223,7 +223,7 @@ async def generate_banana2_text(prompt, size):
 
 async def generate_banana2_edit(prompt, images):
 
-    url = "https://fal.run/fal-ai/nano-banana/edit"
+    url = "https://queue.fal.run/fal-ai/nano-banana/edit"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -236,13 +236,19 @@ async def generate_banana2_edit(prompt, images):
 
         for img in images:
 
+            data = aiohttp.FormData()
+            data.add_field("file", img, filename="image.png")
+
             upload = await session.post(
                 "https://storage.fal.ai/upload",
-                data=img,
+                data=data,
                 headers={"Authorization": f"Key {FAL_KEY}"}
             )
 
             upload_data = await upload.json()
+
+            if "url" not in upload_data:
+                raise Exception(f"Fal upload error: {upload_data}")
 
             image_urls.append(upload_data["url"])
 
@@ -425,6 +431,7 @@ async def generation_worker():
                     user_generation_count[user_id] -= 1
                     if user_generation_count[user_id] <= 0:
                         del user_generation_count[user_id]
+                        
 
 
 # ================= START =================
