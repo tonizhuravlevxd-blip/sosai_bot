@@ -278,7 +278,14 @@ async def generate_banana2_edit(prompt, images):
 
         return await download_fal_image(session, image_url)
 
+# ================= BANANA2 через fal =================
 
+if model == "banana2":
+
+    if images:
+        image_bytes = await generate_banana2_edit(prompt, images)
+    else:
+        image_bytes = await generate_banana2_text(prompt, size)
                 # ================= OPENAI MODELS =================
 
                 else:
