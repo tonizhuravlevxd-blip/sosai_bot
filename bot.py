@@ -240,7 +240,7 @@ async def generate_banana2_edit(prompt, images):
             data.add_field("file", img, filename="image.png")
 
             upload = await session.post(
-                ""https://fal.run/storage/upload"",
+                "https://fal.run/storage/upload",
                 data=data,
                 headers={"Authorization": f"Key {FAL_KEY}"}
             )
