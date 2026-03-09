@@ -172,7 +172,7 @@ def reset_week_if_needed(user):
 
 async def generate_banana2_text(prompt, size):
 
-    url = "https://fal.run/fal-ai/nano-banana"
+    url = "https://fal.run/fal-ai/nano-banana/edit"
 
     payload = {
         "prompt": prompt,
