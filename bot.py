@@ -5,6 +5,7 @@ import base64
 import asyncio
 import logging
 import gc
+import aiohttp
 
 from telegram import (
     Update,
