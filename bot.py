@@ -748,16 +748,40 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
+    # ================= VIDEO MODE =================
 
-    if "model" not in context.user_data:
+if context.user_data.get("mode") == "video":
 
-        await update.message.reply_text(
-            "⚠ Сначала выберите модель.\n\nВведите /photo"
-        )
+    position = get_queue_position() + 1
 
-        return
+    status = await update.message.reply_text(
+        f"⏳ Вы в очереди: {position}\n🎬 Генерация видео..."
+    )
 
+    await generation_queue.put({
+        "update": update,
+        "context": context,
+        "prompt": text,
+        "size": "1280x720",
+        "model": "sora",
+        "images": [],
+        "user_id": user_id,
+        "mode": "video",
+        "status": status
+    })
+
+    return
+
+
+# ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
+
+if "model" not in context.user_data:
+
+    await update.message.reply_text(
+        "⚠ Сначала выберите модель.\n\nВведите /photo"
+    )
+
+    return
     # ================= GENERATION MODE =================
 
     # защита от двойной генерации
