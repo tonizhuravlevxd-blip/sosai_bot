@@ -28,6 +28,7 @@ logging.basicConfig(level=logging.INFO)
 
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+FAL_KEY = os.getenv("FAL_KEY")
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY не установлен")
