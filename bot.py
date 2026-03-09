@@ -282,7 +282,7 @@ async def sora_generate(prompt):
     try:
 
         response = client.videos.create(
-            model="sora",
+            model="sora-2",
             prompt=prompt,
             size="1280x720"
         )
