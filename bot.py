@@ -209,7 +209,14 @@ async def generate_banana2_text(prompt, size):
 
                             result = await r.json()
 
-                            image_url = result["images"][0]["url"]
+                            if "images" in result:
+                                image_url = result["images"][0]["url"]
+
+                            elif "output" in result and "images" in result["output"]:
+                                image_url = result["output"]["images"][0]["url"]
+
+                            else:
+                                raise Exception(f"Fal bad response: {result}")
 
                             return await download_fal_image(session, image_url)
 
@@ -237,7 +244,6 @@ async def generate_banana2_edit(prompt, images):
         image_urls = []
 
         for img in images:
-
             telegram_file_url = f"https://api.telegram.org/file/bot{TG_TOKEN}/{img}"
             image_urls.append(telegram_file_url)
 
@@ -268,7 +274,14 @@ async def generate_banana2_edit(prompt, images):
 
                             result = await r.json()
 
-                            image_url = result["images"][0]["url"]
+                            if "images" in result:
+                                image_url = result["images"][0]["url"]
+
+                            elif "output" in result and "images" in result["output"]:
+                                image_url = result["output"]["images"][0]["url"]
+
+                            else:
+                                raise Exception(f"Fal bad response: {result}")
 
                             return await download_fal_image(session, image_url)
 
