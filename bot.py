@@ -278,6 +278,7 @@ async def generate_banana2_edit(prompt, images):
 
         return await download_fal_image(session, image_url)
 
+
                 # ================= OPENAI MODELS =================
 
                 else:
@@ -377,7 +378,6 @@ async def generate_banana2_edit(prompt, images):
                     user_generation_count[user_id] -= 1
                     if user_generation_count[user_id] <= 0:
                         del user_generation_count[user_id]
-
 
 # ================= START =================
 
