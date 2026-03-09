@@ -739,7 +739,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-    # ================= CHATGPT MODE =================
+        # ================= CHATGPT MODE =================
 
     if context.user_data.get("chat_mode"):
 
@@ -769,27 +769,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= VIDEO MODE =================
 
-if context.user_data.get("mode") == "video":
+    if context.user_data.get("mode") == "video":
 
-    position = get_queue_position() + 1
+        position = get_queue_position() + 1
 
-    status = await update.message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🎬 Генерация видео..."
-    )
+        status = await update.message.reply_text(
+            f"⏳ Вы в очереди: {position}\n🎬 Генерация видео..."
+        )
 
-    await generation_queue.put({
-        "update": update,
-        "context": context,
-        "prompt": text,
-        "size": "1280x720",
-        "model": "sora",
-        "images": [],
-        "user_id": user_id,
-        "mode": "video",
-        "status": status
-    })
+        await generation_queue.put({
+            "update": update,
+            "context": context,
+            "prompt": text,
+            "size": "1280x720",
+            "model": "sora",
+            "images": [],
+            "user_id": user_id,
+            "mode": "video",
+            "status": status
+        })
 
-    return
+        return
 
 
     # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
