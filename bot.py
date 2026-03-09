@@ -7,6 +7,8 @@ import logging
 import gc
 import aiohttp
 
+from aiohttp import TCPConnector
+
 from telegram import (
     Update,
     InlineKeyboardMarkup,
@@ -47,7 +49,16 @@ MAX_WORKERS = 4
 
 generation_queue = asyncio.Queue(maxsize=200)
 
+# ================= GLOBAL HTTP SESSION (fix for Render DNS) =================
 
+connector = TCPConnector(
+    ttl_dns_cache=300,
+    limit=100
+)
+
+http_session = aiohttp.ClientSession(connector=connector)
+
+# ============================================================================
 
 SIZE_CONFIG = {
     "square": "1024x1024",
@@ -154,7 +165,6 @@ def reset_week_if_needed(user):
 
     if now - user[1] > WEEK_SECONDS:
 
-        # защита от database locked
         async def update():
 
             async with db_lock:
@@ -168,11 +178,11 @@ def reset_week_if_needed(user):
 
         asyncio.create_task(update())
 
+
 # ================= FAL BANANA2 TEXT TO IMAGE =================
 
 async def download_fal_image(session, image_url):
 
-    # retry чтобы CDN успел подготовить файл
     for _ in range(12):
 
         try:
@@ -205,18 +215,18 @@ async def generate_banana2_text(prompt, size):
         "Content-Type": "application/json"
     }
 
-    async with aiohttp.ClientSession() as session:
+    session = http_session
 
-        async with session.post(url, json=payload, headers=headers) as resp:
+    async with session.post(url, json=payload, headers=headers) as resp:
 
-            data = await resp.json()
+        data = await resp.json()
 
-            if "images" not in data:
-                raise Exception(f"Fal error: {data}")
+        if "images" not in data:
+            raise Exception(f"Fal error: {data}")
 
-            image_url = data["images"][0]["url"]
+        image_url = data["images"][0]["url"]
 
-            return await download_fal_image(session, image_url)
+        return await download_fal_image(session, image_url)
 
 
 # ================= FAL BANANA2 IMAGE TO IMAGE =================
@@ -230,106 +240,43 @@ async def generate_banana2_edit(prompt, images):
         "Content-Type": "application/json"
     }
 
-    async with aiohttp.ClientSession() as session:
+    session = http_session
 
-        image_urls = []
+    image_urls = []
 
-        for img in images:
+    for img in images:
 
-            # правильный upload формат
-            data = aiohttp.FormData()
-            data.add_field("file", img, filename="image.png")
+        data = aiohttp.FormData()
+        data.add_field("file", img, filename="image.png")
 
-            upload = await session.post(
-                "https://storage.fal.ai/upload",
-                data=data,
-                headers={"Authorization": f"Key {FAL_KEY}"}
-            )
+        upload = await session.post(
+            "https://storage.fal.ai/upload",
+            data=data,
+            headers={"Authorization": f"Key {FAL_KEY}"}
+        )
 
-            upload_data = await upload.json()
+        upload_data = await upload.json()
 
-            if "url" not in upload_data:
-                raise Exception(f"Fal upload error: {upload_data}")
+        if "url" not in upload_data:
+            raise Exception(f"Fal upload error: {upload_data}")
 
-            image_urls.append(upload_data["url"])
+        image_urls.append(upload_data["url"])
 
-        payload = {
-            "prompt": prompt,
-            "image_urls": image_urls
-        }
+    payload = {
+        "prompt": prompt,
+        "image_urls": image_urls
+    }
 
-        async with session.post(url, json=payload, headers=headers) as resp:
+    async with session.post(url, json=payload, headers=headers) as resp:
 
-            data = await resp.json()
+        data = await resp.json()
 
-            if "images" not in data:
-                raise Exception(f"Fal error: {data}")
+        if "images" not in data:
+            raise Exception(f"Fal error: {data}")
 
-            image_url = data["images"][0]["url"]
+        image_url = data["images"][0]["url"]
 
-            return await download_fal_image(session, image_url)
-# ================= WORKER =================
-
-async def generation_worker():
-
-    while True:
-
-        job = await generation_queue.get()
-
-        update = job["update"]
-        context = job["context"]
-        prompt = job["prompt"]
-        size = job["size"]
-        model = job["model"]
-        images = job["images"]
-        user_id = job["user_id"]
-        status = job["status"]
-
-        async with generation_semaphore:
-
-            try:
-
-                style = ""
-
-                if model == "banana1":
-                    style = "cinematic lighting ultra realistic 8k"
-
-                elif model == "banana2":
-                    style = "hyper detailed masterpiece artstation quality"
-
-                elif model == "flash":
-                    style = "fast simple render"
-
-                prompt = f"{style} {prompt}"
-
-                cache_key = f"{prompt}_{model}_{size}"
-
-                cached = generation_cache.get(cache_key)
-
-                if cached and time.time() - cached["time"] < CACHE_TIME:
-
-                    try:
-                        await status.delete()
-                    except:
-                        pass
-
-                    await update.message.reply_photo(
-                        photo=cached["image"]
-                    )
-
-                    generation_queue.task_done()
-                    continue
-
-                images = images[:MAX_INPUT_IMAGES]
-
-                # ================= BANANA2 через fal =================
-
-                if model == "banana2":
-
-                    if images:
-                        image_bytes = await generate_banana2_edit(prompt, images)
-                    else:
-                        image_bytes = await generate_banana2_text(prompt, size)
+        return await download_fal_image(session, image_url)
 
                 # ================= OPENAI MODELS =================
 
