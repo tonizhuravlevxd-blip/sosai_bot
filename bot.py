@@ -168,6 +168,74 @@ def reset_week_if_needed(user):
 
         asyncio.create_task(update())
 
+# ================= FAL BANANA2 TEXT TO IMAGE =================
+
+async def generate_banana2_text(prompt, size):
+
+    url = "https://fal.run/fal-ai/nano-banana"
+
+    payload = {
+        "prompt": prompt,
+        "image_size": size
+    }
+
+    headers = {
+        "Authorization": f"Key {FAL_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    async with aiohttp.ClientSession() as session:
+
+        async with session.post(url, json=payload, headers=headers) as resp:
+
+            data = await resp.json()
+
+            image_url = data["images"][0]["url"]
+
+            async with session.get(image_url) as img:
+                return await img.read()
+
+
+# ================= FAL BANANA2 IMAGE TO IMAGE =================
+
+async def generate_banana2_edit(prompt, images):
+
+    url = "https://fal.run/fal-ai/nano-banana/edit"
+
+    headers = {
+        "Authorization": f"Key {FAL_KEY}"
+    }
+
+    # загрузим изображения временно
+    image_urls = []
+
+    async with aiohttp.ClientSession() as session:
+
+        for img in images:
+
+            upload = await session.post(
+                "https://storage.fal.ai/upload",
+                data=img,
+                headers={"Authorization": f"Key {FAL_KEY}"}
+            )
+
+            upload_data = await upload.json()
+            image_urls.append(upload_data["url"])
+
+        payload = {
+            "prompt": prompt,
+            "image_urls": image_urls
+        }
+
+        async with session.post(url, json=payload, headers=headers) as resp:
+
+            data = await resp.json()
+
+            image_url = data["images"][0]["url"]
+
+            async with session.get(image_url) as img:
+                return await img.read()
+
 
 # ================= WORKER =================
 
@@ -223,32 +291,40 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
-                if images:
+                # ================= BANANA2 через fal =================
 
-                    upload_images = []
+                if model == "banana2":
 
-                    for img in images:
-                        upload_images.append(("image.png", img))
+                    image_bytes = await generate_banana2(prompt, size)
 
-                    result = client.images.edit(
-    model="gpt-image-1",
-    image=upload_images,
-    prompt=prompt,
-    size=size,
-    
-)
+                # ================= OPENAI MODELS =================
 
                 else:
 
-                    result = client.images.generate(
-    model="gpt-image-1",
-    prompt=prompt,
-    size=size,
-    
-)
+                    if images:
 
-                image_base64 = result.data[0].b64_json
-                image_bytes = base64.b64decode(image_base64)
+                        upload_images = []
+
+                        for img in images:
+                            upload_images.append(("image.png", img))
+
+                        result = client.images.edit(
+                            model="gpt-image-1",
+                            image=upload_images,
+                            prompt=prompt,
+                            size=size,
+                        )
+
+                    else:
+
+                        result = client.images.generate(
+                            model="gpt-image-1",
+                            prompt=prompt,
+                            size=size,
+                        )
+
+                    image_base64 = result.data[0].b64_json
+                    image_bytes = base64.b64decode(image_base64)
 
                 generation_cache[cache_key] = {
                     "image": image_bytes,
@@ -278,7 +354,6 @@ async def generation_worker():
                     timeout=30
                 )
 
-                # безопасное обновление БД
                 async with db_lock:
 
                     cursor.execute(
@@ -288,7 +363,6 @@ async def generation_worker():
 
                     conn.commit()
 
-                # очистка изображений
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
 
