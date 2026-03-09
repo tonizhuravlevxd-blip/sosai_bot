@@ -174,16 +174,16 @@ async def generate_banana2_text(prompt, size):
 
     url = "https://queue.fal.run/fal-ai/nano-banana"
 
-    payload = {
-        "prompt": prompt,
-        "image_size": size,
-        "num_images": 1,
-        "output_format": "png"
-    }
-
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
+    }
+
+    payload = {
+        "prompt": prompt,
+        "num_images": 1,
+        "output_format": "png",
+        "safety_tolerance": 5
     }
 
     async with aiohttp.ClientSession() as session:
@@ -192,11 +192,13 @@ async def generate_banana2_text(prompt, size):
 
             data = await resp.json()
 
-            if "response_url" not in data:
+            if "request_id" not in data:
                 raise Exception(f"Fal error: {data}")
 
-            response_url = data["response_url"]
-            status_url = data["status_url"]
+            request_id = data["request_id"]
+
+            status_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}/status"
+            result_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}"
 
             for _ in range(120):
 
@@ -206,15 +208,11 @@ async def generate_banana2_text(prompt, size):
 
                     if status_data.get("status") == "COMPLETED":
 
-                        async with session.get(response_url, headers=headers) as r:
+                        async with session.get(result_url, headers=headers) as r:
 
                             result = await r.json()
 
-                            images = (
-                                result.get("images")
-                                or result.get("output", {}).get("images")
-                                or result.get("data", {}).get("images")
-                            )
+                            images = result.get("images")
 
                             if not images:
                                 raise Exception(f"Fal bad response: {result}")
@@ -244,33 +242,35 @@ async def generate_banana2_edit(prompt, images):
 
     async with aiohttp.ClientSession() as session:
 
-        image_inputs = []
+        image_urls = []
 
         for img in images:
 
             img_base64 = base64.b64encode(img).decode()
 
-            image_inputs.append({
-                "data": img_base64,
-                "mime_type": "image/jpeg"
-            })
+            data_uri = f"data:image/jpeg;base64,{img_base64}"
+
+            image_urls.append(data_uri)
 
         payload = {
             "prompt": prompt,
-            "images": image_inputs,
             "num_images": 1,
-            "output_format": "png"
+            "output_format": "png",
+            "safety_tolerance": 5,
+            "image_urls": image_urls
         }
 
         async with session.post(url, json=payload, headers=headers) as resp:
 
             data = await resp.json()
 
-            if "response_url" not in data:
+            if "request_id" not in data:
                 raise Exception(f"Fal error: {data}")
 
-            response_url = data["response_url"]
-            status_url = data["status_url"]
+            request_id = data["request_id"]
+
+            status_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}/status"
+            result_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}"
 
             for _ in range(120):
 
@@ -280,15 +280,11 @@ async def generate_banana2_edit(prompt, images):
 
                     if status_data.get("status") == "COMPLETED":
 
-                        async with session.get(response_url, headers=headers) as r:
+                        async with session.get(result_url, headers=headers) as r:
 
                             result = await r.json()
 
-                            images = (
-                                result.get("images")
-                                or result.get("output", {}).get("images")
-                                or result.get("data", {}).get("images")
-                            )
+                            images = result.get("images")
 
                             if not images:
                                 raise Exception(f"Fal bad response: {result}")
