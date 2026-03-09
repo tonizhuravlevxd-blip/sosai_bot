@@ -168,6 +168,21 @@ def reset_week_if_needed(user):
 
         asyncio.create_task(update())
 
+# ================= FAL MODELS CONFIG =================
+
+FAL_MODELS = {
+
+    "banana1": {
+        "url": "https://queue.fal.run/fal-ai/nano-banana-v1",
+        "edit": True
+    },
+
+    "banana2": {
+        "url": "https://queue.fal.run/fal-ai/nano-banana",
+        "edit": True
+    }
+
+}
 # ================= DOWNLOAD FAL IMAGE =================
 
 async def download_fal_image(session, url):
@@ -178,72 +193,17 @@ async def download_fal_image(session, url):
             raise Exception(f"Failed to download image: {resp.status}")
 
         return await resp.read()
-# ================= FAL BANANA2 TEXT TO IMAGE =================
+# ================= UNIVERSAL FAL GENERATOR =================
 
-async def generate_banana2_text(prompt, size):
+async def fal_generate(model, prompt, images=None):
 
-    url = "https://queue.fal.run/fal-ai/nano-banana"
+    model_cfg = FAL_MODELS[model]
 
-    headers = {
-        "Authorization": f"Key {FAL_KEY}",
-        "Content-Type": "application/json"
-    }
+    base_url = model_cfg["url"]
+    url = base_url
 
-    payload = {
-        "prompt": prompt,
-        "num_images": 1,
-        "output_format": "png",
-        "safety_tolerance": 5
-    }
-
-    async with aiohttp.ClientSession() as session:
-
-        async with session.post(url, json=payload, headers=headers) as resp:
-
-            data = await resp.json()
-
-            if "request_id" not in data:
-                raise Exception(f"Fal error: {data}")
-
-            request_id = data["request_id"]
-
-            status_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}/status"
-            result_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}"
-
-            for _ in range(120):
-
-                async with session.get(status_url, headers=headers) as s:
-
-                    status_data = await s.json()
-
-                    if status_data.get("status") == "COMPLETED":
-
-                        async with session.get(result_url, headers=headers) as r:
-
-                            result = await r.json()
-
-                            images = result.get("images")
-
-                            if not images:
-                                raise Exception(f"Fal bad response: {result}")
-
-                            image_url = images[0]["url"]
-
-                            return await download_fal_image(session, image_url)
-
-                    if status_data.get("status") == "FAILED":
-                        raise Exception(f"Fal generation failed: {status_data}")
-
-                await asyncio.sleep(1)
-
-            raise Exception("Fal generation timeout")
-
-
-# ================= FAL BANANA2 IMAGE TO IMAGE =================
-
-async def generate_banana2_edit(prompt, images):
-
-    url = "https://queue.fal.run/fal-ai/nano-banana/edit"
+    if images and model_cfg["edit"]:
+        url = f"{base_url}/edit"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -254,21 +214,25 @@ async def generate_banana2_edit(prompt, images):
 
         image_urls = []
 
-        for img in images:
+        if images:
 
-            img_base64 = base64.b64encode(img).decode()
+            for img in images:
 
-            data_uri = f"data:image/jpeg;base64,{img_base64}"
+                img_base64 = base64.b64encode(img).decode()
 
-            image_urls.append(data_uri)
+                data_uri = f"data:image/jpeg;base64,{img_base64}"
+
+                image_urls.append(data_uri)
 
         payload = {
             "prompt": prompt,
             "num_images": 1,
             "output_format": "png",
-            "safety_tolerance": 5,
-            "image_urls": image_urls
+            "safety_tolerance": 5
         }
+
+        if image_urls:
+            payload["image_urls"] = image_urls
 
         async with session.post(url, json=payload, headers=headers) as resp:
 
@@ -279,36 +243,36 @@ async def generate_banana2_edit(prompt, images):
 
             request_id = data["request_id"]
 
-            status_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}/status"
-            result_url = f"https://queue.fal.run/fal-ai/nano-banana/requests/{request_id}"
+        status_url = f"{base_url}/requests/{request_id}/status"
+        result_url = f"{base_url}/requests/{request_id}"
 
-            for _ in range(120):
+        for _ in range(120):
 
-                async with session.get(status_url, headers=headers) as s:
+            async with session.get(status_url, headers=headers) as s:
 
-                    status_data = await s.json()
+                status_data = await s.json()
 
-                    if status_data.get("status") == "COMPLETED":
+                if status_data.get("status") == "COMPLETED":
 
-                        async with session.get(result_url, headers=headers) as r:
+                    async with session.get(result_url, headers=headers) as r:
 
-                            result = await r.json()
+                        result = await r.json()
 
-                            images = result.get("images")
+                        images = result.get("images")
 
-                            if not images:
-                                raise Exception(f"Fal bad response: {result}")
+                        if not images:
+                            raise Exception(f"Fal bad response: {result}")
 
-                            image_url = images[0]["url"]
+                        image_url = images[0]["url"]
 
-                            return await download_fal_image(session, image_url)
+                        return await download_fal_image(session, image_url)
 
-                    if status_data.get("status") == "FAILED":
-                        raise Exception(f"Fal generation failed: {status_data}")
+                if status_data.get("status") == "FAILED":
+                    raise Exception(f"Fal generation failed: {status_data}")
 
-                await asyncio.sleep(1)
+            await asyncio.sleep(1)
 
-            raise Exception("Fal generation timeout")
+        raise Exception("Fal generation timeout")
                         
 # ================= WORKER =================
 
@@ -364,14 +328,11 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
-                # ================= BANANA2 через fal =================
+                # ================= FAL MODELS =================
 
-                if model == "banana2":
+if model in FAL_MODELS:
 
-                    if images:
-                        image_bytes = await generate_banana2_edit(prompt, images)
-                    else:
-                        image_bytes = await generate_banana2_text(prompt, size)
+    image_bytes = await fal_generate(model, prompt, images)
 
                 # ================= OPENAI MODELS =================
 
