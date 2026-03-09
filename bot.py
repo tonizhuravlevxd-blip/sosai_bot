@@ -6,6 +6,7 @@ import asyncio
 import logging
 import gc
 import aiohttp
+import requests
 
 from telegram import (
     Update,
@@ -281,16 +282,27 @@ async def sora_generate(prompt):
     try:
 
         response = client.videos.create(
-            model="sora-2",
+            model="sora",
             prompt=prompt,
-            duration=8,
             size="1280x720"
         )
 
-        video_base64 = response.data[0].b64_video
-        video_bytes = base64.b64decode(video_base64)
+        video_data = response.data[0]
 
-        return video_bytes
+        # если пришло base64 видео
+        if hasattr(video_data, "b64_video") and video_data.b64_video:
+            video_bytes = base64.b64decode(video_data.b64_video)
+            return video_bytes
+
+        # если пришел URL
+        if hasattr(video_data, "url") and video_data.url:
+
+            video_response = requests.get(video_data.url)
+            video_bytes = video_response.content
+
+            return video_bytes
+
+        raise Exception("Sora returned empty video")
 
     except Exception as e:
 
