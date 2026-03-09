@@ -211,12 +211,38 @@ async def generate_banana2_text(prompt, size):
 
             data = await resp.json()
 
-            if "images" not in data:
-                raise Exception(f"Fal error: {data}")
+            # если задача попала в очередь
+            if "response_url" in data:
 
-            image_url = data["images"][0]["url"]
+                response_url = data["response_url"]
 
-            return await download_fal_image(session, image_url)
+                for _ in range(60):
+
+                    async with session.get(
+                        response_url,
+                        headers={"Authorization": f"Key {FAL_KEY}"}
+                    ) as r:
+
+                        result = await r.json()
+
+                        if "images" in result:
+
+                            image_url = result["images"][0]["url"]
+
+                            return await download_fal_image(session, image_url)
+
+                    await asyncio.sleep(2)
+
+                raise Exception("Fal generation timeout")
+
+            # если результат пришёл сразу
+            if "images" in data:
+
+                image_url = data["images"][0]["url"]
+
+                return await download_fal_image(session, image_url)
+
+            raise Exception(f"Fal error: {data}")
 
 
 # ================= FAL BANANA2 IMAGE TO IMAGE =================
@@ -250,12 +276,38 @@ async def generate_banana2_edit(prompt, images):
 
             data = await resp.json()
 
-            if "images" not in data:
-                raise Exception(f"Fal error: {data}")
+            # если задача в очереди
+            if "response_url" in data:
 
-            image_url = data["images"][0]["url"]
+                response_url = data["response_url"]
 
-            return await download_fal_image(session, image_url)
+                for _ in range(60):
+
+                    async with session.get(
+                        response_url,
+                        headers={"Authorization": f"Key {FAL_KEY}"}
+                    ) as r:
+
+                        result = await r.json()
+
+                        if "images" in result:
+
+                            image_url = result["images"][0]["url"]
+
+                            return await download_fal_image(session, image_url)
+
+                    await asyncio.sleep(2)
+
+                raise Exception("Fal generation timeout")
+
+            # если результат сразу
+            if "images" in data:
+
+                image_url = data["images"][0]["url"]
+
+                return await download_fal_image(session, image_url)
+
+            raise Exception(f"Fal error: {data}")
 
 
 # ================= WORKER =================
