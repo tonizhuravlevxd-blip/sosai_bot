@@ -295,7 +295,10 @@ async def generation_worker():
 
                 if model == "banana2":
 
-                    image_bytes = await generate_banana2(prompt, size)
+                    if images:
+                        image_bytes = await generate_banana2_edit(prompt, images)
+                    else:
+                        image_bytes = await generate_banana2_text(prompt, size)
 
                 # ================= OPENAI MODELS =================
 
