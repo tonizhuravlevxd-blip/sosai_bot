@@ -280,24 +280,14 @@ async def sora_generate(prompt):
 
     try:
 
-        response = client.responses.create(
+        response = client.videos.generate(
             model="sora-2",
-            input=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt}
-                    ]
-                }
-            ],
-            modalities=["video"],
-            video={
-                "duration": 8,
-                "size": "1280x720"
-            }
+            prompt=prompt,
+            duration=8,
+            size="1280x720"
         )
 
-        video_base64 = response.output[0].content[0].video
+        video_base64 = response.data[0].b64_video
         video_bytes = base64.b64decode(video_base64)
 
         return video_bytes
