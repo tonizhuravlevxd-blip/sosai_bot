@@ -170,6 +170,27 @@ def reset_week_if_needed(user):
 
 # ================= FAL BANANA2 TEXT TO IMAGE =================
 
+async def download_fal_image(session, image_url):
+
+    # retry чтобы CDN успел подготовить файл
+    for _ in range(8):
+
+        try:
+
+            async with session.get(image_url) as img:
+
+                if img.status == 200:
+                    return await img.read()
+
+        except Exception as e:
+
+            logging.info(f"fal download retry: {e}")
+
+        await asyncio.sleep(1)
+
+    raise Exception("Fal CDN image download failed")
+
+
 async def generate_banana2_text(prompt, size):
 
     url = "https://fal.ai/models/fal-ai/nano-banana"
@@ -190,10 +211,12 @@ async def generate_banana2_text(prompt, size):
 
             data = await resp.json()
 
+            if "images" not in data:
+                raise Exception(f"Fal error: {data}")
+
             image_url = data["images"][0]["url"]
 
-            async with session.get(image_url) as img:
-                return await img.read()
+            return await download_fal_image(session, image_url)
 
 
 # ================= FAL BANANA2 IMAGE TO IMAGE =================
@@ -203,13 +226,13 @@ async def generate_banana2_edit(prompt, images):
     url = "https://fal.ai/models/fal-ai/nano-banana/edit"
 
     headers = {
-        "Authorization": f"Key {FAL_KEY}"
+        "Authorization": f"Key {FAL_KEY}",
+        "Content-Type": "application/json"
     }
 
-    # загрузим изображения временно
-    image_urls = []
-
     async with aiohttp.ClientSession() as session:
+
+        image_urls = []
 
         for img in images:
 
@@ -220,6 +243,7 @@ async def generate_banana2_edit(prompt, images):
             )
 
             upload_data = await upload.json()
+
             image_urls.append(upload_data["url"])
 
         payload = {
@@ -231,10 +255,12 @@ async def generate_banana2_edit(prompt, images):
 
             data = await resp.json()
 
+            if "images" not in data:
+                raise Exception(f"Fal error: {data}")
+
             image_url = data["images"][0]["url"]
 
-            async with session.get(image_url) as img:
-                return await img.read()
+            return await download_fal_image(session, image_url)
 
 
 # ================= WORKER =================
