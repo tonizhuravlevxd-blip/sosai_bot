@@ -281,7 +281,7 @@ async def sora_generate(prompt):
     try:
 
         response = client.responses.create(
-            model="gpt-4.1",
+            model="sora-2",
             input=[
                 {
                     "role": "user",
@@ -375,6 +375,7 @@ async def generation_worker():
                         video=video_bytes,
                         caption="🎬 Видео создано Sora"
                     )
+                    context.user_data["mode"] = None
 
                     generation_queue.task_done()
                     continue
