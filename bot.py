@@ -280,7 +280,7 @@ async def sora_generate(prompt):
 
     try:
 
-        response = client.videos.generate(
+        response = client.videos.create(
             model="sora-2",
             prompt=prompt,
             duration=8,
