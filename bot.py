@@ -289,15 +289,23 @@ async def sora_generate(prompt):
 
         video_id = video.id
 
-        # ждём рендер
         for _ in range(120):
 
             result = client.videos.retrieve(video_id)
 
             if result.status == "completed":
 
-                # новая структура ответа
-                video_url = result.video.url
+                video_url = None
+
+                # разные версии API
+                if hasattr(result, "output") and result.output:
+                    video_url = result.output[0].get("content_url")
+
+                elif hasattr(result, "data") and result.data:
+                    video_url = result.data[0].get("url")
+
+                if not video_url:
+                    raise Exception("Sora returned no video url")
 
                 video_bytes = requests.get(video_url).content
 
@@ -306,9 +314,9 @@ async def sora_generate(prompt):
             if result.status == "failed":
                 raise Exception("Sora rendering failed")
 
-            await asyncio.sleep(3)
+            await asyncio.sleep(4)
 
-        raise Exception("Sora timeout")
+        raise Exception("Sora generation timeout")
 
     except Exception as e:
 
