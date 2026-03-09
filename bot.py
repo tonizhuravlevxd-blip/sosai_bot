@@ -289,27 +289,26 @@ async def sora_generate(prompt):
 
         video_id = video.id
 
-        # ждём завершения генерации
+        # ждём рендер
         for _ in range(120):
 
             result = client.videos.retrieve(video_id)
 
             if result.status == "completed":
-                break
+
+                # новая структура ответа
+                video_url = result.video.url
+
+                video_bytes = requests.get(video_url).content
+
+                return video_bytes
 
             if result.status == "failed":
                 raise Exception("Sora rendering failed")
 
             await asyncio.sleep(3)
 
-        if not result.output:
-            raise Exception("Sora returned empty output")
-
-        video_url = result.output[0].url
-
-        video_bytes = requests.get(video_url).content
-
-        return video_bytes
+        raise Exception("Sora timeout")
 
     except Exception as e:
 
