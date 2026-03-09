@@ -289,8 +289,8 @@ async def sora_generate(prompt):
 
         video_id = video.id
 
-        # ждём пока видео сгенерируется
-        while True:
+        # ждём завершения генерации
+        for _ in range(120):
 
             result = client.videos.retrieve(video_id)
 
@@ -302,10 +302,11 @@ async def sora_generate(prompt):
 
             await asyncio.sleep(3)
 
-        # получаем файл
-        video_url = result.url
+        if not result.output:
+            raise Exception("Sora returned empty output")
 
-        import requests
+        video_url = result.output[0].url
+
         video_bytes = requests.get(video_url).content
 
         return video_bytes
@@ -370,23 +371,24 @@ async def generation_worker():
 
                                 # ================= VIDEO GENERATION =================
 
-                if job.get("mode") == "video":
+if job.get("mode") == "video":
 
-                    video_bytes = await sora_generate(prompt)
+    video_bytes = await sora_generate(prompt)
 
-                    try:
-                        await status.delete()
-                    except:
-                        pass
+    try:
+        await status.delete()
+    except:
+        pass
 
-                    await update.message.reply_video(
-                        video=video_bytes,
-                        caption="🎬 Видео создано Sora"
-                    )
-                    context.user_data["mode"] = None
+    await update.message.reply_video(
+        video=video_bytes,
+        caption="🎬 Видео создано (Sora)"
+    )
 
-                    generation_queue.task_done()
-                    continue
+    context.user_data["mode"] = None
+
+    generation_queue.task_done()
+    continue
                 # ================= FAL MODELS =================
 
                 if model in FAL_MODELS:
@@ -769,27 +771,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= VIDEO MODE =================
 
-    if context.user_data.get("mode") == "video":
+if context.user_data.get("mode") == "video":
 
-        position = get_queue_position() + 1
+    position = get_queue_position() + 1
 
-        status = await update.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🎬 Генерация видео..."
-        )
+    status = await update.message.reply_text(
+        f"⏳ Вы в очереди: {position}\n🎬 Генерация видео..."
+    )
 
-        await generation_queue.put({
-            "update": update,
-            "context": context,
-            "prompt": text,
-            "size": "1280x720",
-            "model": "sora",
-            "images": [],
-            "user_id": user_id,
-            "mode": "video",
-            "status": status
-        })
+    await generation_queue.put({
+        "update": update,
+        "context": context,
+        "prompt": text,
+        "size": "1280x720",
+        "model": "sora",
+        "images": [],
+        "user_id": user_id,
+        "mode": "video",
+        "status": status
+    })
 
-        return
+    return
 
 
     # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
