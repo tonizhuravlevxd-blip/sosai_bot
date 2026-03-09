@@ -289,6 +289,7 @@ async def sora_generate(prompt):
 
         video_id = video.id
 
+        # ждём генерацию
         for _ in range(120):
 
             result = client.videos.retrieve(video_id)
@@ -297,19 +298,27 @@ async def sora_generate(prompt):
 
                 video_url = None
 
-                # разные версии API
+                # правильная структура ответа OpenAI
                 if hasattr(result, "output") and result.output:
-                    video_url = result.output[0].get("content_url")
 
-                elif hasattr(result, "data") and result.data:
-                    video_url = result.data[0].get("url")
+                    output = result.output[0]
+
+                    if isinstance(output, dict):
+                        video_url = output.get("url")
+
+                    elif hasattr(output, "url"):
+                        video_url = output.url
 
                 if not video_url:
                     raise Exception("Sora returned no video url")
 
-                video_bytes = requests.get(video_url).content
+                # скачиваем видео
+                r = requests.get(video_url)
 
-                return video_bytes
+                if r.status_code != 200:
+                    raise Exception("Failed to download video")
+
+                return r.content
 
             if result.status == "failed":
                 raise Exception("Sora rendering failed")
