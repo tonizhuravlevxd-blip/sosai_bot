@@ -273,7 +273,29 @@ async def fal_generate(model, prompt, images=None):
             await asyncio.sleep(1)
 
         raise Exception("Fal generation timeout")
-                        
+
+# ================= SORA VIDEO GENERATOR =================
+
+async def sora_generate(prompt):
+
+    try:
+
+        result = client.videos.generate(
+            model="sora-2",
+            prompt=prompt,
+            duration=8,
+            size="1280x720"
+        )
+
+        video_base64 = result.data[0].b64_video
+        video_bytes = base64.b64decode(video_base64)
+
+        return video_bytes
+
+    except Exception as e:
+
+        raise Exception(f"Sora generation failed: {e}")
+
 # ================= WORKER =================
 
 async def generation_worker():
@@ -328,6 +350,24 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
+                                # ================= VIDEO GENERATION =================
+
+                if context.user_data.get("mode") == "video":
+
+                    video_bytes = await sora_generate(prompt)
+
+                    try:
+                        await status.delete()
+                    except:
+                        pass
+
+                    await update.message.reply_video(
+                        video=video_bytes,
+                        caption="🎬 Видео создано Sora"
+                    )
+
+                    generation_queue.task_done()
+                    continue
                 # ================= FAL MODELS =================
 
                 if model in FAL_MODELS:
@@ -839,7 +879,16 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎨 Выберите модель и размер изображения:",
         reply_markup=keyboard
     )
+async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    context.user_data["mode"] = "video"
+
+    await update.message.reply_text(
+        "🎬 Режим генерации видео включен\n\n"
+        "✏ Напишите описание сцены\n\n"
+        "Пример:\n"
+        "a robot walking in neon city cinematic lighting"
+    )
 
 # ================= REGISTER =================
 
@@ -849,6 +898,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("account", account))
 app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
+app.add_handler(CommandHandler("video", video))
 app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("finish", finish))
 app.add_handler(CommandHandler("restart", restart))
@@ -865,6 +915,7 @@ async def set_commands(app):
         BotCommand("start", "Запуск"),
         BotCommand("account", "Профиль"),
         BotCommand("ref", "Реферальная программа"),
+        BotCommand("video", "Создать видео"),
         BotCommand("photo", "Создать изображение"),
         BotCommand("uu", "Лимит генераций"),
         BotCommand("finish", "Закончить генерацию"),
