@@ -795,32 +795,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= CHATGPT MODE =================
 
-    if context.user_data.get("chat_mode"):
+if context.user_data.get("chat_mode"):
 
-        try:
+    try:
 
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": text}
-                ]
-            )
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "user", "content": text}
+            ]
+        )
 
-            answer = response.choices[0].message.content
+        answer = response.choices[0].message.content
 
-            await update.message.reply_text(answer)
+        await update.message.reply_text(answer)
 
-        except Exception as e:
+    except Exception as e:
 
-            logging.error(f"ChatGPT error: {e}")
+        logging.error(f"ChatGPT error: {e}")
 
-            await update.message.reply_text(
-                "⚠ Ошибка ChatGPT. Попробуйте позже."
-            )
+        await update.message.reply_text(
+            "⚠ Ошибка ChatGPT. Попробуйте позже."
+        )
 
-        return
+    return
 
-    # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
+
+# ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
 
 if context.user_data.get("mode") != "video":
 
@@ -832,68 +833,70 @@ if context.user_data.get("mode") != "video":
 
         return
 
-    # ================= GENERATION MODE =================
 
-    # защита от двойной генерации
-    if user_id in active_generations:
-        await update.message.reply_text("⏳ Ваша генерация уже выполняется")
-        return
+# ================= GENERATION MODE =================
 
-    count = user_generation_count.get(user_id, 0)
+# защита от двойной генерации
+if user_id in active_generations:
+    await update.message.reply_text("⏳ Ваша генерация уже выполняется")
+    return
 
-    if count >= MAX_USER_GENERATIONS:
-        await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
-        return
+count = user_generation_count.get(user_id, 0)
 
-    user = get_user(user_id)
+if count >= MAX_USER_GENERATIONS:
+    await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
+    return
 
-    reset_week_if_needed(user)
+user = get_user(user_id)
 
-    used = user[2]
-    bonus = user[5]
+reset_week_if_needed(user)
 
-    remaining = FREE_LIMIT + bonus - used
+used = user[2]
+bonus = user[5]
 
-    if remaining <= 0:
+remaining = FREE_LIMIT + bonus - used
 
-        await update.message.reply_text(
-            "❌ Бесплатные генерации закончились.\n"
-            "Пригласите друзей через /ref"
-        )
+if remaining <= 0:
 
-        return
-
-    if generation_queue.full():
-
-        await update.message.reply_text(
-            "⚠️ Сервер перегружен. Попробуйте через несколько секунд."
-        )
-
-        return
-
-    # блокируем генерацию
-    user_generation_count[user_id] = count + 1
-    active_generations.add(user_id)
-
-    context.user_data["last_prompt"] = text
-    context.user_data["last_images"] = context.user_data.get("input_images", [])
-
-    position = get_queue_position() + 1
-
-    status = await update.message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
+    await update.message.reply_text(
+        "❌ Бесплатные генерации закончились.\n"
+        "Пригласите друзей через /ref"
     )
 
-    await generation_queue.put({
-        "update": update,
-        "context": context,
-        "prompt": text,
-        "size": context.user_data.get("size", "1024x1024"),
-        "model": context.user_data.get("model", "banana2"),
-        "images": context.user_data.get("input_images", []),
-        "user_id": user_id,
-        "status": status
-    })
+    return
+
+if generation_queue.full():
+
+    await update.message.reply_text(
+        "⚠️ Сервер перегружен. Попробуйте через несколько секунд."
+    )
+
+    return
+
+
+# блокируем генерацию
+user_generation_count[user_id] = count + 1
+active_generations.add(user_id)
+
+context.user_data["last_prompt"] = text
+context.user_data["last_images"] = context.user_data.get("input_images", [])
+
+position = get_queue_position() + 1
+
+status = await update.message.reply_text(
+    f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
+)
+
+await generation_queue.put({
+    "update": update,
+    "context": context,
+    "prompt": text,
+    "size": context.user_data.get("size", "1024x1024"),
+    "model": context.user_data.get("model", "banana2"),
+    "images": context.user_data.get("input_images", []),
+    "user_id": user_id,
+    "status": status
+})
 # ================= COMMANDS =================
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
