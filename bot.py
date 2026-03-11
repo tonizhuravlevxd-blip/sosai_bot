@@ -866,7 +866,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-elif data == "repeat":
+
 
     prompt = context.user_data.get("last_prompt")
     images = context.user_data.get("last_images", [])
