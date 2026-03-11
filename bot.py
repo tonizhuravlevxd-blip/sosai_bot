@@ -259,12 +259,12 @@ async def fal_generate(model, prompt, images=None):
 
                         result = await r.json()
 
-                        images = result.get("images") or result.get("output")
+                        images = result.get("images")
 
                         if not images:
                             raise Exception(f"Fal bad response: {result}")
 
-                        image_url = images[0].get("url") or images[0].get("image_url")
+                        image_url = images[0]["url"]
 
                         return await download_fal_image(session, image_url)
 
@@ -865,26 +865,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
+    # блокируем генерацию
+    user_generation_count[user_id] = count + 1
+    active_generations.add(user_id)
 
-
-
-    prompt = context.user_data.get("last_prompt")
-    images = context.user_data.get("last_images", [])
-    user_id = query.from_user.id
+    context.user_data["last_prompt"] = text
+    context.user_data["last_images"] = context.user_data.get("input_images", [])
 
     position = get_queue_position() + 1
 
-    status = await query.message.reply_text(
+    status = await update.message.reply_text(
         f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
     )
 
     await generation_queue.put({
         "update": update,
         "context": context,
-        "prompt": prompt,
+        "prompt": text,
         "size": context.user_data.get("size", "1024x1024"),
         "model": context.user_data.get("model", "banana2"),
-        "images": images,
+        "images": context.user_data.get("input_images", []),
         "user_id": user_id,
         "mode": context.user_data.get("mode"),
         "status": status
@@ -1025,3 +1025,4 @@ app.post_init = post_init
 if __name__ == "__main__":
     print("🚀 Бот запущен")
     app.run_polling(drop_pending_updates=True)
+
