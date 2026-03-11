@@ -173,12 +173,12 @@ def reset_week_if_needed(user):
 FAL_MODELS = {
 
     "banana1": {
-        "url": "https://queue.fal.run/fal-ai/nano-banana-v1",
+        "url": "https://queue.fal.run/fal-ai/nano-banana",
         "edit": True
     },
 
     "banana2": {
-        "url": "https://queue.fal.run/fal-ai/nano-banana",
+        "url": "https://queue.fal.run/fal-ai/nano-banana-pro",
         "edit": True
     }
 
