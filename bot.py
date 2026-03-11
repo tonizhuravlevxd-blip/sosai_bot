@@ -183,6 +183,17 @@ FAL_MODELS = {
     }
 
 }
+
+
+# ================= FAL VIDEO MODELS =================
+
+FAL_VIDEO_MODELS = {
+
+    "sora2": {
+        "url": "https://queue.fal.run/fal-ai/sora-video"
+    }
+
+}
 # ================= DOWNLOAD FAL IMAGE =================
 
 async def download_fal_image(session, url):
@@ -273,7 +284,85 @@ async def fal_generate(model, prompt, images=None):
             await asyncio.sleep(1)
 
         raise Exception("Fal generation timeout")
-                        
+
+# ================= FAL VIDEO GENERATOR =================
+
+async def fal_video_generate(prompt, images=None):
+
+    base_url = FAL_VIDEO_MODELS["sora2"]["url"]
+
+    headers = {
+        "Authorization": f"Key {FAL_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    async with aiohttp.ClientSession() as session:
+
+        image_urls = []
+
+        if images:
+
+            for img in images:
+
+                img_base64 = base64.b64encode(img).decode()
+
+                data_uri = f"data:image/jpeg;base64,{img_base64}"
+
+                image_urls.append(data_uri)
+
+        payload = {
+            "prompt": prompt,
+            "duration": 5,
+            "aspect_ratio": "16:9"
+        }
+
+        if image_urls:
+            payload["image_urls"] = image_urls
+
+        async with session.post(base_url, json=payload, headers=headers) as resp:
+
+            data = await resp.json()
+
+            if "request_id" not in data:
+                raise Exception(f"Fal video error: {data}")
+
+            request_id = data["request_id"]
+
+        status_url = f"{base_url}/requests/{request_id}/status"
+        result_url = f"{base_url}/requests/{request_id}"
+
+        for _ in range(180):
+
+            async with session.get(status_url, headers=headers) as s:
+
+                status = await s.json()
+
+                if status.get("status") == "COMPLETED":
+
+    async with session.get(result_url, headers=headers) as r:
+
+        result = await r.json()
+
+        video_url = None
+
+        if "video" in result:
+            video_url = result["video"]["url"]
+
+        elif "videos" in result:
+            video_url = result["videos"][0]["url"]
+
+        if not video_url:
+            raise Exception(f"Fal video bad response: {result}")
+
+        async with session.get(video_url) as v:
+            return await v.read()
+
+                if status.get("status") == "FAILED":
+                    raise Exception("Sora video generation failed")
+
+            await asyncio.sleep(2)
+
+        raise Exception("Sora video timeout")
 # ================= WORKER =================
 
 async def generation_worker():
@@ -290,6 +379,8 @@ async def generation_worker():
         images = job["images"]
         user_id = job["user_id"]
         status = job["status"]
+
+        mode = job.get("mode", "image")
 
         async with generation_semaphore:
 
@@ -312,7 +403,7 @@ async def generation_worker():
 
                 cached = generation_cache.get(cache_key)
 
-                if cached and time.time() - cached["time"] < CACHE_TIME:
+                if cached and time.time() - cached["time"] < CACHE_TIME and mode != "video":
 
                     try:
                         await status.delete()
@@ -328,7 +419,31 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
-                # ================= FAL MODELS =================
+                # ================= VIDEO MODE (SORA2) =================
+
+                if mode == "video":
+
+                    video_bytes = await fal_video_generate(prompt, images)
+
+                    try:
+                        await status.delete()
+                    except:
+                        pass
+
+                    await asyncio.wait_for(
+                        update.message.reply_video(
+                            video=video_bytes
+                        ),
+                        timeout=60
+                    )
+
+                    context.user_data["input_images"] = []
+                    context.user_data["last_images"] = []
+
+                    generation_queue.task_done()
+                    continue
+
+                # ================= FAL IMAGE MODELS =================
 
                 if model in FAL_MODELS:
 
@@ -778,6 +893,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "status": status
     })
 # ================= COMMANDS =================
+async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["mode"] = "video"
+
+    await update.message.reply_text(
+        "🎬 Режим видео включён (Sora2)\n\n"
+        "Отправьте промпт или фото + текст."
+    )
 
 async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -849,6 +972,7 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("account", account))
 app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
+app.add_handler(CommandHandler("video", video))
 app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("finish", finish))
 app.add_handler(CommandHandler("restart", restart))
@@ -866,6 +990,7 @@ async def set_commands(app):
         BotCommand("account", "Профиль"),
         BotCommand("ref", "Реферальная программа"),
         BotCommand("photo", "Создать изображение"),
+        BotCommand("video", "Создать видео"),
         BotCommand("uu", "Лимит генераций"),
         BotCommand("finish", "Закончить генерацию"),
         BotCommand("restart", "Перезапустить")
