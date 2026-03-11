@@ -727,9 +727,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= PHOTO / TEXT HANDLERS =================
 # (оставлены полностью без изменений)
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    user_id = update.effective_user.id
+if context.user_data.get("mode") != "video":
 
     if "model" not in context.user_data:
 
