@@ -292,11 +292,12 @@ async def fal_generate(model, prompt, images=None):
 # ================= FAL VIDEO GENERATOR =================
 
 async def fal_video_generate(prompt, images=None):
-
     if images:
     base_url = FAL_VIDEO_MODELS["image"]["url"]
 else:
     base_url = FAL_VIDEO_MODELS["text"]["url"]
+
+    
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
