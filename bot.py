@@ -339,23 +339,23 @@ async def fal_video_generate(prompt, images=None):
 
                 if status.get("status") == "COMPLETED":
 
-    async with session.get(result_url, headers=headers) as r:
+                    async with session.get(result_url, headers=headers) as r:
 
-        result = await r.json()
+                        result = await r.json()
 
-        video_url = None
+                        video_url = None
 
-        if "video" in result:
-            video_url = result["video"]["url"]
+                        if "video" in result:
+                            video_url = result["video"]["url"]
 
-        elif "videos" in result:
-            video_url = result["videos"][0]["url"]
+                        elif "videos" in result:
+                            video_url = result["videos"][0]["url"]
 
-        if not video_url:
-            raise Exception(f"Fal video bad response: {result}")
+                        if not video_url:
+                            raise Exception(f"Fal video bad response: {result}")
 
-        async with session.get(video_url) as v:
-            return await v.read()
+                        async with session.get(video_url) as v:
+                            return await v.read()
 
                 if status.get("status") == "FAILED":
                     raise Exception("Sora video generation failed")
