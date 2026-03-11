@@ -190,7 +190,7 @@ FAL_MODELS = {
 FAL_VIDEO_MODELS = {
 
     "sora2": {
-        "url": "https://queue.fal.run/fal-ai/sora-video"
+        "url": "https://queue.fal.run/fal-ai/sora-2/text-to-video"
     }
 
 }
@@ -313,11 +313,11 @@ async def fal_video_generate(prompt, images=None):
         payload = {
             "prompt": prompt,
             "duration": 5,
-            "aspect_ratio": "16:9"
+            "resolution": "720p"
         }
 
         if image_urls:
-            payload["image_urls"] = image_urls
+            payload["image_urls"] = image_urls[0]
 
         async with session.post(base_url, json=payload, headers=headers) as resp:
 
