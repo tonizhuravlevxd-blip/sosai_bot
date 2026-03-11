@@ -316,8 +316,9 @@ async def fal_video_generate(prompt, images=None):
             "resolution": "720p"
         }
 
+        # если есть картинка — используем как стартовый кадр
         if image_urls:
-            payload["image_urls"] = image_urls[0]
+            payload["image_url"] = image_urls[0]
 
         async with session.post(base_url, json=payload, headers=headers) as resp:
 
@@ -328,10 +329,11 @@ async def fal_video_generate(prompt, images=None):
 
             request_id = data["request_id"]
 
-        status_url = f"{base_url}/requests/{request_id}/status"
-        result_url = f"{base_url}/requests/{request_id}"
+        status_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}/status"
+        result_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}"
 
-        for _ in range(180):
+        # sora-2 может генерировать долго
+        for _ in range(300):
 
             async with session.get(status_url, headers=headers) as s:
 
