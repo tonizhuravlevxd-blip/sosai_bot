@@ -793,7 +793,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-    # ================= CHATGPT MODE =================
+        # ================= CHATGPT MODE =================
 
 if context.user_data.get("chat_mode"):
 
