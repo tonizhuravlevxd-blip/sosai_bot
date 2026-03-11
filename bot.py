@@ -6,7 +6,6 @@ import asyncio
 import logging
 import gc
 import aiohttp
-import requests
 
 from telegram import (
     Update,
@@ -174,7 +173,7 @@ def reset_week_if_needed(user):
 FAL_MODELS = {
 
     "banana1": {
-        "url": "https://queue.fal.run/fal-ai/nano-banana-pro",
+        "url": "https://queue.fal.run/fal-ai/nano-banana-v1",
         "edit": True
     },
 
@@ -274,70 +273,7 @@ async def fal_generate(model, prompt, images=None):
             await asyncio.sleep(1)
 
         raise Exception("Fal generation timeout")
-
-# ================= SORA VIDEO GENERATOR =================
-
-async def sora_generate(prompt):
-
-    try:
-
-        video = client.videos.create(
-            model="sora-2",
-            prompt=prompt,
-            size="1280x720"
-        )
-
-        video_id = video.id
-
-        for _ in range(120):
-
-            result = client.videos.retrieve(video_id)
-
-            if result.status == "completed":
-
-                # ===== вариант 1: прямой URL =====
-                if hasattr(result, "output") and result.output:
-
-                    output = result.output[0]
-
-                    if isinstance(output, dict) and output.get("url"):
-
-                        r = requests.get(output["url"])
-                        return r.content
-
-                    if hasattr(output, "url"):
-
-                        r = requests.get(output.url)
-                        return r.content
-
-                    # ===== вариант 2: file_id =====
-                    if isinstance(output, dict) and output.get("file_id"):
-
-                        file_id = output["file_id"]
-
-                        file_bytes = client.files.content(file_id)
-
-                        return file_bytes.read()
-
-                    if hasattr(output, "file_id"):
-
-                        file_bytes = client.files.content(output.file_id)
-
-                        return file_bytes.read()
-
-                raise Exception("No video in response")
-
-            if result.status == "failed":
-                raise Exception("Sora rendering failed")
-
-            await asyncio.sleep(4)
-
-        raise Exception("Sora generation timeout")
-
-    except Exception as e:
-
-        raise Exception(f"Sora video error: {e}")
-
+                        
 # ================= WORKER =================
 
 async def generation_worker():
@@ -392,34 +328,13 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
-                # ================= VIDEO GENERATION =================
-
-                if job.get("mode") == "video":
-
-                    video_bytes = await sora_generate(prompt)
-
-                    try:
-                        await status.delete()
-                    except:
-                        pass
-
-                    await update.message.reply_video(
-                        video=video_bytes,
-                        caption="🎬 Видео создано (Sora)"
-                    )
-
-                    context.user_data["mode"] = None
-
-                    generation_queue.task_done()
-                    continue
-
                 # ================= FAL MODELS =================
 
                 if model in FAL_MODELS:
 
                     image_bytes = await fal_generate(model, prompt, images)
 
-                # ================= OPENAI IMAGE =================
+                # ================= OPENAI MODELS =================
 
                 else:
 
@@ -468,9 +383,12 @@ async def generation_worker():
                 except:
                     pass
 
-                await update.message.reply_photo(
-                    photo=image_bytes,
-                    reply_markup=keyboard
+                await asyncio.wait_for(
+                    update.message.reply_photo(
+                        photo=image_bytes,
+                        reply_markup=keyboard
+                    ),
+                    timeout=30
                 )
 
                 async with db_lock:
@@ -680,16 +598,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await generation_queue.put({
-    "update": update,
-    "context": context,
-    "prompt": text,
-    "size": context.user_data.get("size", "1024x1024"),
-    "model": context.user_data.get("model", "banana2"),
-    "images": context.user_data.get("input_images", []),
-    "user_id": user_id,
-    "mode": context.user_data.get("mode"),  # ← ВАЖНО
-    "status": status
-})
+            "update": update,
+            "context": context,
+            "prompt": prompt,
+            "size": context.user_data.get("size","1024x1024"),
+            "model": context.user_data.get("model","banana2"),
+            "images": images,
+            "user_id": query.from_user.id,
+            "status": status
+        })
 
 
 # ================= PHOTO / TEXT HANDLERS =================
@@ -742,7 +659,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model","banana2"),
             "images": context.user_data["input_images"],
             "user_id": user_id,
-            "mode": context.user_data.get("mode"),
             "status": status
         })
 
@@ -762,7 +678,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-        # ================= CHATGPT MODE =================
+    # ================= CHATGPT MODE =================
 
     if context.user_data.get("chat_mode"):
 
@@ -789,32 +705,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-
-    # ================= VIDEO MODE =================
-
-    if context.user_data.get("mode") == "video":
-
-        position = get_queue_position() + 1
-
-        status = await update.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🎬 Генерация видео..."
-        )
-
-        await generation_queue.put({
-            "update": update,
-            "context": context,
-            "prompt": text,
-            "size": "1280x720",
-            "model": "sora",
-            "images": [],
-            "user_id": user_id,
-            "mode": "video",
-            "status": status
-        })
-
-        return
-
-
     # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
 
     if "model" not in context.user_data:
@@ -824,7 +714,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         return
-
 
     # ================= GENERATION MODE =================
 
@@ -886,7 +775,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "model": context.user_data.get("model", "banana2"),
         "images": context.user_data.get("input_images", []),
         "user_id": user_id,
-        "mode": context.user_data.get("mode"),
         "status": status
     })
 # ================= COMMANDS =================
@@ -951,17 +839,7 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎨 Выберите модель и размер изображения:",
         reply_markup=keyboard
     )
-async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    context.user_data["mode"] = "video"
-    
-
-    await update.message.reply_text(
-        "🎬 Режим генерации видео включен\n\n"
-        "✏ Напишите описание сцены\n\n"
-        "Пример:\n"
-        "a robot walking in neon city cinematic lighting"
-    )
 
 # ================= REGISTER =================
 
@@ -971,7 +849,6 @@ app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("account", account))
 app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
-app.add_handler(CommandHandler("video", video))
 app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("finish", finish))
 app.add_handler(CommandHandler("restart", restart))
@@ -988,7 +865,6 @@ async def set_commands(app):
         BotCommand("start", "Запуск"),
         BotCommand("account", "Профиль"),
         BotCommand("ref", "Реферальная программа"),
-        BotCommand("video", "Создать видео"),
         BotCommand("photo", "Создать изображение"),
         BotCommand("uu", "Лимит генераций"),
         BotCommand("finish", "Закончить генерацию"),
