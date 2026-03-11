@@ -822,6 +822,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
 
+if context.user_data.get("mode") != "video":
+
     if "model" not in context.user_data:
 
         await update.message.reply_text(
