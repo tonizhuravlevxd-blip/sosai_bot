@@ -189,8 +189,12 @@ FAL_MODELS = {
 
 FAL_VIDEO_MODELS = {
 
-    "sora2": {
+    "text": {
         "url": "https://queue.fal.run/fal-ai/sora-2/text-to-video"
+    },
+
+    "image": {
+        "url": "https://queue.fal.run/fal-ai/sora-2/image-to-video"
     }
 
 }
@@ -289,7 +293,10 @@ async def fal_generate(model, prompt, images=None):
 
 async def fal_video_generate(prompt, images=None):
 
-    base_url = FAL_VIDEO_MODELS["sora2"]["url"]
+    if images:
+    base_url = FAL_VIDEO_MODELS["image"]["url"]
+else:
+    base_url = FAL_VIDEO_MODELS["text"]["url"]
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -317,7 +324,7 @@ async def fal_video_generate(prompt, images=None):
         }
 
         # если есть картинка — используем как стартовый кадр
-        if image_urls:
+        if images and image_urls:
             payload["image_url"] = image_urls[0]
 
         async with session.post(base_url, json=payload, headers=headers) as resp:
