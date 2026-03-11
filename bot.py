@@ -312,7 +312,7 @@ async def fal_video_generate(prompt, images=None):
 
         payload = {
             "prompt": prompt,
-            "duration": 5,
+            "duration": 4,
             "resolution": "720p"
         }
 
