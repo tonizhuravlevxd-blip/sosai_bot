@@ -727,15 +727,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= PHOTO / TEXT HANDLERS =================
 # (оставлены полностью без изменений)
 
-if context.user_data.get("mode") != "video":
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if "model" not in context.user_data:
+    user_id = update.effective_user.id
 
-        await update.message.reply_text(
-            "⚠ Сначала выберите модель\nВведите /photo"
-        )
+    if context.user_data.get("mode") != "video":
 
-        return
+        if "model" not in context.user_data:
+
+            await update.message.reply_text(
+                "⚠ Сначала выберите модель\nВведите /photo"
+            )
+
+            return
 
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
@@ -772,6 +776,7 @@ if context.user_data.get("mode") != "video":
             "model": context.user_data.get("model","banana2"),
             "images": context.user_data["input_images"],
             "user_id": user_id,
+            "mode": context.user_data.get("mode"),
             "status": status
         })
 
