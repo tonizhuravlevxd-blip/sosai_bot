@@ -739,14 +739,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("cartoon_"):
 
-    style_key = data.replace("cartoon_", "")
+        style_key = data.replace("cartoon_", "")
 
     if style_key not in CARTOON_STYLES:
         return
 
-    context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
+        context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
 
-    context.user_data["mode"] = "video"
+        context.user_data["mode"] = "video"
 
     await query.message.reply_text(
         f"🎬 Стиль выбран: {style_key.upper()}\n\n"
