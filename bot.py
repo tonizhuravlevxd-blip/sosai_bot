@@ -943,26 +943,26 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = await update.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
         )
-            allowed, msg = check_user_generation_limit(user_id)
 
-    if not allowed:
-        await update.message.reply_text(msg)
-        return
+        allowed, msg = check_user_generation_limit(user_id)
 
-    lock_user_generation(user_id)
+        if not allowed:
+            await update.message.reply_text(msg)
+            return
+
+        lock_user_generation(user_id)
 
         await generation_queue.put({
             "update": update,
             "context": context,
             "prompt": caption,
-            "size": context.user_data.get("size","1024x1024"),
-            "model": context.user_data.get("model","banana2"),
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
             "images": context.user_data["input_images"],
             "user_id": user_id,
             "mode": context.user_data.get("mode"),
             "status": status
         })
-
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
