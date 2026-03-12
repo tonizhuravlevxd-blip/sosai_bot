@@ -188,19 +188,19 @@ FAL_MODELS = {
 
 CARTOON_STYLES = {
 
-    "pixar": "Pixar 3D animation style, expressive eyes, cinematic lighting",
+    "pixar": "3D animated movie style, expressive eyes, cinematic lighting",
 
-    "disney": "Disney animation style, magical lighting, colorful fantasy",
+    "disney": "magical fantasy animation style, colorful cinematic lighting",
 
-    "anime": "Japanese anime movie style, vibrant colors",
+    "anime": "japanese anime movie style, vibrant colors, detailed animation",
 
-    "dreamworks": "DreamWorks animation style cinematic character",
+    "dreamworks": "cinematic animated character style, expressive faces",
 
-    "ghibli": "Studio Ghibli animation style soft lighting",
+    "ghibli": "soft watercolor anime style, dreamy lighting, nature atmosphere",
 
-    "simpsons": "The Simpsons cartoon style yellow skin",
+    "simpsons": "yellow skin cartoon family style, bold outlines, sitcom animation",
 
-    "rickmorty": "Rick and Morty cartoon style bold outlines"
+    "rickmorty": "crazy sci fi cartoon style, exaggerated expressions, bold lines"
 }
 
 # ================= FAL VIDEO MODELS =================
