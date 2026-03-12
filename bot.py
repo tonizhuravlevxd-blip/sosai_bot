@@ -986,18 +986,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     used = user[2]
     bonus = user[5]
 
+
     remaining = FREE_LIMIT + bonus - used
     video_used = user[3]
+
     if context.user_data.get("mode") in ["video", "cartoon"]:
 
-    if video_used >= FREE_VIDEO_LIMIT:
+        if video_used >= FREE_VIDEO_LIMIT:
 
-        await update.message.reply_text(
-            "🎬 Бесплатный лимит видео/мультфильма исчерпан.\n"
-            "Новый будет доступен через неделю."
-        )
+            await update.message.reply_text(
+                "🎬 Бесплатный лимит видео/мультфильма исчерпан.\n"
+                "Новый будет доступен через неделю."
+            )
 
-        return
+            return
 
 
 
