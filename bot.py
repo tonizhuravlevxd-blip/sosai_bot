@@ -612,7 +612,7 @@ async def generation_worker():
 
             except Exception as e:
 
-       logging.error(f"Generation error: {e}")
+               logging.error(f"Generation error: {e}")
 
        error_text = str(e)
 
