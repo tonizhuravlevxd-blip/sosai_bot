@@ -467,9 +467,12 @@ async def generation_worker():
         status = job["status"]
 
         mode = job.get("mode", "image")
-async with generation_semaphore:
+
+        async with generation_semaphore:
 
             try:
+
+                # ===== проверка лимита видео =====
 
                 user = get_user(user_id)
 
@@ -479,22 +482,19 @@ async with generation_semaphore:
 
                 if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
 
-            try:
-                await status.delete()
-            except:
-                pass
+                    try:
+                        await status.delete()
+                    except:
+                        pass
 
-            await update.message.reply_text(
-                "🎬 Лимит видео/мультфильма на неделю исчерпан."
-            )
+                    await update.message.reply_text(
+                        "🎬 Лимит видео/мультфильма на неделю исчерпан."
+                    )
 
-            generation_queue.task_done()
-            continue        
-                   
+                    generation_queue.task_done()
+                    continue
 
-        async with generation_semaphore:
-
-            try:
+                # ===== стиль генерации =====
 
                 style = ""
 
@@ -515,6 +515,7 @@ async with generation_semaphore:
                 prompt = f"{style} {prompt}"
 
                 # ================= SAFETY FILTER =================
+
                 prompt = clean_prompt(prompt)
 
                 cache_key = f"{prompt}_{model}_{size}"
