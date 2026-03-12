@@ -175,30 +175,54 @@ def clean_prompt(prompt: str):
     replacements = {
 
         # оружие
-        "стреляет": "запускает энергетический луч",
+        "стреляет": "испускает свет",
+        "стрельба": "энергетический эффект",
         "оружие": "устройство",
         "пистолет": "устройство",
+        "бластер": "фантастическое устройство",
         "gun": "device",
-        "shoot": "energy action",
+        "shoot": "light effect",
         "weapon": "device",
+        "blaster": "sci-fi device",
 
         # насилие
         "убивает": "побеждает",
         "kill": "defeat",
+        "killing": "defeating",
         "blood": "red energy",
         "кровь": "красная энергия",
 
         # бренды
-        "simpsons": "yellow cartoon family",
+        "simpsons": "yellow cartoon family style",
         "pixar": "3d animated movie style",
         "disney": "fantasy animation style",
-        "rick and morty": "crazy sci fi cartoon"
+        "rick and morty": "crazy sci fi cartoon style",
+
+        # опасные слова для sora
+        "laser": "light beam",
+        "attack": "action",
+        "battle": "scene",
+        "fight": "dynamic action",
+        "explosion": "bright flash",
     }
 
     prompt = prompt.lower()
 
     for bad, good in replacements.items():
         prompt = prompt.replace(bad, good)
+
+    # дополнительная защита
+    blocked = [
+        "kill",
+        "murder",
+        "blood",
+        "weapon",
+        "gun",
+        "shoot"
+    ]
+
+    for word in blocked:
+        prompt = prompt.replace(word, "")
 
     return prompt
 # ================= FAL MODELS CONFIG =================
