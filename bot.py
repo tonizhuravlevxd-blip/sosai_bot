@@ -467,25 +467,30 @@ async def generation_worker():
         status = job["status"]
 
         mode = job.get("mode", "image")
-                user = get_user(user_id)
+async with generation_semaphore:
 
-                reset_week_if_needed(user)
+    try:
 
-                video_used = user[3]
+        user = get_user(user_id)
 
-                if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
+        reset_week_if_needed(user)
 
-                    try:
-                        await status.delete()
-                    except:
-                        pass
+        video_used = user[3]
 
-                    await update.message.reply_text(
-                        "🎬 Лимит видео/мультфильма на неделю исчерпан."
-                    )
+        if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
 
-                    generation_queue.task_done()
-                    continue        
+            try:
+                await status.delete()
+            except:
+                pass
+
+            await update.message.reply_text(
+                "🎬 Лимит видео/мультфильма на неделю исчерпан."
+            )
+
+            generation_queue.task_done()
+            continue        
+                   
 
         async with generation_semaphore:
 
