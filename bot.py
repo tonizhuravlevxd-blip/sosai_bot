@@ -537,11 +537,42 @@ async def generation_worker():
                     continue
 
                 images = images[:MAX_INPUT_IMAGES]
+                                # ================= VIDEO MODE (SORA2) =================
 
-                # ================= VIDEO MODE (SORA2) =================
+                if mode in ["video", "cartoon"]:
 
-                if mode == "video":
+                    # резервируем слот видео (защита от обхода очереди)
+                    async with db_lock:
 
+                        cursor.execute(
+                            "SELECT video_count FROM users WHERE user_id=?",
+                            (user_id,)
+                        )
+
+                        video_used = cursor.fetchone()[0]
+
+                        if video_used >= FREE_VIDEO_LIMIT:
+
+                            try:
+                                await status.delete()
+                            except:
+                                pass
+
+                            await update.message.reply_text(
+                                "🎬 Лимит видео/мультфильма на неделю исчерпан."
+                            )
+
+                            generation_queue.task_done()
+                            continue
+
+                        cursor.execute(
+                            "UPDATE users SET video_count = video_count + 1 WHERE user_id=?",
+                            (user_id,)
+                        )
+
+                        conn.commit()
+
+                    # генерация видео
                     video_bytes = await fal_video_generate(prompt, images)
 
                     try:
@@ -556,21 +587,13 @@ async def generation_worker():
                         timeout=60
                     )
 
-                    # увеличиваем счетчик видео
-                    async with db_lock:
-
-                        cursor.execute(
-                            "UPDATE users SET video_count=video_count+1 WHERE user_id=?",
-                            (user_id,)
-                        )
-
-                        conn.commit()
-
                     context.user_data["input_images"] = []
                     context.user_data["last_images"] = []
 
                     generation_queue.task_done()
                     continue
+
+
 
                 # ================= FAL IMAGE MODELS =================
 
