@@ -515,37 +515,37 @@ async def generation_worker():
 
                 # ================= VIDEO MODE (SORA2) =================
 
-             if mode == "video":
+                if mode == "video":
 
-              video_bytes = await fal_video_generate(prompt, images)
+                    video_bytes = await fal_video_generate(prompt, images)
 
-                 try:
-                     await status.delete()
-                 except:
-                     pass
+                    try:
+                        await status.delete()
+                    except:
+                        pass
 
-                 await asyncio.wait_for(
-                     update.message.reply_video(
-                     video=video_bytes
-        ),
-        timeout=60
-    )
+                    await asyncio.wait_for(
+                        update.message.reply_video(
+                            video=video_bytes
+                        ),
+                        timeout=60
+                    )
 
-    # увеличиваем счетчик видео
-    async with db_lock:
+                    # увеличиваем счетчик видео
+                    async with db_lock:
 
-        cursor.execute(
-            "UPDATE users SET video_count=video_count+1 WHERE user_id=?",
-            (user_id,)
-        )
+                        cursor.execute(
+                            "UPDATE users SET video_count=video_count+1 WHERE user_id=?",
+                            (user_id,)
+                        )
 
-        conn.commit()
+                        conn.commit()
 
-    context.user_data["input_images"] = []
-    context.user_data["last_images"] = []
+                    context.user_data["input_images"] = []
+                    context.user_data["last_images"] = []
 
-    generation_queue.task_done()
-    continue
+                    generation_queue.task_done()
+                    continue
 
                 # ================= FAL IMAGE MODELS =================
 
