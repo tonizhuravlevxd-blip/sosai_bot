@@ -168,6 +168,39 @@ def reset_week_if_needed(user):
 
         asyncio.create_task(update())
 
+# ================= PROMPT SAFETY FILTER =================
+
+def clean_prompt(prompt: str):
+
+    replacements = {
+
+        # оружие
+        "стреляет": "запускает энергетический луч",
+        "оружие": "устройство",
+        "пистолет": "устройство",
+        "gun": "device",
+        "shoot": "energy action",
+        "weapon": "device",
+
+        # насилие
+        "убивает": "побеждает",
+        "kill": "defeat",
+        "blood": "red energy",
+        "кровь": "красная энергия",
+
+        # бренды
+        "simpsons": "yellow cartoon family",
+        "pixar": "3d animated movie style",
+        "disney": "fantasy animation style",
+        "rick and morty": "crazy sci fi cartoon"
+    }
+
+    prompt = prompt.lower()
+
+    for bad, good in replacements.items():
+        prompt = prompt.replace(bad, good)
+
+    return prompt
 # ================= FAL MODELS CONFIG =================
 
 FAL_MODELS = {
@@ -430,6 +463,9 @@ async def generation_worker():
                     prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
 
                 prompt = f"{style} {prompt}"
+
+                # ================= SAFETY FILTER =================
+                prompt = clean_prompt(prompt)
 
                 cache_key = f"{prompt}_{model}_{size}"
 
