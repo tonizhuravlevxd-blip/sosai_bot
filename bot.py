@@ -657,9 +657,7 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔄 Сессия перезапущена. Выберите модель через /photo"
     )
-
-
-# ================= CALLBACK =================
+    # ================= CALLBACK =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -733,8 +731,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["size"] = SIZE_CONFIG["phone"]
         await query.message.reply_text("📱 Вертикальное разрешение выбрано")
 
-
-
     # ================= CARTOON STYLE SELECT =================
 
     elif data.startswith("cartoon_"):
@@ -742,20 +738,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         style_key = data.replace("cartoon_", "")
 
         if style_key not in CARTOON_STYLES:
-        return
+            return
 
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
-
         context.user_data["mode"] = "video"
 
-    await query.message.reply_text(
-        f"🎬 Стиль выбран: {style_key.upper()}\n\n"
-        "📸 Теперь отправьте:\n"
-        "• фото + текст\n"
-        "или\n"
-        "• просто текст\n\n"
-        "Бот создаст мультфильм 🎥"
-    )
+        await query.message.reply_text(
+            f"🎬 Стиль выбран: {style_key.upper()}\n\n"
+            "📸 Теперь отправьте:\n"
+            "• фото + текст\n"
+            "или\n"
+            "• просто текст\n\n"
+            "Бот создаст мультфильм 🎥"
+        )
+
+
+
     elif data == "repeat":
 
         prompt = context.user_data.get("last_prompt")
