@@ -612,22 +612,22 @@ async def generation_worker():
 
             except Exception as e:
 
-                logging.error(f"Generation error: {e}")
+    logging.error(f"Generation error: {e}")
 
-                error_text = str(e)
+    error_text = str(e)
 
-                if "moderation" in error_text or "safety" in error_text:
+    if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
 
-                    await update.message.reply_text(
-                        "🚫 Запрос отклонён системой безопасности.\n"
-                        "Попробуйте изменить текст или изображение."
-                    )
+        await update.message.reply_text(
+            "⚠️ Запрос не прошёл фильтр безопасности.\n"
+            "Попробуйте изменить текст или фото."
+        )
 
-                else:
+    else:
 
-                    await update.message.reply_text(
-                        "⚠ Ошибка генерации. Попробуйте позже."
-                    )
+        await update.message.reply_text(
+            "⚠ Ошибка генерации. Попробуйте позже."
+        )
 
             finally:
 
