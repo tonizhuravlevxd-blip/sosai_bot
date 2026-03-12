@@ -920,10 +920,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
 
+    # защита RAM — очищаем если слишком много изображений
     if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
-        return
+        context.user_data["input_images"] = []
 
     photo = update.message.photo[-1]
+
+    # защита от огромных файлов
+    if photo.file_size and photo.file_size > 5_000_000:
+        await update.message.reply_text("⚠️ Фото слишком большое (макс 5MB)")
+        return
 
     file = await photo.get_file()
 
