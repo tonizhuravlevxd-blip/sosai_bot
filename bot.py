@@ -184,6 +184,24 @@ FAL_MODELS = {
 
 }
 
+# ================= CARTOON STYLES =================
+
+CARTOON_STYLES = {
+
+    "pixar": "Pixar 3D animation style, expressive eyes, cinematic lighting",
+
+    "disney": "Disney animation style, magical lighting, colorful fantasy",
+
+    "anime": "Japanese anime movie style, vibrant colors",
+
+    "dreamworks": "DreamWorks animation style cinematic character",
+
+    "ghibli": "Studio Ghibli animation style soft lighting",
+
+    "simpsons": "The Simpsons cartoon style yellow skin",
+
+    "rickmorty": "Rick and Morty cartoon style bold outlines"
+}
 
 # ================= FAL VIDEO MODELS =================
 
@@ -405,6 +423,11 @@ async def generation_worker():
 
                 elif model == "flash":
                     style = "fast simple render"
+
+                cartoon_style = context.user_data.get("cartoon_style")
+
+                if cartoon_style:
+                prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
 
                 prompt = f"{style} {prompt}"
 
@@ -710,6 +733,29 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["size"] = SIZE_CONFIG["phone"]
         await query.message.reply_text("📱 Вертикальное разрешение выбрано")
 
+
+
+    # ================= CARTOON STYLE SELECT =================
+
+    elif data.startswith("cartoon_"):
+
+    style_key = data.replace("cartoon_", "")
+
+    if style_key not in CARTOON_STYLES:
+        return
+
+    context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
+
+    context.user_data["mode"] = "video"
+
+    await query.message.reply_text(
+        f"🎬 Стиль выбран: {style_key.upper()}\n\n"
+        "📸 Теперь отправьте:\n"
+        "• фото + текст\n"
+        "или\n"
+        "• просто текст\n\n"
+        "Бот создаст мультфильм 🎥"
+    )
     elif data == "repeat":
 
         prompt = context.user_data.get("last_prompt")
@@ -740,7 +786,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
-    if context.user_data.get("mode") != "video":
+    if context.user_data.get("mode") not in ["video", "cartoon"]:
 
         if "model" not in context.user_data:
 
@@ -919,6 +965,32 @@ async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🎬 Режим видео включён (Sora2)\n\n"
         "Отправьте промпт или фото + текст."
     )
+async def cartoon(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🎬 Pixar", callback_data="cartoon_pixar"),
+            InlineKeyboardButton("🏰 Disney", callback_data="cartoon_disney")
+        ],
+        [
+            InlineKeyboardButton("🇯🇵 Anime", callback_data="cartoon_anime"),
+            InlineKeyboardButton("🎥 DreamWorks", callback_data="cartoon_dreamworks")
+        ],
+        [
+            InlineKeyboardButton("🌿 Ghibli", callback_data="cartoon_ghibli"),
+            InlineKeyboardButton("🟡 Simpsons", callback_data="cartoon_simpsons")
+        ],
+        [
+            InlineKeyboardButton("🧪 RickMorty", callback_data="cartoon_rickmorty")
+        ]
+    ])
+
+    context.user_data["mode"] = "cartoon"
+
+    await update.message.reply_text(
+        "🎨 Выберите стиль мультфильма:",
+        reply_markup=keyboard
+    )
 
 async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -991,6 +1063,7 @@ app.add_handler(CommandHandler("account", account))
 app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
 app.add_handler(CommandHandler("video", video))
+app.add_handler(CommandHandler("cartoon", cartoon))
 app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("finish", finish))
 app.add_handler(CommandHandler("restart", restart))
@@ -1009,6 +1082,7 @@ async def set_commands(app):
         BotCommand("ref", "Реферальная программа"),
         BotCommand("photo", "Создать изображение"),
         BotCommand("video", "Создать видео"),
+        BotCommand("cartoon", "Сделать мультфильм"),
         BotCommand("uu", "Лимит генераций"),
         BotCommand("finish", "Закончить генерацию"),
         BotCommand("restart", "Перезапустить")
