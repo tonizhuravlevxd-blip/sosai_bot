@@ -515,7 +515,7 @@ async def generation_worker():
 
                 # ================= VIDEO MODE (SORA2) =================
 
-if mode == "video":
+    if mode == "video":
 
     video_bytes = await fal_video_generate(prompt, images)
 
