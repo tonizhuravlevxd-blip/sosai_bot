@@ -741,7 +741,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         style_key = data.replace("cartoon_", "")
 
-    if style_key not in CARTOON_STYLES:
+        if style_key not in CARTOON_STYLES:
         return
 
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
