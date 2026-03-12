@@ -541,7 +541,7 @@ async def generation_worker():
 
                     image_bytes = await fal_generate(model, prompt, images)
 
-                # ================= OPENAI MODELS =================
+                                # ================= OPENAI MODELS =================
 
                 else:
 
@@ -610,26 +610,24 @@ async def generation_worker():
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
 
-           
+            except Exception as e:
 
-    except Exception as e:
+                logging.error(f"Generation error: {e}")
 
-    logging.error(f"Generation error: {e}")
+                error_text = str(e)
 
-    error_text = str(e)
+                if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
 
-    if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
+                    await update.message.reply_text(
+                        "⚠️ Запрос не прошёл фильтр безопасности.\n"
+                        "Попробуйте изменить текст."
+                    )
 
-        await update.message.reply_text(
-            "⚠️ Запрос не прошёл фильтр безопасности.\n"
-            "Попробуйте изменить текст."
-        )
+                else:
 
-    else:
-
-        await update.message.reply_text(
-            "⚠ Ошибка генерации. Попробуйте позже."
-        )
+                    await update.message.reply_text(
+                        "⚠ Ошибка генерации. Попробуйте позже."
+                    )
                 
 
             
