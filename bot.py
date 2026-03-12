@@ -988,8 +988,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     remaining = FREE_LIMIT + bonus - used
     video_used = user[3]
-
-if context.user_data.get("mode") in ["video", "cartoon"]:
+    if context.user_data.get("mode") in ["video", "cartoon"]:
 
     if video_used >= FREE_VIDEO_LIMIT:
 
@@ -999,6 +998,8 @@ if context.user_data.get("mode") in ["video", "cartoon"]:
         )
 
         return
+
+
 
 
     
