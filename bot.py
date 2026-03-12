@@ -37,6 +37,7 @@ if not OPENAI_API_KEY:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 FREE_LIMIT = 5
+FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 
@@ -127,6 +128,7 @@ CREATE TABLE IF NOT EXISTS users (
 user_id INTEGER PRIMARY KEY,
 week_start INTEGER,
 image_count INTEGER DEFAULT 0,
+video_count INTEGER DEFAULT 0,
 accepted_terms INTEGER DEFAULT 0,
 referrals INTEGER DEFAULT 0,
 bonus_images INTEGER DEFAULT 0,
@@ -160,7 +162,7 @@ def reset_week_if_needed(user):
             async with db_lock:
 
                 cursor.execute(
-                    "UPDATE users SET week_start=?, image_count=0 WHERE user_id=?",
+                    "UPDATE users SET week_start=?, video_count=0, image_count=0 WHERE user_id=?",
                     (now, user[0])
                 )
 
@@ -513,27 +515,37 @@ async def generation_worker():
 
                 # ================= VIDEO MODE (SORA2) =================
 
-                if mode == "video":
+if mode == "video":
 
-                    video_bytes = await fal_video_generate(prompt, images)
+    video_bytes = await fal_video_generate(prompt, images)
 
-                    try:
-                        await status.delete()
-                    except:
-                        pass
+    try:
+        await status.delete()
+    except:
+        pass
 
-                    await asyncio.wait_for(
-                        update.message.reply_video(
-                            video=video_bytes
-                        ),
-                        timeout=60
-                    )
+    await asyncio.wait_for(
+        update.message.reply_video(
+            video=video_bytes
+        ),
+        timeout=60
+    )
 
-                    context.user_data["input_images"] = []
-                    context.user_data["last_images"] = []
+    # увеличиваем счетчик видео
+    async with db_lock:
 
-                    generation_queue.task_done()
-                    continue
+        cursor.execute(
+            "UPDATE users SET video_count=video_count+1 WHERE user_id=?",
+            (user_id,)
+        )
+
+        conn.commit()
+
+    context.user_data["input_images"] = []
+    context.user_data["last_images"] = []
+
+    generation_queue.task_done()
+    continue
 
                 # ================= FAL IMAGE MODELS =================
 
@@ -975,7 +987,21 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bonus = user[5]
 
     remaining = FREE_LIMIT + bonus - used
+    video_used = user[3]
 
+if context.user_data.get("mode") in ["video", "cartoon"]:
+
+    if video_used >= FREE_VIDEO_LIMIT:
+
+        await update.message.reply_text(
+            "🎬 Бесплатный лимит видео/мультфильма исчерпан.\n"
+            "Новый будет доступен через неделю."
+        )
+
+        return
+
+
+    
     if remaining <= 0:
 
         await update.message.reply_text(
