@@ -427,7 +427,7 @@ async def generation_worker():
                 cartoon_style = context.user_data.get("cartoon_style")
 
                 if cartoon_style:
-                prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
+                    prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
 
                 prompt = f"{style} {prompt}"
 
