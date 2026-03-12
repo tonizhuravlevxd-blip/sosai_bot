@@ -515,18 +515,18 @@ async def generation_worker():
 
                 # ================= VIDEO MODE (SORA2) =================
 
-    if mode == "video":
+             if mode == "video":
 
-    video_bytes = await fal_video_generate(prompt, images)
+              video_bytes = await fal_video_generate(prompt, images)
 
-    try:
-        await status.delete()
-    except:
-        pass
+                 try:
+                     await status.delete()
+                 except:
+                     pass
 
-    await asyncio.wait_for(
-        update.message.reply_video(
-            video=video_bytes
+                 await asyncio.wait_for(
+                     update.message.reply_video(
+                     video=video_bytes
         ),
         timeout=60
     )
