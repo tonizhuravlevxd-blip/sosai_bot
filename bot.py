@@ -469,15 +469,15 @@ async def generation_worker():
         mode = job.get("mode", "image")
 async with generation_semaphore:
 
-    try:
+            try:
 
-        user = get_user(user_id)
+                user = get_user(user_id)
 
-        reset_week_if_needed(user)
+                reset_week_if_needed(user)
 
-        video_used = user[3]
+                video_used = user[3]
 
-        if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
+                if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
 
             try:
                 await status.delete()
