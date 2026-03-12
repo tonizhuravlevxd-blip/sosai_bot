@@ -610,7 +610,9 @@ async def generation_worker():
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
 
-            except Exception as e:
+           
+
+    except Exception as e:
 
     logging.error(f"Generation error: {e}")
 
