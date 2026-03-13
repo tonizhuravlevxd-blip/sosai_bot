@@ -387,7 +387,7 @@ async def fal_generate(model, prompt, images=None):
 
 async def fal_music_generate(prompt):
 
-    base_url = "https://queue.fal.run/fal-ai/elevenlabs/music"
+    base_url = "https://queue.fal.run/fal-ai/suno"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
