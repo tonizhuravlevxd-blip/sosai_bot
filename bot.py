@@ -1229,6 +1229,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "model": context.user_data.get("model", "banana2"),
         "images": context.user_data.get("input_images", []),
         "user_id": user_id,
+        "mode": context.user_data.get("mode"),  # ВАЖНО
         "status": status
     })
 # ================= COMMANDS =================
