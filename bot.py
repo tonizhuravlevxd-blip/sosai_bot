@@ -400,20 +400,26 @@ async def fal_music_generate(prompt):
 
     async with aiohttp.ClientSession() as session:
 
-        # отправляем задачу
         async with session.post(base_url, headers=headers, json=payload) as r:
             data = await r.json()
 
-        request_id = data["request_id"]
+        request_id = data.get("request_id")
+
+        if not request_id:
+            raise Exception(f"Fal error: {data}")
 
         result_url = f"{base_url}/requests/{request_id}"
 
-        # ждём результат
         for _ in range(120):
 
             await asyncio.sleep(2)
 
             async with session.get(result_url, headers=headers) as r:
+
+                if r.status != 200:
+                    text = await r.text()
+                    raise Exception(f"Fal API error {r.status}: {text}")
+
                 result = await r.json()
 
             if result.get("status") == "COMPLETED":
@@ -423,6 +429,7 @@ async def fal_music_generate(prompt):
                 raise Exception("Music generation failed")
 
         raise Exception("Music timeout")
+
 
 
 
