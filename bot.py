@@ -1102,7 +1102,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     
-    active_generations.add(user_id)
+    
     
     text = update.message.text
 
