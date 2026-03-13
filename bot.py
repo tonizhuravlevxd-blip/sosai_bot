@@ -383,11 +383,11 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
-# ================= FAL SUNO MUSIC =================
+# ================= FAL ELEVENLABS MUSIC =================
 
 async def fal_music_generate(prompt):
 
-    base_url = "https://queue.fal.run/fal-ai/suno"
+    url = "https://queue.fal.run/fal-ai/elevenlabs/music"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -395,44 +395,40 @@ async def fal_music_generate(prompt):
     }
 
     payload = {
-        "prompt": prompt,
-        "duration": 30
+        "prompt": prompt
     }
 
     async with aiohttp.ClientSession() as session:
 
-        async with session.post(base_url, json=payload, headers=headers) as r:
+        # отправляем запрос на генерацию
+        async with session.post(url, headers=headers, json=payload) as r:
             data = await r.json()
 
         request_id = data["request_id"]
 
-        status_url = f"{base_url}/requests/{request_id}/status"
-        result_url = f"{base_url}/requests/{request_id}"
+        status_url = f"{url}/requests/{request_id}/status"
+        result_url = f"{url}/requests/{request_id}"
 
-        for _ in range(120):
-
-            async with session.get(status_url, headers=headers) as s:
-                status = await s.json()
-
-            if status.get("status") == "COMPLETED":
-
-                async with session.get(result_url, headers=headers) as r:
-                    result = await r.json()
-
-                if "audio" in result:
-                    audio_url = result["audio"]["url"]
-                else:
-                    audio_url = result["audios"][0]["url"]
-
-                async with session.get(audio_url) as a:
-                    return await a.read()
-
-            if status.get("status") == "FAILED":
-                raise Exception("Suno generation failed")
+        # ждём завершения генерации
+        while True:
 
             await asyncio.sleep(2)
 
-    raise Exception("Music timeout")
+            async with session.get(status_url, headers=headers) as r:
+                status = await r.json()
+
+            if status.get("status") == "COMPLETED":
+                break
+
+            if status.get("status") == "FAILED":
+                raise Exception("Music generation failed")
+
+        # получаем результат
+        async with session.get(result_url, headers=headers) as r:
+            result = await r.json()
+
+    return result["audio_url"]
+
 
 
 # ================= FAL VIDEO GENERATOR =================
