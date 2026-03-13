@@ -387,7 +387,7 @@ async def fal_generate(model, prompt, images=None):
 
 async def fal_music_generate(prompt):
 
-    url = "https://queue.fal.run/fal-ai/elevenlabs/music"
+    base_url = "https://queue.fal.run/fal-ai/elevenlabs/music"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -400,34 +400,29 @@ async def fal_music_generate(prompt):
 
     async with aiohttp.ClientSession() as session:
 
-        # отправляем запрос на генерацию
-        async with session.post(url, headers=headers, json=payload) as r:
+        # отправляем задачу
+        async with session.post(base_url, headers=headers, json=payload) as r:
             data = await r.json()
 
         request_id = data["request_id"]
 
-        status_url = f"{url}/requests/{request_id}/status"
-        result_url = f"{url}/requests/{request_id}"
+        result_url = f"{base_url}/requests/{request_id}"
 
-        # ждём завершения генерации
-        while True:
+        # ждём результат
+        for _ in range(120):
 
             await asyncio.sleep(2)
 
-            async with session.get(status_url, headers=headers) as r:
-                status = await r.json()
+            async with session.get(result_url, headers=headers) as r:
+                result = await r.json()
 
-            if status.get("status") == "COMPLETED":
-                break
+            if result.get("status") == "COMPLETED":
+                return result["audio_url"]
 
-            if status.get("status") == "FAILED":
+            if result.get("status") == "FAILED":
                 raise Exception("Music generation failed")
 
-        # получаем результат
-        async with session.get(result_url, headers=headers) as r:
-            result = await r.json()
-
-    return result["audio_url"]
+        raise Exception("Music timeout")
 
 
 
