@@ -156,6 +156,33 @@ is_active INTEGER DEFAULT 0
 
 conn.commit()
 
+# ================= MUSIC CACHE =================
+
+def get_cached_music(prompt):
+
+    cursor.execute(
+        "SELECT audio_url FROM music_cache WHERE prompt=?",
+        (prompt,)
+    )
+
+    row = cursor.fetchone()
+
+    if row:
+        return row[0]
+
+    return None
+
+
+def save_music_cache(prompt, audio_url):
+
+    cursor.execute(
+        "INSERT OR REPLACE INTO music_cache (prompt, audio_url, created_at) VALUES (?, ?, ?)",
+        (prompt, audio_url, int(time.time()))
+    )
+
+    conn.commit()
+
+
 
 def get_user(user_id):
 
@@ -186,6 +213,34 @@ def reset_week_if_needed(user):
                 conn.commit()
 
         asyncio.create_task(update())
+        # ================= MUSIC CACHE FUNCTIONS =================
+
+def get_cached_music(prompt):
+
+    cursor.execute(
+        "SELECT audio_url FROM music_cache WHERE prompt=?",
+        (prompt,)
+    )
+
+    row = cursor.fetchone()
+
+    if row:
+        return row[0]
+
+    return None
+
+
+def save_music_cache(prompt, audio_url):
+
+    cursor.execute(
+        "INSERT OR REPLACE INTO music_cache (prompt, audio_url, created_at) VALUES (?, ?, ?)",
+        (prompt, audio_url, int(time.time()))
+    )
+
+    conn.commit()
+
+
+
 
 # ================= PROMPT SAFETY FILTER =================
 
@@ -605,28 +660,51 @@ async def generation_worker():
 
                 images = images[:MAX_INPUT_IMAGES]
 
-                                # ================= MUSIC MODE =================
+                                        # ================= MUSIC MODE =================
 
-                if mode == "music":
+        if mode == "music":
 
-                    music = await fal_music_generate(prompt)
+            # проверяем кеш
+            cached_audio = get_cached_music(prompt)
 
-                    try:
-                        await status.delete()
-                    except:
-                        pass
+            if cached_audio:
 
-                    await asyncio.wait_for(
-                        update.message.reply_audio(
-                            audio=music
-                        ),
-                        timeout=120
-                    )
+                try:
+                    await status.delete()
+                except:
+                    pass
 
-                    context.user_data["mode"] = None
+                await update.message.reply_audio(
+                    audio=cached_audio,
+                    title="Generated Song"
+                )
 
-                    generation_queue.task_done()
-                    continue
+                context.user_data["mode"] = None
+                generation_queue.task_done()
+                continue
+
+
+            # если нет в кеше — генерируем
+            audio_url = await fal_music_generate(prompt)
+
+            # сохраняем в кеш
+            save_music_cache(prompt, audio_url)
+
+            try:
+                await status.delete()
+            except:
+                pass
+
+            await update.message.reply_audio(
+                audio=audio_url,
+                title="Generated Song"
+            )
+
+            context.user_data["mode"] = None
+
+            generation_queue.task_done()
+            continue
+
 
 
 
