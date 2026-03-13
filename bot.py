@@ -383,6 +383,58 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
+# ================= FAL SUNO MUSIC =================
+
+async def fal_music_generate(prompt):
+
+    base_url = "https://queue.fal.run/fal-ai/suno"
+
+    headers = {
+        "Authorization": f"Key {FAL_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "prompt": prompt,
+        "duration": 30
+    }
+
+    async with aiohttp.ClientSession() as session:
+
+        async with session.post(base_url, json=payload, headers=headers) as r:
+            data = await r.json()
+
+        request_id = data["request_id"]
+
+        status_url = f"{base_url}/requests/{request_id}/status"
+        result_url = f"{base_url}/requests/{request_id}"
+
+        for _ in range(120):
+
+            async with session.get(status_url, headers=headers) as s:
+                status = await s.json()
+
+            if status.get("status") == "COMPLETED":
+
+                async with session.get(result_url, headers=headers) as r:
+                    result = await r.json()
+
+                if "audio" in result:
+                    audio_url = result["audio"]["url"]
+                else:
+                    audio_url = result["audios"][0]["url"]
+
+                async with session.get(audio_url) as a:
+                    return await a.read()
+
+            if status.get("status") == "FAILED":
+                raise Exception("Suno generation failed")
+
+            await asyncio.sleep(2)
+
+    raise Exception("Music timeout")
+
+
 # ================= FAL VIDEO GENERATOR =================
 
 async def fal_video_generate(prompt, images=None):
@@ -554,6 +606,32 @@ async def generation_worker():
                     continue
 
                 images = images[:MAX_INPUT_IMAGES]
+
+                                # ================= MUSIC MODE =================
+
+                if mode == "music":
+
+                    music = await fal_music_generate(prompt)
+
+                    try:
+                        await status.delete()
+                    except:
+                        pass
+
+                    await asyncio.wait_for(
+                        update.message.reply_audio(
+                            audio=music
+                        ),
+                        timeout=60
+                    )
+
+                    generation_queue.task_done()
+                    continue
+
+
+
+
+                
                                 # ================= VIDEO MODE (SORA2) =================
 
                 if mode in ["video", "cartoon"]:
@@ -870,6 +948,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["size"] = SIZE_CONFIG["phone"]
         await query.message.reply_text("📱 Вертикальное разрешение выбрано")
+
+    elif data == "suno_hit":
+
+        context.user_data["mode"] = "music"
+
+        await query.message.reply_text(
+            "🎵 Напишите тему песни\n\n"
+            "Пример:\n"
+            "emotional pop song about lost love"
+        )
+
+
+
+    
+
+    
 
     # ================= CARTOON STYLE SELECT =================
 
@@ -1234,6 +1328,20 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard
     )
 
+    async def suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎵 Hit song", callback_data="suno_hit")]
+    ])
+
+    context.user_data["mode"] = "music"
+
+    await update.message.reply_text(
+        "🎶 Suno AI генератор песен\n\n"
+        "Нажмите кнопку ниже чтобы создать хит",
+        reply_markup=keyboard
+    )
+
 
 # ================= REGISTER =================
 
@@ -1245,6 +1353,7 @@ app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
 app.add_handler(CommandHandler("video", video))
 app.add_handler(CommandHandler("cartoon", cartoon))
+app.add_handler(CommandHandler("suno", suno))
 app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("finish", finish))
 app.add_handler(CommandHandler("restart", restart))
@@ -1264,6 +1373,7 @@ async def set_commands(app):
         BotCommand("photo", "Создать изображение"),
         BotCommand("video", "Создать видео"),
         BotCommand("cartoon", "Сделать мультфильм"),
+        BotCommand("suno", "Создать песню"),
         BotCommand("uu", "Лимит генераций"),
         BotCommand("finish", "Закончить генерацию"),
         BotCommand("restart", "Перезапустить")
