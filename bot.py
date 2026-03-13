@@ -635,7 +635,7 @@ async def generation_worker():
                 if mode != "music":
                     prompt = f"{style} {prompt}"
 
-                # ================= SAFETY FILTER =================
+                                # ================= SAFETY FILTER =================
                 if mode != "music":
 
                     prompt = clean_prompt(prompt)
@@ -658,52 +658,55 @@ async def generation_worker():
                     generation_queue.task_done()
                     continue
 
+
                 images = images[:MAX_INPUT_IMAGES]
 
-                                        # ================= MUSIC MODE =================
 
-        if mode == "music":
+                # ================= MUSIC MODE =================
 
-            # проверяем кеш
-            cached_audio = get_cached_music(prompt)
+                if mode == "music":
 
-            if cached_audio:
+                    cached_audio = get_cached_music(prompt)
 
-                try:
-                    await status.delete()
-                except:
-                    pass
+                    if cached_audio:
+                        try:
+                            await status.delete()
+                        except:
+                            pass
 
-                await update.message.reply_audio(
-                    audio=cached_audio,
-                    title="Generated Song"
-                )
+                        await update.message.reply_audio(
+                            audio=cached_audio,
+                            title="Generated Song"
+                        )
 
-                context.user_data["mode"] = None
-                generation_queue.task_done()
-                continue
+                        context.user_data["mode"] = None
+                        generation_queue.task_done()
+                        continue
 
 
-            # если нет в кеше — генерируем
-            audio_url = await fal_music_generate(prompt)
+                    audio_url = await fal_music_generate(prompt)
 
-            # сохраняем в кеш
-            save_music_cache(prompt, audio_url)
+                    save_music_cache(prompt, audio_url)
 
-            try:
-                await status.delete()
-            except:
-                pass
+                    try:
+                        await status.delete()
+                    except:
+                        pass
 
-            await update.message.reply_audio(
-                audio=audio_url,
-                title="Generated Song"
-            )
+                    await update.message.reply_audio(
+                        audio=audio_url,
+                        title="Generated Song"
+                    )
 
-            context.user_data["mode"] = None
+                    context.user_data["mode"] = None
+                    generation_queue.task_done()
+                    continue
 
-            generation_queue.task_done()
-            continue
+
+
+                       
+
+                                        
 
 
 
