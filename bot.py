@@ -1087,6 +1087,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("MODE:", context.user_data.get("mode"))
+
 
     user_id = update.effective_user.id
         # ================= USER GENERATION LIMIT =================
