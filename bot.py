@@ -1011,6 +1011,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model","banana2"),
             "images": images,
             "user_id": query.from_user.id,
+            "mode": context.user_data.get("mode"),
             "status": status
         })
 
