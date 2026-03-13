@@ -383,7 +383,7 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
-# ================= FAL ELEVENLABS MUSIC =================
+# ================= FAL MUSIC =================
 
 async def fal_music_generate(prompt):
 
@@ -403,10 +403,7 @@ async def fal_music_generate(prompt):
         async with session.post(base_url, headers=headers, json=payload) as r:
             data = await r.json()
 
-        request_id = data.get("request_id")
-
-        if not request_id:
-            raise Exception(f"Fal error: {data}")
+        request_id = data["request_id"]
 
         result_url = f"{base_url}/requests/{request_id}"
 
@@ -415,20 +412,21 @@ async def fal_music_generate(prompt):
             await asyncio.sleep(2)
 
             async with session.get(result_url, headers=headers) as r:
-
-                if r.status != 200:
-                    text = await r.text()
-                    raise Exception(f"Fal API error {r.status}: {text}")
-
                 result = await r.json()
 
             if result.get("status") == "COMPLETED":
-                return result["audio_url"]
+
+                if "audio_url" in result:
+                    return result["audio_url"]
+
+                if "audios" in result:
+                    return result["audios"][0]["url"]
 
             if result.get("status") == "FAILED":
                 raise Exception("Music generation failed")
 
         raise Exception("Music timeout")
+
 
 
 
