@@ -622,8 +622,10 @@ async def generation_worker():
                         update.message.reply_audio(
                             audio=music
                         ),
-                        timeout=60
+                        timeout=120
                     )
+
+                    context.user_data["mode"] = None
 
                     generation_queue.task_done()
                     continue
