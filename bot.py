@@ -64,6 +64,23 @@ active_generations = set()
 user_generation_count = {}
 
 MAX_USER_GENERATIONS = 2
+def check_user_generation_limit(user_id):
+
+    count = user_generation_count.get(user_id, 0)
+
+    if count >= MAX_USER_GENERATIONS:
+        return False, "⚠️ Подождите завершения текущих генераций"
+
+    return True, None
+
+
+def lock_user_generation(user_id):
+
+    count = user_generation_count.get(user_id, 0)
+
+    user_generation_count[user_id] = count + 1
+
+    active_generations.add(user_id)
 
 
 # ================= CACHE CLEANER =================
@@ -741,7 +758,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         db_user = get_user(user.id)
 
-    if db_user[3] == 0:
+    if db_user[4] == 0:
 
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📄 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
@@ -983,7 +1000,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    user_generation_count[user_id] = count + 1
+    
     active_generations.add(user_id)
     
     text = update.message.text
