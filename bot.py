@@ -580,12 +580,14 @@ async def generation_worker():
 
                 if cartoon_style:
                     prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
-
-                prompt = f"{style} {prompt}"
+                    
+                if mode != "music":
+                    prompt = f"{style} {prompt}"
 
                 # ================= SAFETY FILTER =================
+                if mode != "music":
 
-                prompt = clean_prompt(prompt)
+                    prompt = clean_prompt(prompt)
 
                 cache_key = f"{prompt}_{model}_{size}"
 
