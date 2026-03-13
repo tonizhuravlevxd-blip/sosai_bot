@@ -1328,7 +1328,7 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard
     )
 
-    async def suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🎵 Hit song", callback_data="suno_hit")]
@@ -1341,6 +1341,7 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Нажмите кнопку ниже чтобы создать хит",
         reply_markup=keyboard
     )
+
 
 
 # ================= REGISTER =================
