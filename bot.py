@@ -140,6 +140,8 @@ conn.execute("PRAGMA synchronous=NORMAL")
 
 cursor = conn.cursor()
 
+# ---------- USERS TABLE ----------
+
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
 user_id INTEGER PRIMARY KEY,
@@ -154,9 +156,20 @@ is_active INTEGER DEFAULT 0
 )
 """)
 
+# ---------- MUSIC CACHE TABLE ----------
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS music_cache (
+prompt TEXT PRIMARY KEY,
+audio_url TEXT,
+created_at INTEGER
+)
+""")
+
 conn.commit()
 
-# ================= MUSIC CACHE =================
+
+# ================= MUSIC CACHE FUNCTIONS =================
 
 def get_cached_music(prompt):
 
@@ -183,6 +196,7 @@ def save_music_cache(prompt, audio_url):
     conn.commit()
 
 
+# ================= USER FUNCTIONS =================
 
 def get_user(user_id):
 
@@ -200,7 +214,6 @@ def reset_week_if_needed(user):
 
     if now - user[1] > WEEK_SECONDS:
 
-        # защита от database locked
         async def update():
 
             async with db_lock:
@@ -213,31 +226,6 @@ def reset_week_if_needed(user):
                 conn.commit()
 
         asyncio.create_task(update())
-        # ================= MUSIC CACHE FUNCTIONS =================
-
-def get_cached_music(prompt):
-
-    cursor.execute(
-        "SELECT audio_url FROM music_cache WHERE prompt=?",
-        (prompt,)
-    )
-
-    row = cursor.fetchone()
-
-    if row:
-        return row[0]
-
-    return None
-
-
-def save_music_cache(prompt, audio_url):
-
-    cursor.execute(
-        "INSERT OR REPLACE INTO music_cache (prompt, audio_url, created_at) VALUES (?, ?, ?)",
-        (prompt, audio_url, int(time.time()))
-    )
-
-    conn.commit()
 
 
 
