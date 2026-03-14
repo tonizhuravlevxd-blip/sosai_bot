@@ -437,20 +437,21 @@ async def fal_music_generate(prompt):
     }
 
     payload = {
-        "prompt": prompt
+        "prompt": prompt,
+        "duration": 30
     }
 
     async with aiohttp.ClientSession() as session:
 
-        # создаём job
-        async with session.post(base_url, headers=headers, json=payload) as r:
+        # создаём генерацию
+        async with session.post(base_url, json=payload, headers=headers) as r:
 
             text = await r.text()
 
             try:
                 data = json.loads(text)
             except:
-                raise Exception(f"Fal music bad response: {text}")
+                raise Exception(f"Fal bad response: {text}")
 
         if "request_id" not in data:
             raise Exception(f"Fal music error: {data}")
@@ -461,7 +462,7 @@ async def fal_music_generate(prompt):
         result_url = f"{base_url}/requests/{request_id}"
 
         # ждём генерацию
-        for _ in range(300):
+        for _ in range(360):
 
             await asyncio.sleep(2)
 
@@ -487,16 +488,20 @@ async def fal_music_generate(prompt):
                     except:
                         continue
 
-                if "audio_url" in result:
-                    return result["audio_url"]
+                # варианты ответа fal
+                if "audio" in result:
+                    return result["audio"]["url"]
 
                 if "audios" in result:
                     return result["audios"][0]["url"]
 
+                if "audio_url" in result:
+                    return result["audio_url"]
+
             if status == "FAILED":
                 raise Exception(f"Fal music failed: {status_data}")
 
-        # 🔴 если вышли по таймауту — делаем последнюю попытку
+        # последняя попытка (fal иногда отвечает позже)
 
         async with session.get(result_url, headers=headers) as r:
 
@@ -507,14 +512,16 @@ async def fal_music_generate(prompt):
             except:
                 raise Exception("Music generation timeout")
 
-        if "audio_url" in result:
-            return result["audio_url"]
+        if "audio" in result:
+            return result["audio"]["url"]
 
         if "audios" in result:
             return result["audios"][0]["url"]
 
-        raise Exception("Music generation timeout")
+        if "audio_url" in result:
+            return result["audio_url"]
 
+        raise Exception("Music generation timeout")
 
 
 
@@ -696,13 +703,15 @@ async def generation_worker():
                 images = images[:MAX_INPUT_IMAGES]
 
 
-                                # ================= MUSIC MODE =================
+                                                                # ================= MUSIC MODE =================
 
                 if mode == "music":
 
                     cached_audio = get_cached_music(prompt)
 
                     if cached_audio:
+                        print("🎵 Music cache hit:", prompt)
+
                         try:
                             await status.delete()
                         except:
@@ -731,7 +740,11 @@ async def generation_worker():
                         continue
 
 
+                    print("🎵 Music prompt:", prompt)
+
                     audio_url = await fal_music_generate(prompt)
+
+                    print("🎵 Music URL:", audio_url)
 
                     save_music_cache(prompt, audio_url)
 
@@ -761,8 +774,6 @@ async def generation_worker():
                     context.user_data["mode"] = None
                     generation_queue.task_done()
                     continue
-
-
 
                        
 
