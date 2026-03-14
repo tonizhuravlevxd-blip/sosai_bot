@@ -700,15 +700,27 @@ async def generation_worker():
                         if status is None:
                             status = await update.message.reply_text("🎵 Музыка генерируется… 0%")
 
-                        audio_url = await fal_music_generate(prompt, progress_callback=lambda p: asyncio.create_task(status.edit_text(f"🎵 Музыка генерируется… {p}%")))
+                        async def music_progress(msg, interval=1):
+                            pct = 0
+                            try:
+                                while True:
+                                    await asyncio.sleep(interval)
+                                    pct = min(pct + 10, 100)
+                                    await msg.edit_text(f"🎵 Музыка генерируется… {pct}%")
+                            except asyncio.CancelledError:
+                                pass
 
-                        save_music_cache(prompt, audio_url)
+                        progress_task = asyncio.create_task(music_progress(status))
+                        audio_url = await fal_music_generate(prompt)
+                        progress_task.cancel()
 
                         try:
                             if status:
                                 await status.delete()
                         except:
                             pass
+
+                        save_music_cache(prompt, audio_url)
 
                         try:
                             await context.bot.send_audio(
@@ -779,7 +791,19 @@ async def generation_worker():
                     if status is None:
                         status = await update.message.reply_text("🎬 Видео генерируется… 0%")
 
-                    video_bytes = await fal_video_generate(prompt, images, progress_callback=lambda p: asyncio.create_task(status.edit_text(f"🎬 Видео генерируется… {p}%")))
+                    async def video_progress(msg, interval=1):
+                        pct = 0
+                        try:
+                            while True:
+                                await asyncio.sleep(interval)
+                                pct = min(pct + 10, 100)
+                                await msg.edit_text(f"🎬 Видео генерируется… {pct}%")
+                        except asyncio.CancelledError:
+                            pass
+
+                    progress_task = asyncio.create_task(video_progress(status))
+                    video_bytes = await fal_video_generate(prompt, images)
+                    progress_task.cancel()
 
                     try:
                         if status:
