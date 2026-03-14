@@ -703,14 +703,56 @@ async def generation_worker():
                 images = images[:MAX_INPUT_IMAGES]
 
 
-                # ================= MUSIC MODE =================
+                               # ================= MUSIC MODE =================
 
                 if mode == "music":
 
-                    cached_audio = get_cached_music(prompt)
+                    try:
 
-                    if cached_audio:
-                        print("🎵 Music cache hit:", prompt)
+                        cached_audio = get_cached_music(prompt)
+
+                        if cached_audio:
+                            print("🎵 Music cache hit:", prompt)
+
+                            try:
+                                await status.delete()
+                            except:
+                                pass
+
+                            try:
+                                await context.bot.send_audio(
+                                    chat_id=update.effective_chat.id,
+                                    audio=cached_audio,
+                                    title="Generated Song"
+                                )
+                            except Exception:
+
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(cached_audio) as r:
+                                        audio_bytes = await r.read()
+
+                                await context.bot.send_audio(
+                                    chat_id=update.effective_chat.id,
+                                    audio=audio_bytes,
+                                    title="Generated Song"
+                                )
+
+                            context.user_data["mode"] = None
+
+                            active_generations.discard(user_id)
+                            user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                            generation_queue.task_done()
+
+                            continue
+
+
+                        print("🎵 Music prompt:", prompt)
+
+                        audio_url = await fal_music_generate(prompt)
+
+                        print("🎵 Music URL:", audio_url)
+
+                        save_music_cache(prompt, audio_url)
 
                         try:
                             await status.delete()
@@ -720,13 +762,13 @@ async def generation_worker():
                         try:
                             await context.bot.send_audio(
                                 chat_id=update.effective_chat.id,
-                                audio=cached_audio,
+                                audio=audio_url,
                                 title="Generated Song"
                             )
                         except Exception:
 
                             async with aiohttp.ClientSession() as session:
-                                async with session.get(cached_audio) as r:
+                                async with session.get(audio_url) as r:
                                     audio_bytes = await r.read()
 
                             await context.bot.send_audio(
@@ -736,44 +778,37 @@ async def generation_worker():
                             )
 
                         context.user_data["mode"] = None
+
+                        active_generations.discard(user_id)
+                        user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
                         generation_queue.task_done()
+
                         continue
 
 
-                    print("🎵 Music prompt:", prompt)
+                    except Exception as e:
 
-                    audio_url = await fal_music_generate(prompt)
+                        print("🎵 Music generation error:", e)
 
-                    print("🎵 Music URL:", audio_url)
+                        try:
+                            await status.delete()
+                        except:
+                            pass
 
-                    save_music_cache(prompt, audio_url)
+                        try:
+                            await update.message.reply_text(
+                                "⚠ Ошибка генерации песни. Попробуйте позже."
+                            )
+                        except:
+                            pass
 
-                    try:
-                        await status.delete()
-                    except:
-                        pass
+                        context.user_data["mode"] = None
 
-                    try:
-                        await context.bot.send_audio(
-                            chat_id=update.effective_chat.id,
-                            audio=audio_url,
-                            title="Generated Song"
-                        )
-                    except Exception:
+                        active_generations.discard(user_id)
+                        user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                        generation_queue.task_done()
 
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(audio_url) as r:
-                                audio_bytes = await r.read()
-
-                        await context.bot.send_audio(
-                            chat_id=update.effective_chat.id,
-                            audio=audio_bytes,
-                            title="Generated Song"
-                        )
-
-                    context.user_data["mode"] = None
-                    generation_queue.task_done()
-                    continue
+                        continue
 
                                         
 
