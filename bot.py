@@ -685,7 +685,7 @@ async def generation_worker():
 
                 cached = generation_cache.get(cache_key)
 
-                if cached and time.time() - cached["time"] < CACHE_TIME and mode != "video":
+                if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
 
                     try:
                         await status.delete()
@@ -1486,11 +1486,15 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    # очищаем старые режимы
+    context.user_data.clear()
+
+    # устанавливаем режим музыки
+    context.user_data["mode"] = "music"
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🎵 Hit song", callback_data="suno_hit")]
     ])
-
-    context.user_data["mode"] = "music"
 
     await update.message.reply_text(
         "🎶 Suno AI генератор песен\n\n"
