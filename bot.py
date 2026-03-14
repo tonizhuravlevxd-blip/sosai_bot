@@ -1329,6 +1329,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     remaining = FREE_LIMIT + bonus - used
     video_used = user[3]
+    # музыка не использует лимит изображений
+    if context.user_data.get("mode") == "music":
+        remaining = 9999
 
     if context.user_data.get("mode") in ["video", "cartoon"]:
 
