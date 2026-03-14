@@ -742,7 +742,7 @@ async def generation_worker():
                             context.user_data["mode"] = None
 
                             active_generations.discard(user_id)
-                            user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                            
                             
 
                             continue
@@ -783,7 +783,7 @@ async def generation_worker():
 
                         active_generations.discard(user_id)
                         user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
-                        generation_queue.task_done()
+                        
 
                         continue
 
