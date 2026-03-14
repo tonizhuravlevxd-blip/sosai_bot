@@ -618,7 +618,7 @@ async def generation_worker():
                     await update.message.reply_text(
                         "🎬 Лимит видео/мультфильма на неделю исчерпан."
                     )
-                    generation_queue.task_done()
+                    
                     continue
 
                 # ===== стиль генерации =====
@@ -660,7 +660,6 @@ async def generation_worker():
                         logging.warning(f"Skipping music job for user {user_id}, invalid update")
                         active_generations.discard(user_id)
                         user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
-                        generation_queue.task_done()
                         continue
 
                     chat_id = update.effective_chat.id
