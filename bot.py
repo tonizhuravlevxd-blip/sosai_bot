@@ -694,9 +694,14 @@ async def generation_worker():
                             generation_queue.task_done()
                             continue
 
-                        # генерация музыки
+                        # генерация музыки с прогрессом
                         logging.info(f"🎵 Generating music for: {prompt}")
-                        audio_url = await fal_music_generate(prompt)
+
+                        if status is None:
+                            status = await update.message.reply_text("🎵 Музыка генерируется… 0%")
+
+                        audio_url = await fal_music_generate(prompt, progress_callback=lambda p: asyncio.create_task(status.edit_text(f"🎵 Музыка генерируется… {p}%")))
+
                         save_music_cache(prompt, audio_url)
 
                         try:
@@ -771,11 +776,17 @@ async def generation_worker():
                         )
                         conn.commit()
 
-                    video_bytes = await fal_video_generate(prompt, images)
+                    if status is None:
+                        status = await update.message.reply_text("🎬 Видео генерируется… 0%")
+
+                    video_bytes = await fal_video_generate(prompt, images, progress_callback=lambda p: asyncio.create_task(status.edit_text(f"🎬 Видео генерируется… {p}%")))
+
                     try:
-                        await status.delete()
+                        if status:
+                            await status.delete()
                     except:
                         pass
+
                     await asyncio.wait_for(
                         update.message.reply_video(video=video_bytes),
                         timeout=60
