@@ -1411,7 +1411,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await update.message.reply_text(
         f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
     )
-        mode = context.user_data.get("mode")
+    mode = context.user_data.get("mode")
 
     if not mode:
         mode = "image"
