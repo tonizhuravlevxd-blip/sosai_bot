@@ -438,36 +438,39 @@ async def fal_music_generate(prompt):
     }
 
     payload = {
-        "prompt": prompt,
-        "duration": 30
+        "prompt": prompt
     }
 
     async with aiohttp.ClientSession() as session:
 
-        # отправляем запрос
+        # создаём job
         async with session.post(base_url, headers=headers, json=payload) as r:
             data = await r.json()
 
-            # защита от ошибки request_id
-            if "request_id" not in data:
-                raise Exception(f"Fal music error: {data}")
+        if "request_id" not in data:
+            raise Exception(f"Fal music error: {data}")
 
-            request_id = data["request_id"]
+        request_id = data["request_id"]
 
-        status_url = f"{base_url}/requests/{request_id}/status"
         result_url = f"{base_url}/requests/{request_id}"
 
+        # ждём результат
         for _ in range(120):
 
             await asyncio.sleep(2)
 
-            async with session.get(status_url, headers=headers) as r:
-                status = await r.json()
+            async with session.get(result_url, headers=headers) as r:
 
-            if status.get("status") == "COMPLETED":
+                text = await r.text()
 
-                async with session.get(result_url, headers=headers) as r:
-                    result = await r.json()
+                try:
+                    result = json.loads(text)
+                except:
+                    continue
+
+            status = result.get("status")
+
+            if status == "COMPLETED":
 
                 if "audio_url" in result:
                     return result["audio_url"]
@@ -475,10 +478,8 @@ async def fal_music_generate(prompt):
                 if "audios" in result:
                     return result["audios"][0]["url"]
 
-                raise Exception(f"Bad fal response: {result}")
-
-            if status.get("status") == "FAILED":
-                raise Exception("Music generation failed")
+            if status == "FAILED":
+                raise Exception(f"Fal music failed: {result}")
 
         raise Exception("Music generation timeout")
 
