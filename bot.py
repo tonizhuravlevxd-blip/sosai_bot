@@ -736,6 +736,7 @@ async def generation_worker():
                             )
 
                         context.user_data["mode"] = None
+                        generation_queue.task_done()
                         continue
 
 
