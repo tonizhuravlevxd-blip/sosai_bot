@@ -611,11 +611,8 @@ async def fal_video_generate(prompt, images=None):
 
         raise Exception("Sora video timeout")
 # ================= WORKER =================
-
 async def generation_worker():
-
     while True:
-
         job = await generation_queue.get()
 
         update = job["update"]
@@ -630,97 +627,68 @@ async def generation_worker():
         mode = job.get("mode", "image")
 
         async with generation_semaphore:
-
             try:
-
                 # ===== проверка лимита видео =====
-
                 user = get_user(user_id)
-
                 reset_week_if_needed(user)
-
                 video_used = user[3]
 
                 if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
-
                     try:
                         await status.delete()
                     except:
                         pass
-
                     await update.message.reply_text(
                         "🎬 Лимит видео/мультфильма на неделю исчерпан."
                     )
-
                     generation_queue.task_done()
                     continue
 
                 # ===== стиль генерации =====
-
                 style = ""
-
                 if model == "banana1":
                     style = "cinematic lighting ultra realistic 8k"
-
                 elif model == "banana2":
                     style = "hyper detailed masterpiece artstation quality"
-
                 elif model == "flash":
                     style = "fast simple render"
 
                 cartoon_style = context.user_data.get("cartoon_style")
-
                 if cartoon_style:
                     prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
-                    
+
                 if mode == "music":
                     pass
                 else:
                     prompt = f"{style} {prompt}"
 
                 # ================= SAFETY FILTER =================
-
                 if mode != "music":
                     prompt = clean_prompt(prompt)
 
                 cache_key = f"{prompt}_{model}_{size}"
-
                 cached = generation_cache.get(cache_key)
 
                 if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
-
                     try:
                         await status.delete()
                     except:
                         pass
-
-                    await update.message.reply_photo(
-                        photo=cached["image"]
-                    )
-
-                    
+                    await update.message.reply_photo(photo=cached["image"])
                     continue
-
 
                 images = images[:MAX_INPUT_IMAGES]
 
-
-                               # ================= MUSIC MODE =================
-
+                # ================= MUSIC MODE =================
                 if mode == "music":
-
                     try:
-
                         cached_audio = get_cached_music(prompt)
-
                         if cached_audio:
                             print("🎵 Music cache hit:", prompt)
-
                             try:
                                 await status.delete()
                             except:
                                 pass
-
                             try:
                                 await context.bot.send_audio(
                                     chat_id=update.effective_chat.id,
@@ -728,39 +696,27 @@ async def generation_worker():
                                     title="Generated Song"
                                 )
                             except Exception:
-
                                 async with aiohttp.ClientSession() as session:
                                     async with session.get(cached_audio) as r:
                                         audio_bytes = await r.read()
-
                                 await context.bot.send_audio(
                                     chat_id=update.effective_chat.id,
                                     audio=audio_bytes,
                                     title="Generated Song"
                                 )
-
                             context.user_data["mode"] = None
-
                             active_generations.discard(user_id)
-                            
-                            
-
                             continue
 
-
                         print("🎵 Music prompt:", prompt)
-
                         audio_url = await fal_music_generate(prompt)
-
                         print("🎵 Music URL:", audio_url)
-
                         save_music_cache(prompt, audio_url)
 
                         try:
                             await status.delete()
                         except:
                             pass
-
                         try:
                             await context.bot.send_audio(
                                 chat_id=update.effective_chat.id,
@@ -768,11 +724,9 @@ async def generation_worker():
                                 title="Generated Song"
                             )
                         except Exception:
-
                             async with aiohttp.ClientSession() as session:
                                 async with session.get(audio_url) as r:
                                     audio_bytes = await r.read()
-
                             await context.bot.send_audio(
                                 chat_id=update.effective_chat.id,
                                 audio=audio_bytes,
@@ -780,70 +734,44 @@ async def generation_worker():
                             )
 
                         context.user_data["mode"] = None
-
                         active_generations.discard(user_id)
                         user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
-                        
-
                         continue
 
-
                     except Exception as e:
-
                         print("🎵 Music generation error:", e)
-
                         try:
                             await status.delete()
                         except:
                             pass
-
                         try:
                             await update.message.reply_text(
                                 "⚠ Ошибка генерации песни. Попробуйте позже."
                             )
                         except:
                             pass
-
                         context.user_data["mode"] = None
-
                         active_generations.discard(user_id)
                         user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
-                        
-
                         continue
 
-                                        
-
-
-
-
-
-                
-                                # ================= VIDEO MODE (SORA2) =================
-
+                # ================= VIDEO MODE (SORA2) =================
                 if mode in ["video", "cartoon"]:
-
-                    # резервируем слот видео (защита от обхода очереди)
                     async with db_lock:
-
                         cursor.execute(
                             "SELECT video_count FROM users WHERE user_id=?",
                             (user_id,)
                         )
-
                         video_used = cursor.fetchone()[0]
 
                         if video_used >= FREE_VIDEO_LIMIT:
-
                             try:
                                 await status.delete()
                             except:
                                 pass
-
                             await update.message.reply_text(
                                 "🎬 Лимит видео/мультфильма на неделю исчерпан."
                             )
-
                             generation_queue.task_done()
                             continue
 
@@ -851,71 +779,47 @@ async def generation_worker():
                             "UPDATE users SET video_count = video_count + 1 WHERE user_id=?",
                             (user_id,)
                         )
-
                         conn.commit()
 
-                    # генерация видео
                     video_bytes = await fal_video_generate(prompt, images)
-
                     try:
                         await status.delete()
                     except:
                         pass
-
                     await asyncio.wait_for(
-                        update.message.reply_video(
-                            video=video_bytes
-                        ),
+                        update.message.reply_video(video=video_bytes),
                         timeout=60
                     )
-
                     context.user_data["input_images"] = []
                     context.user_data["last_images"] = []
-
-                    
                     continue
 
-
-
                 # ================= FAL IMAGE MODELS =================
-
                 if model in FAL_MODELS:
-
                     image_bytes = await fal_generate(model, prompt, images)
 
-                                # ================= OPENAI MODELS =================
-
+                # ================= OPENAI MODELS =================
                 else:
-
                     if images:
-
                         upload_images = []
-
                         for img in images:
                             upload_images.append(("image.png", img))
-
                         result = client.images.edit(
                             model="gpt-image-1",
                             image=upload_images,
                             prompt=prompt,
                             size=size,
                         )
-
                     else:
-
                         result = client.images.generate(
                             model="gpt-image-1",
                             prompt=prompt,
                             size=size,
                         )
-
                     image_base64 = result.data[0].b64_json
                     image_bytes = base64.b64decode(image_base64)
 
-                generation_cache[cache_key] = {
-                    "image": image_bytes,
-                    "time": time.time()
-                }
+                generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
 
                 keyboard = InlineKeyboardMarkup([
                     [
@@ -941,53 +845,35 @@ async def generation_worker():
                 )
 
                 async with db_lock:
-
                     cursor.execute(
                         "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
                         (user_id,)
                     )
-
                     conn.commit()
 
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
 
             except Exception as e:
-
                 logging.error(f"Generation error: {e}")
-
                 error_text = str(e)
-
                 if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
-
                     await update.message.reply_text(
-                        "⚠️ Запрос не прошёл фильтр безопасности.\n"
-                        "Попробуйте изменить текст."
+                        "⚠️ Запрос не прошёл фильтр безопасности.\nПопробуйте изменить текст."
                     )
-
                 else:
-
                     await update.message.reply_text(
                         "⚠ Ошибка генерации. Попробуйте позже."
                     )
-                
-
-            
 
             finally:
-
                 generation_queue.task_done()
-
                 if user_id in active_generations:
                     active_generations.remove(user_id)
-
                 if user_id in user_generation_count:
-
                     user_generation_count[user_id] -= 1
-
                     if user_generation_count[user_id] <= 0:
                         del user_generation_count[user_id]
-
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
