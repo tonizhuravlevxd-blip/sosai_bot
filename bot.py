@@ -673,7 +673,9 @@ async def generation_worker():
                 if cartoon_style:
                     prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
                     
-                if mode != "music":
+                if mode == "music":
+                    pass
+                else:
                     prompt = f"{style} {prompt}"
 
                 # ================= SAFETY FILTER =================
