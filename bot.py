@@ -427,27 +427,29 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
-async def fal_music_generate(prompt):
-
+async def fal_music_generate(prompt, duration=30, max_wait=900):
+    """
+    Генерация музыки через FAL с прогресс-логированием.
+    
+    :param prompt: текстовый промпт
+    :param duration: длина трека в секундах
+    :param max_wait: максимальное время ожидания генерации (в секундах)
+    :return: URL с аудио
+    """
     base_url = "https://queue.fal.run/fal-ai/lyria2"
-
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
     }
-
     payload = {
         "prompt": prompt,
-        "duration": 30
+        "duration": duration
     }
 
     async with aiohttp.ClientSession() as session:
-
         # создаём генерацию
         async with session.post(base_url, json=payload, headers=headers) as r:
-
             text = await r.text()
-
             try:
                 data = json.loads(text)
             except:
@@ -457,71 +459,46 @@ async def fal_music_generate(prompt):
             raise Exception(f"Fal music error: {data}")
 
         request_id = data["request_id"]
-
         status_url = f"{base_url}/requests/{request_id}/status"
         result_url = f"{base_url}/requests/{request_id}"
 
-        # ждём генерацию
-        for _ in range(360):
+        start_time = time.time()
+        last_status = None
 
+        while True:
             await asyncio.sleep(2)
-
             async with session.get(status_url, headers=headers) as r:
-
-                text = await r.text()
-
                 try:
-                    status_data = json.loads(text)
-                except:
+                    status_data = await r.json()
+                except Exception:
                     continue
 
             status = status_data.get("status")
+            if status != last_status:
+                logging.info(f"🎵 Music generation status: {status} for prompt: {prompt}")
+                last_status = status
 
             if status == "COMPLETED":
-
                 async with session.get(result_url, headers=headers) as r:
-
-                    text = await r.text()
-
                     try:
-                        result = json.loads(text)
-                    except:
-                        continue
-
-                # варианты ответа fal
+                        result = await r.json()
+                    except Exception:
+                        raise Exception("Failed to parse FAL music result")
+                
+                # проверяем варианты ответа
                 if "audio" in result:
                     return result["audio"]["url"]
-
                 if "audios" in result:
                     return result["audios"][0]["url"]
-
                 if "audio_url" in result:
                     return result["audio_url"]
+                raise Exception(f"Fal returned no audio for prompt: {prompt}")
 
             if status == "FAILED":
-                raise Exception(f"Fal music failed: {status_data}")
+                raise Exception(f"Fal music generation failed: {status_data}")
 
-        # последняя попытка (fal иногда отвечает позже)
-
-        async with session.get(result_url, headers=headers) as r:
-
-            text = await r.text()
-
-            try:
-                result = json.loads(text)
-            except:
-                raise Exception("Music generation timeout")
-
-        if "audio" in result:
-            return result["audio"]["url"]
-
-        if "audios" in result:
-            return result["audios"][0]["url"]
-
-        if "audio_url" in result:
-            return result["audio_url"]
-
-        raise Exception("Music generation timeout")
+            if time.time() - start_time > max_wait:
+                raise Exception(f"Music generation timeout (> {max_wait}s) for prompt: {prompt}")
 
 
 
