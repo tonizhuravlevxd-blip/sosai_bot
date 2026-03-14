@@ -6,6 +6,7 @@ import asyncio
 import logging
 import gc
 import aiohttp
+import json
 
 from telegram import (
     Update,
@@ -426,11 +427,9 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
-# ================= FAL MUSIC =================
-
 async def fal_music_generate(prompt):
 
-    base_url = "https://queue.fal.run/fal-ai/elevenlabs/music"
+    base_url = "https://queue.fal.run/fal-ai/lyria2"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -445,32 +444,48 @@ async def fal_music_generate(prompt):
 
         # создаём job
         async with session.post(base_url, headers=headers, json=payload) as r:
-            data = await r.json()
+
+            text = await r.text()
+
+            try:
+                data = json.loads(text)
+            except:
+                raise Exception(f"Fal music bad response: {text}")
 
         if "request_id" not in data:
             raise Exception(f"Fal music error: {data}")
 
         request_id = data["request_id"]
 
+        status_url = f"{base_url}/requests/{request_id}/status"
         result_url = f"{base_url}/requests/{request_id}"
 
-        # ждём результат
-        for _ in range(120):
+        # ждём генерацию
+        for _ in range(300):
 
             await asyncio.sleep(2)
 
-            async with session.get(result_url, headers=headers) as r:
+            async with session.get(status_url, headers=headers) as r:
 
                 text = await r.text()
 
                 try:
-                    result = json.loads(text)
+                    status_data = json.loads(text)
                 except:
                     continue
 
-            status = result.get("status")
+            status = status_data.get("status")
 
             if status == "COMPLETED":
+
+                async with session.get(result_url, headers=headers) as r:
+
+                    text = await r.text()
+
+                    try:
+                        result = json.loads(text)
+                    except:
+                        continue
 
                 if "audio_url" in result:
                     return result["audio_url"]
@@ -479,7 +494,24 @@ async def fal_music_generate(prompt):
                     return result["audios"][0]["url"]
 
             if status == "FAILED":
-                raise Exception(f"Fal music failed: {result}")
+                raise Exception(f"Fal music failed: {status_data}")
+
+        # 🔴 если вышли по таймауту — делаем последнюю попытку
+
+        async with session.get(result_url, headers=headers) as r:
+
+            text = await r.text()
+
+            try:
+                result = json.loads(text)
+            except:
+                raise Exception("Music generation timeout")
+
+        if "audio_url" in result:
+            return result["audio_url"]
+
+        if "audios" in result:
+            return result["audios"][0]["url"]
 
         raise Exception("Music generation timeout")
 
@@ -664,7 +696,7 @@ async def generation_worker():
                 images = images[:MAX_INPUT_IMAGES]
 
 
-                # ================= MUSIC MODE =================
+                                # ================= MUSIC MODE =================
 
                 if mode == "music":
 
@@ -676,10 +708,23 @@ async def generation_worker():
                         except:
                             pass
 
-                        await update.message.reply_audio(
-                            audio=cached_audio,
-                            title="Generated Song"
-                        )
+                        try:
+                            await context.bot.send_audio(
+                                chat_id=update.effective_chat.id,
+                                audio=cached_audio,
+                                title="Generated Song"
+                            )
+                        except Exception:
+
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(cached_audio) as r:
+                                    audio_bytes = await r.read()
+
+                            await context.bot.send_audio(
+                                chat_id=update.effective_chat.id,
+                                audio=audio_bytes,
+                                title="Generated Song"
+                            )
 
                         context.user_data["mode"] = None
                         generation_queue.task_done()
@@ -695,10 +740,23 @@ async def generation_worker():
                     except:
                         pass
 
-                    await update.message.reply_audio(
-                        audio=audio_url,
-                        title="Generated Song"
-                    )
+                    try:
+                        await context.bot.send_audio(
+                            chat_id=update.effective_chat.id,
+                            audio=audio_url,
+                            title="Generated Song"
+                        )
+                    except Exception:
+
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(audio_url) as r:
+                                audio_bytes = await r.read()
+
+                        await context.bot.send_audio(
+                            chat_id=update.effective_chat.id,
+                            audio=audio_bytes,
+                            title="Generated Song"
+                        )
 
                     context.user_data["mode"] = None
                     generation_queue.task_done()
