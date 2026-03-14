@@ -1584,16 +1584,24 @@ async def set_commands(app):
 
 
 
+
+
+# ================= POST INIT =================
 async def post_init(app):
     global generation_queue
+
+    # создаём очередь в правильном event loop
     generation_queue = asyncio.Queue(maxsize=200)
 
-    await set_commands(app)
-
+    # создаём воркеров генерации в том же event loop
     for _ in range(MAX_WORKERS):
         asyncio.create_task(generation_worker())
 
+    # запускаем очистку кеша
     asyncio.create_task(cache_cleaner())
+
+    # регистрируем команды бота
+    await set_commands(app)
 
 
 app.post_init = post_init
