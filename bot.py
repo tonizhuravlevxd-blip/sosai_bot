@@ -657,9 +657,7 @@ async def generation_worker():
                 if cartoon_style:
                     prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
 
-                if mode == "music":
-                    pass
-                else:
+                if mode != "music":
                     prompt = f"{style} {prompt}"
 
                 # ================= SAFETY FILTER =================
@@ -681,17 +679,28 @@ async def generation_worker():
 
                 # ================= MUSIC MODE =================
                 if mode == "music":
+                    if not update or not getattr(update, "effective_chat", None):
+                        logging.warning(f"Skipping music job for user {user_id}, invalid update")
+                        active_generations.discard(user_id)
+                        user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                        generation_queue.task_done()
+                        continue
+
+                    chat_id = update.effective_chat.id
+
                     try:
+                        # проверяем кэш
                         cached_audio = get_cached_music(prompt)
                         if cached_audio:
-                            print("🎵 Music cache hit:", prompt)
+                            logging.info(f"🎵 Music cache hit: {prompt}")
                             try:
-                                await status.delete()
+                                if status:
+                                    await status.delete()
                             except:
                                 pass
                             try:
                                 await context.bot.send_audio(
-                                    chat_id=update.effective_chat.id,
+                                    chat_id=chat_id,
                                     audio=cached_audio,
                                     title="Generated Song"
                                 )
@@ -700,26 +709,29 @@ async def generation_worker():
                                     async with session.get(cached_audio) as r:
                                         audio_bytes = await r.read()
                                 await context.bot.send_audio(
-                                    chat_id=update.effective_chat.id,
+                                    chat_id=chat_id,
                                     audio=audio_bytes,
                                     title="Generated Song"
                                 )
                             context.user_data["mode"] = None
                             active_generations.discard(user_id)
+                            generation_queue.task_done()
                             continue
 
-                        print("🎵 Music prompt:", prompt)
+                        # генерация музыки
+                        logging.info(f"🎵 Generating music for: {prompt}")
                         audio_url = await fal_music_generate(prompt)
-                        print("🎵 Music URL:", audio_url)
                         save_music_cache(prompt, audio_url)
 
                         try:
-                            await status.delete()
+                            if status:
+                                await status.delete()
                         except:
                             pass
+
                         try:
                             await context.bot.send_audio(
-                                chat_id=update.effective_chat.id,
+                                chat_id=chat_id,
                                 audio=audio_url,
                                 title="Generated Song"
                             )
@@ -728,7 +740,7 @@ async def generation_worker():
                                 async with session.get(audio_url) as r:
                                     audio_bytes = await r.read()
                             await context.bot.send_audio(
-                                chat_id=update.effective_chat.id,
+                                chat_id=chat_id,
                                 audio=audio_bytes,
                                 title="Generated Song"
                             )
@@ -736,23 +748,27 @@ async def generation_worker():
                         context.user_data["mode"] = None
                         active_generations.discard(user_id)
                         user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                        generation_queue.task_done()
                         continue
 
                     except Exception as e:
-                        print("🎵 Music generation error:", e)
+                        logging.error(f"🎵 Music generation error for user {user_id}: {e}")
                         try:
-                            await status.delete()
+                            if status:
+                                await status.delete()
                         except:
                             pass
                         try:
-                            await update.message.reply_text(
-                                "⚠ Ошибка генерации песни. Попробуйте позже."
+                            await context.bot.send_message(
+                                chat_id=chat_id,
+                                text="⚠ Ошибка генерации песни. Попробуйте позже."
                             )
                         except:
                             pass
                         context.user_data["mode"] = None
                         active_generations.discard(user_id)
                         user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                        generation_queue.task_done()
                         continue
 
                 # ================= VIDEO MODE (SORA2) =================
