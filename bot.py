@@ -1156,27 +1156,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("MODE:", context.user_data.get("mode"))
-
-
     user_id = update.effective_user.id
-        # ================= USER GENERATION LIMIT =================
-
-    count = user_generation_count.get(user_id, 0)
-
-    if count >= MAX_USER_GENERATIONS:
-        await update.message.reply_text(
-            "⚠️ Подождите завершения текущих генераций"
-        )
-        return
-
-    
-    
-    
     text = update.message.text
 
-    # ================= GLOBAL ANTI SPAM =================
+    print("MODE:", context.user_data.get("mode"))
 
+    # ================= USER GENERATION LIMIT =================
+    count = user_generation_count.get(user_id, 0)
+    if count >= MAX_USER_GENERATIONS:
+        await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
+        return
+
+    # ================= GLOBAL ANTI SPAM =================
     if not check_rate_limit(user_id):
         await update.message.reply_text("⏳ Не так быстро. Подождите 2 секунды.")
         return
@@ -1185,107 +1176,61 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-
     # ================= CHATGPT MODE =================
-
     if context.user_data.get("chat_mode"):
-
         try:
-
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": text}
-                ]
+                messages=[{"role": "user", "content": text}]
             )
-
             answer = response.choices[0].message.content
-
             await update.message.reply_text(answer)
-
         except Exception as e:
-
             logging.error(f"ChatGPT error: {e}")
-
-            await update.message.reply_text(
-                "⚠ Ошибка ChatGPT. Попробуйте позже."
-            )
-
+            await update.message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
         return
 
-
     # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
-
     if context.user_data.get("mode") not in ["video", "music"]:
-
         if "model" not in context.user_data:
-
-            await update.message.reply_text(
-                "⚠ Сначала выберите модель.\n\nВведите /photo"
-            )
-
+            await update.message.reply_text("⚠ Сначала выберите модель.\n\nВведите /photo")
             return
 
-
     # ================= GENERATION MODE =================
-
-    # защита от двойной генерации
     if user_id in active_generations:
         await update.message.reply_text("⏳ Ваша генерация уже выполняется")
         return
 
     count = user_generation_count.get(user_id, 0)
-
     if count >= MAX_USER_GENERATIONS:
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
 
     user = get_user(user_id)
-
     reset_week_if_needed(user)
 
     used = user[2]
     bonus = user[5]
-
-
     remaining = FREE_LIMIT + bonus - used
     video_used = user[3]
+
     # музыка не использует лимит изображений
     if context.user_data.get("mode") == "music":
         remaining = 9999
 
-    if context.user_data.get("mode") in ["video", "cartoon"]:
-
-        if video_used >= FREE_VIDEO_LIMIT:
-
-            await update.message.reply_text(
-                "🎬 Бесплатный лимит видео/мультфильма исчерпан.\n"
-                "Новый будет доступен через неделю."
-            )
-
-            return
-
-
-
-
-    
-    if remaining <= 0:
-
+    if context.user_data.get("mode") in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
         await update.message.reply_text(
-            "❌ Бесплатные генерации закончились.\n"
-            "Пригласите друзей через /ref"
+            "🎬 Бесплатный лимит видео/мультфильма исчерпан.\nНовый будет доступен через неделю."
         )
+        return
 
+    if remaining <= 0:
+        await update.message.reply_text("❌ Бесплатные генерации закончились.\nПригласите друзей через /ref")
         return
 
     if generation_queue.full():
-
-        await update.message.reply_text(
-            "⚠️ Сервер перегружен. Попробуйте через несколько секунд."
-        )
-
+        await update.message.reply_text("⚠️ Сервер перегружен. Попробуйте через несколько секунд.")
         return
-
 
     # блокируем генерацию
     user_generation_count[user_id] = count + 1
@@ -1295,14 +1240,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_images"] = context.user_data.get("input_images", [])
 
     position = get_queue_position() + 1
+    status = await update.message.reply_text(f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации...")
 
-    status = await update.message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
-    )
+    # ================= ПРАВИЛЬНЫЙ MODE =================
     mode = context.user_data.get("mode")
-
-    if not mode:
-        mode = "image"
+    if mode not in ["image", "video", "cartoon", "music"]:
+        mode = "image"  # дефолт для обычной картинки
 
     await generation_queue.put({
         "update": update,
