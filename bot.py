@@ -47,7 +47,7 @@ OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
 MAX_WORKERS = 4
 
-generation_queue = asyncio.Queue(maxsize=200)
+generation_queue = None
 
 
 
@@ -1585,6 +1585,8 @@ async def set_commands(app):
 
 
 async def post_init(app):
+    global generation_queue
+    generation_queue = asyncio.Queue(maxsize=200)
 
     await set_commands(app)
 
