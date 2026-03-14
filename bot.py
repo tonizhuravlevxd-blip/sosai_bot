@@ -703,78 +703,75 @@ async def generation_worker():
                 images = images[:MAX_INPUT_IMAGES]
 
 
-                                                                # ================= MUSIC MODE =================
+                     # ================= MUSIC MODE =================
 
-                if mode == "music":
+        if mode == "music":
 
-                    cached_audio = get_cached_music(prompt)
+            cached_audio = get_cached_music(prompt)
 
-                    if cached_audio:
-                        print("🎵 Music cache hit:", prompt)
+            if cached_audio:
+                print("🎵 Music cache hit:", prompt)
 
-                        try:
-                            await status.delete()
-                        except:
-                            pass
+                try:
+                    await status.delete()
+                except:
+                    pass
 
-                        try:
-                            await context.bot.send_audio(
-                                chat_id=update.effective_chat.id,
-                                audio=cached_audio,
-                                title="Generated Song"
-                            )
-                        except Exception:
+                try:
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=cached_audio,
+                        title="Generated Song"
+                    )
+                except Exception:
 
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(cached_audio) as r:
-                                    audio_bytes = await r.read()
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(cached_audio) as r:
+                            audio_bytes = await r.read()
 
-                            await context.bot.send_audio(
-                                chat_id=update.effective_chat.id,
-                                audio=audio_bytes,
-                                title="Generated Song"
-                            )
+                    await context.bot.send_audio(
+                        chat_id=update.effective_chat.id,
+                        audio=audio_bytes,
+                        title="Generated Song"
+                    )
 
-                        context.user_data["mode"] = None
-                        generation_queue.task_done()
-                        continue
+                context.user_data["mode"] = None
+                continue
 
 
-                    print("🎵 Music prompt:", prompt)
+            print("🎵 Music prompt:", prompt)
 
-                    audio_url = await fal_music_generate(prompt)
+            audio_url = await fal_music_generate(prompt)
 
-                    print("🎵 Music URL:", audio_url)
+            print("🎵 Music URL:", audio_url)
 
-                    save_music_cache(prompt, audio_url)
+            save_music_cache(prompt, audio_url)
 
-                    try:
-                        await status.delete()
-                    except:
-                        pass
+            try:
+                await status.delete()
+            except:
+                pass
 
-                    try:
-                        await context.bot.send_audio(
-                            chat_id=update.effective_chat.id,
-                            audio=audio_url,
-                            title="Generated Song"
-                        )
-                    except Exception:
+            try:
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=audio_url,
+                    title="Generated Song"
+                )
+            except Exception:
 
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(audio_url) as r:
-                                audio_bytes = await r.read()
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(audio_url) as r:
+                        audio_bytes = await r.read()
 
-                        await context.bot.send_audio(
-                            chat_id=update.effective_chat.id,
-                            audio=audio_bytes,
-                            title="Generated Song"
-                        )
+                await context.bot.send_audio(
+                    chat_id=update.effective_chat.id,
+                    audio=audio_bytes,
+                    title="Generated Song"
+                )
 
-                    context.user_data["mode"] = None
-                    generation_queue.task_done()
-                    continue
-
+            context.user_data["mode"] = None
+            continue
                        
 
                                         
