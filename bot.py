@@ -691,7 +691,7 @@ async def generation_worker():
                                 )
                             context.user_data["mode"] = None
                             active_generations.discard(user_id)
-                            generation_queue.task_done()
+                            
                             continue
 
                         # генерация музыки с прогрессом
@@ -779,7 +779,6 @@ async def generation_worker():
                             await update.message.reply_text(
                                 "🎬 Лимит видео/мультфильма на неделю исчерпан."
                             )
-                            generation_queue.task_done()
                             continue
 
                         cursor.execute(
@@ -845,6 +844,10 @@ async def generation_worker():
                     image_bytes = base64.b64decode(image_base64)
 
                 generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
+                # ===== очистка кэша если он слишком большой =====
+                if len(generation_cache) > 100:
+                    logging.info("🧹 Clearing image cache")
+                    generation_cache.clear()
 
                 keyboard = InlineKeyboardMarkup([
                     [
