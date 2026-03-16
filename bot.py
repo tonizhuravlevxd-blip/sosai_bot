@@ -868,6 +868,7 @@ async def generation_worker():
                     ),
                     timeout=30
                 )
+                context.user_data["mode"] = "image"
 
                 async with db_lock:
                     cursor.execute(
@@ -1235,7 +1236,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_week_if_needed(user)
 
     used = user[2]
-    bonus = user[5]
+    bonus = user[6]
     remaining = FREE_LIMIT + bonus - used
     video_used = user[3]
 
@@ -1336,7 +1337,7 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = get_user(tg_user.id)
 
     used = user[2]
-    bonus = user[5]
+    bonus = user[6]
 
     remaining = FREE_LIMIT + bonus - used
 
