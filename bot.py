@@ -691,7 +691,7 @@ async def generation_worker():
                                 )
                             context.user_data["mode"] = None
                             active_generations.discard(user_id)
-                            
+                            generation_queue.task_done()
                             continue
 
                         # генерация музыки с прогрессом
@@ -846,8 +846,8 @@ async def generation_worker():
                 generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
                 # ===== очистка кэша если он слишком большой =====
                 if len(generation_cache) > 100:
-                    logging.info("🧹 Clearing image cache")
-                    generation_cache.clear()
+                    oldest_key = min(generation_cache, key=lambda k: generation_cache[k]["time"])
+                    del generation_cache[oldest_key]
 
                 keyboard = InlineKeyboardMarkup([
                     [
