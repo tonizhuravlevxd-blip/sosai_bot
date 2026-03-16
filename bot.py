@@ -953,6 +953,8 @@ async def generation_worker():
                         await status.delete()
                 except:
                     pass
+                    # ===== сообщение что фото отправляется =====
+                sending_status = await update.message.reply_text("📤 Отправляем изображение...")
 
                 await asyncio.wait_for(
                     update.message.reply_photo(
@@ -961,6 +963,11 @@ async def generation_worker():
                     ),
                     timeout=30
                 )
+                   # удаляем сообщение после отправки
+                try:
+                    await sending_status.delete()
+                except:
+                    pass
 
                 context.user_data["mode"] = "image"
 
