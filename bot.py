@@ -607,6 +607,21 @@ async def fal_video_generate(prompt, images=None):
             await asyncio.sleep(2)
 
         raise Exception("Sora video timeout")
+
+# ================= FAKE PHOTO UPLOAD ACTION =================
+
+async def fake_photo_upload(bot, chat_id):
+
+    try:
+        while True:
+            await bot.send_chat_action(
+                chat_id=chat_id,
+                action="upload_photo"
+            )
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+
 # ================= WORKER =================
 async def generation_worker():
     while True:
@@ -654,8 +669,6 @@ async def generation_worker():
 
                 elif model == "banana2":
                     style = "hyper detailed masterpiece artstation quality"
-
-                
 
                 cartoon_style = context.user_data.get("cartoon_style")
 
@@ -896,34 +909,46 @@ async def generation_worker():
                     continue
 
                 # ================= FAL IMAGE =================
-                if model in FAL_MODELS:
-                    image_bytes = await fal_generate(model, prompt, images)
 
-                # ================= OPENAI IMAGE =================
-                else:
+                chat_id = update.effective_chat.id
 
-                    if images:
-                        upload_images = []
+                upload_task = asyncio.create_task(
+                    fake_photo_upload(context.bot, chat_id)
+                )
 
-                        for img in images:
-                            upload_images.append(("image.png", img))
+                try:
 
-                        result = client.images.edit(
-                            model="gpt-image-1",
-                            image=upload_images,
-                            prompt=prompt,
-                            size=size,
-                        )
+                    if model in FAL_MODELS:
+                        image_bytes = await fal_generate(model, prompt, images)
 
+                    # ================= OPENAI IMAGE =================
                     else:
-                        result = client.images.generate(
-                            model="gpt-image-1",
-                            prompt=prompt,
-                            size=size,
-                        )
 
-                    image_base64 = result.data[0].b64_json
-                    image_bytes = base64.b64decode(image_base64)
+                        if images:
+                            upload_images = []
+
+                            for img in images:
+                                upload_images.append(("image.png", img))
+
+                            result = client.images.edit(
+                                model="gpt-image-1",
+                                image=upload_images,
+                                prompt=prompt,
+                                size=size,
+                            )
+
+                        else:
+                            result = client.images.generate(
+                                model="gpt-image-1",
+                                prompt=prompt,
+                                size=size,
+                            )
+
+                        image_base64 = result.data[0].b64_json
+                        image_bytes = base64.b64decode(image_base64)
+
+                finally:
+                    upload_task.cancel()
 
                 generation_cache[cache_key] = {
                     "image": image_bytes,
@@ -953,8 +978,11 @@ async def generation_worker():
                         await status.delete()
                 except:
                     pass
-                    # ===== сообщение что фото отправляется =====
-                sending_status = await update.message.reply_text("📤 Отправляем изображение...")
+
+                # ===== сообщение что фото отправляется =====
+                sending_status = await update.message.reply_text(
+                    "📤 Отправляем изображение..."
+                )
 
                 await asyncio.wait_for(
                     update.message.reply_photo(
@@ -963,7 +991,8 @@ async def generation_worker():
                     ),
                     timeout=30
                 )
-                   # удаляем сообщение после отправки
+
+                # ===== удаляем сообщение после отправки =====
                 try:
                     await sending_status.delete()
                 except:
