@@ -1120,7 +1120,6 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
     # ================= CALLBACK =================
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.callback_query
@@ -1128,18 +1127,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
 
-    elif data == "buy_stars":
+    if data == "buy_stars":
 
-    await query.message.reply_invoice(
-        title="🍩 Пончик Premium",
-        description="30 дней Premium доступа",
-        payload="premium_donut",
-        provider_token="",
-        currency="XTR",
-        prices=[{"label": "Premium", "amount": 500}]
-    )
+        await query.message.reply_invoice(
+            title="🍩 Пончик Premium",
+            description="30 дней Premium доступа",
+            payload="premium_donut",
+            provider_token="",  # Вставь токен провайдера платежей
+            currency="XTR",
+            prices=[{"label": "Premium", "amount": 500}]
+        )
 
-    if data == "finish":
+    elif data == "finish":
 
         context.user_data.clear()
         await query.message.reply_text("✅ Генерация завершена.")
