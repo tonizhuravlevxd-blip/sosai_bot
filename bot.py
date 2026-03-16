@@ -1121,14 +1121,12 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     # ================= CALLBACK =================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
     await query.answer()
-
     data = query.data
+    user_id = query.from_user.id
 
     if data == "buy_stars":
-
         await query.message.reply_invoice(
             title="🍩 Пончик Premium",
             description="30 дней Premium доступа",
@@ -1138,81 +1136,83 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prices=[{"label": "Premium", "amount": 500}]
         )
 
-    elif data == "finish":
+    elif data == "buy_spb":
+        # ссылка на оплату через YooKassa (СПБ)
+        # замените SELLER_ID на ваш магазин
+        spb_link = (
+            "https://yoomoney.ru/quickpay/shop-widget?"
+            "writer=SELLER_ID&"
+            "targets=Premium+Donut&"
+            "default-sum=500&"
+            "button-text=11&"
+            "payment-type-choice=on&"
+            "quickpay-form=shop&"
+            f"metadata[user_id]={user_id}&"
+            f"successURL=https://t.me/{context.bot.username}"
+        )
+        await query.message.reply_text(
+            f"💳 Оплата через СПБ (ЮKassa)\n\n"
+            f"Нажмите на ссылку и оплатите:\n{spb_link}\n\n"
+            f"После успешной оплаты ваш статус Premium активируется автоматически."
+        )
 
+    elif data == "finish":
         context.user_data.clear()
         await query.message.reply_text("✅ Генерация завершена.")
 
     elif data == "restart":
-
         context.user_data["input_images"] = []
         context.user_data["last_images"] = []
-
         await query.message.reply_text("🔄 Начните заново. Используйте /photo")
 
     elif data == "accept_terms":
-
         cursor.execute(
             "UPDATE users SET accepted_terms=1 WHERE user_id=?",
-            (query.from_user.id,)
+            (user_id,)
         )
-
         conn.commit()
-
         await query.edit_message_text("✅ Условия приняты.")
 
     elif data == "model_flash":
-
         context.user_data["model"] = "flash"
-
         await query.message.reply_text(
             "✅ Выбрана модель:\n⚡ Flash\n\n"
             "✏ Напишите текст или отправьте 1-4 фото"
         )
 
     elif data == "model_banana1":
-
         context.user_data["model"] = "banana1"
-
         await query.message.reply_text(
             "✅ Выбрана модель:\n🍌 Nano Banana 1\n\n"
             "✏ Напишите текст или отправьте 1-4 фото"
         )
 
     elif data == "model_banana2":
-
         context.user_data["model"] = "banana2"
-
         await query.message.reply_text(
             "✅ Выбрана модель:\n🍌 Nano Banana 2\n\n"
             "✏ Напишите текст или отправьте 1-4 фото"
         )
 
     elif data == "size_square":
-
         context.user_data["size"] = SIZE_CONFIG["square"]
         await query.message.reply_text("⬜ Разрешение 1:1 выбрано")
 
     elif data == "size_wide":
-
         context.user_data["size"] = SIZE_CONFIG["wide"]
         await query.message.reply_text("🖥 Разрешение 16:9 выбрано")
 
     elif data == "size_phone":
-
         context.user_data["size"] = SIZE_CONFIG["phone"]
         await query.message.reply_text("📱 Вертикальное разрешение выбрано")
 
     elif data == "suno_hit":
-
         context.user_data["mode"] = "music"
-
         await query.message.reply_text(
             "🎵 Напишите тему песни\n\n"
             "Пример:\n"
             "emotional pop song about lost love"
         )
-
 
 
     
