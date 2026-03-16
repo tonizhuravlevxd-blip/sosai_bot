@@ -41,6 +41,11 @@ FREE_LIMIT = 5
 FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
+# ===== PREMIUM LIMITS =====
+
+PREMIUM_IMAGE_LIMIT = 200
+PREMIUM_VIDEO_LIMIT = 20
+PREMIUM_MUSIC_LIMIT = 50
 
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
@@ -153,7 +158,10 @@ accepted_terms INTEGER DEFAULT 0,
 referrals INTEGER DEFAULT 0,
 bonus_images INTEGER DEFAULT 0,
 ref_by INTEGER,
-is_active INTEGER DEFAULT 0
+is_active INTEGER DEFAULT 0,
+
+premium INTEGER DEFAULT 0,
+premium_until INTEGER DEFAULT 0
 )
 """)
 
@@ -227,6 +235,18 @@ def reset_week_if_needed(user):
                 conn.commit()
 
         asyncio.create_task(update())
+def is_premium(user):
+
+    if not user:
+        return False
+
+    premium = user[9]
+    premium_until = user[10]
+
+    if premium == 1 and premium_until > int(time.time()):
+        return True
+
+    return False        
 
 
 
@@ -1056,6 +1076,49 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🔄 Сессия перезапущена. Выберите модель через /photo"
     )
+
+# ================= PREMIUM COMMAND =================
+async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("⭐ Купить за Stars", callback_data="buy_stars")
+        ],
+        [
+            InlineKeyboardButton("💳 Оплатить через СПБ", callback_data="buy_spb")
+        ]
+    ])
+
+    await update.message.reply_text(
+        "🍩 Пончик-статус Premium\n\n"
+        "Что входит:\n"
+        "🎨 200 генераций изображений\n"
+        "🎬 20 видео / мультфильмов\n"
+        "🎵 50 генераций музыки\n\n"
+        "⏳ действует 30 дней\n\n"
+        "Выберите способ оплаты:",
+        reply_markup=keyboard
+    )
+
+# ================= PAYMENT SUCCESS =================
+async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+
+    cursor.execute(
+        "UPDATE users SET premium=1, premium_until=? WHERE user_id=?",
+        (premium_until, user_id)
+    )
+
+    conn.commit()
+
+    await update.message.reply_text(
+        "🍩 Поздравляем!\n\n"
+        "Вы получили Пончик-статус Premium на 30 дней!"
+    )
+
     # ================= CALLBACK =================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1064,6 +1127,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     data = query.data
+
+    elif data == "buy_stars":
+
+    await query.message.reply_invoice(
+        title="🍩 Пончик Premium",
+        description="30 дней Premium доступа",
+        payload="premium_donut",
+        provider_token="",
+        currency="XTR",
+        prices=[{"label": "Premium", "amount": 500}]
+    )
 
     if data == "finish":
 
@@ -1319,14 +1393,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     used = user[2]
     bonus = user[6]
-    remaining = FREE_LIMIT + bonus - used
     video_used = user[3]
+
+    if is_premium(user):
+        remaining = PREMIUM_IMAGE_LIMIT - used
+    else:
+        remaining = FREE_LIMIT + bonus - used
 
     # музыка не использует лимит изображений
     if context.user_data.get("mode") == "music":
         remaining = 9999
 
-    if context.user_data.get("mode") in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
+    video_limit = PREMIUM_VIDEO_LIMIT if is_premium(user) else FREE_VIDEO_LIMIT
+    if context.user_data.get("mode") in ["video", "cartoon"] and video_used >= video_limit:
         await update.message.reply_text(
             "🎬 Бесплатный лимит видео/мультфильма исчерпан.\nНовый будет доступен через неделю."
         )
@@ -1489,6 +1568,7 @@ app = ApplicationBuilder().token(TG_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("account", account))
+app.add_handler(CommandHandler("premium", premium))    
 app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
 app.add_handler(CommandHandler("video", video))
@@ -1502,6 +1582,7 @@ app.add_handler(CallbackQueryHandler(button_handler))
 
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
 
 
 async def set_commands(app):
@@ -1509,6 +1590,7 @@ async def set_commands(app):
     await app.bot.set_my_commands([
         BotCommand("start", "Запуск"),
         BotCommand("account", "Профиль"),
+        BotCommand("premium", "🍩 Купить Premium"),
         BotCommand("ref", "Реферальная программа"),
         BotCommand("photo", "Создать изображение"),
         BotCommand("video", "Создать видео"),
