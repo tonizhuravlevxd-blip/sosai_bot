@@ -655,8 +655,7 @@ async def generation_worker():
                 elif model == "banana2":
                     style = "hyper detailed masterpiece artstation quality"
 
-                elif model == "flash":
-                    style = "fast simple render"
+                
 
                 cartoon_style = context.user_data.get("cartoon_style")
 
@@ -1174,12 +1173,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
         await query.edit_message_text("✅ Условия приняты.")
 
-    elif data == "model_flash":
-        context.user_data["model"] = "flash"
-        await query.message.reply_text(
-            "✅ Выбрана модель:\n⚡ Flash\n\n"
-            "✏ Напишите текст или отправьте 1-4 фото"
-        )
+    
 
     elif data == "model_banana1":
         context.user_data["model"] = "banana1"
@@ -1527,7 +1521,7 @@ async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Flash", callback_data="model_flash")],
+        
         [InlineKeyboardButton("🍌 Nano Banana 1", callback_data="model_banana1")],
         [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_banana2")],
         [
