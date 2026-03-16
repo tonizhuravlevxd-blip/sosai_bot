@@ -607,30 +607,39 @@ async def generation_worker():
             try:
                 # ===== проверка лимита видео =====
                 user = get_user(user_id)
+
+                if not user:
+                    continue
+
                 reset_week_if_needed(user)
                 video_used = user[3]
 
                 if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
                     try:
-                        await status.delete()
+                        if status:
+                            await status.delete()
                     except:
                         pass
+
                     await update.message.reply_text(
                         "🎬 Лимит видео/мультфильма на неделю исчерпан."
                     )
-                    
                     continue
 
                 # ===== стиль генерации =====
                 style = ""
+
                 if model == "banana1":
                     style = "cinematic lighting ultra realistic 8k"
+
                 elif model == "banana2":
                     style = "hyper detailed masterpiece artstation quality"
+
                 elif model == "flash":
                     style = "fast simple render"
 
                 cartoon_style = context.user_data.get("cartoon_style")
+
                 if cartoon_style:
                     prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
 
@@ -646,9 +655,11 @@ async def generation_worker():
 
                 if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
                     try:
-                        await status.delete()
+                        if status:
+                            await status.delete()
                     except:
                         pass
+
                     await update.message.reply_photo(photo=cached["image"])
                     continue
 
@@ -656,49 +667,60 @@ async def generation_worker():
 
                 # ================= MUSIC MODE =================
                 if mode == "music":
+
                     if not update or not getattr(update, "effective_chat", None):
                         logging.warning(f"Skipping music job for user {user_id}, invalid update")
                         active_generations.discard(user_id)
-                        user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                        user_generation_count[user_id] = max(
+                            0,
+                            user_generation_count.get(user_id, 1) - 1
+                        )
                         continue
 
                     chat_id = update.effective_chat.id
 
                     try:
-                        # проверяем кэш
+                        # ===== проверяем кэш =====
                         cached_audio = get_cached_music(prompt)
+
                         if cached_audio:
                             logging.info(f"🎵 Music cache hit: {prompt}")
+
                             try:
                                 if status:
                                     await status.delete()
                             except:
                                 pass
+
                             try:
                                 await context.bot.send_audio(
                                     chat_id=chat_id,
                                     audio=cached_audio,
                                     title="Generated Song"
                                 )
+
                             except Exception:
                                 async with aiohttp.ClientSession() as session:
                                     async with session.get(cached_audio) as r:
                                         audio_bytes = await r.read()
+
                                 await context.bot.send_audio(
                                     chat_id=chat_id,
                                     audio=audio_bytes,
                                     title="Generated Song"
                                 )
+
                             context.user_data["mode"] = None
                             active_generations.discard(user_id)
-                            generation_queue.task_done()
                             continue
 
-                        # генерация музыки с прогрессом
+                        # ===== генерация музыки =====
                         logging.info(f"🎵 Generating music for: {prompt}")
 
                         if status is None:
-                            status = await update.message.reply_text("🎵 Музыка генерируется… 0%")
+                            status = await update.message.reply_text(
+                                "🎵 Музыка генерируется… 0%"
+                            )
 
                         async def music_progress(msg, interval=1):
                             pct = 0
@@ -706,12 +728,18 @@ async def generation_worker():
                                 while True:
                                     await asyncio.sleep(interval)
                                     pct = min(pct + 10, 100)
-                                    await msg.edit_text(f"🎵 Музыка генерируется… {pct}%")
+                                    await msg.edit_text(
+                                        f"🎵 Музыка генерируется… {pct}%"
+                                    )
                             except asyncio.CancelledError:
                                 pass
 
-                        progress_task = asyncio.create_task(music_progress(status))
+                        progress_task = asyncio.create_task(
+                            music_progress(status)
+                        )
+
                         audio_url = await fal_music_generate(prompt)
+
                         progress_task.cancel()
 
                         try:
@@ -728,10 +756,12 @@ async def generation_worker():
                                 audio=audio_url,
                                 title="Generated Song"
                             )
+
                         except Exception:
                             async with aiohttp.ClientSession() as session:
                                 async with session.get(audio_url) as r:
                                     audio_bytes = await r.read()
+
                             await context.bot.send_audio(
                                 chat_id=chat_id,
                                 audio=audio_bytes,
@@ -740,16 +770,25 @@ async def generation_worker():
 
                         context.user_data["mode"] = None
                         active_generations.discard(user_id)
-                        user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+
+                        user_generation_count[user_id] = max(
+                            0,
+                            user_generation_count.get(user_id, 1) - 1
+                        )
+
                         continue
 
                     except Exception as e:
-                        logging.error(f"🎵 Music generation error for user {user_id}: {e}")
+                        logging.error(
+                            f"🎵 Music generation error for user {user_id}: {e}"
+                        )
+
                         try:
                             if status:
                                 await status.delete()
                         except:
                             pass
+
                         try:
                             await context.bot.send_message(
                                 chat_id=chat_id,
@@ -757,25 +796,35 @@ async def generation_worker():
                             )
                         except:
                             pass
+
                         context.user_data["mode"] = None
                         active_generations.discard(user_id)
-                        user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+
+                        user_generation_count[user_id] = max(
+                            0,
+                            user_generation_count.get(user_id, 1) - 1
+                        )
+
                         continue
 
-                # ================= VIDEO MODE (SORA2) =================
+                # ================= VIDEO MODE =================
                 if mode in ["video", "cartoon"]:
+
                     async with db_lock:
                         cursor.execute(
                             "SELECT video_count FROM users WHERE user_id=?",
                             (user_id,)
                         )
+
                         video_used = cursor.fetchone()[0]
 
                         if video_used >= FREE_VIDEO_LIMIT:
                             try:
-                                await status.delete()
+                                if status:
+                                    await status.delete()
                             except:
                                 pass
+
                             await update.message.reply_text(
                                 "🎬 Лимит видео/мультфильма на неделю исчерпан."
                             )
@@ -788,7 +837,9 @@ async def generation_worker():
                         conn.commit()
 
                     if status is None:
-                        status = await update.message.reply_text("🎬 Видео генерируется… 0%")
+                        status = await update.message.reply_text(
+                            "🎬 Видео генерируется… 0%"
+                        )
 
                     async def video_progress(msg, interval=1):
                         pct = 0
@@ -796,12 +847,18 @@ async def generation_worker():
                             while True:
                                 await asyncio.sleep(interval)
                                 pct = min(pct + 10, 100)
-                                await msg.edit_text(f"🎬 Видео генерируется… {pct}%")
+                                await msg.edit_text(
+                                    f"🎬 Видео генерируется… {pct}%"
+                                )
                         except asyncio.CancelledError:
                             pass
 
-                    progress_task = asyncio.create_task(video_progress(status))
+                    progress_task = asyncio.create_task(
+                        video_progress(status)
+                    )
+
                     video_bytes = await fal_video_generate(prompt, images)
+
                     progress_task.cancel()
 
                     try:
@@ -814,39 +871,52 @@ async def generation_worker():
                         update.message.reply_video(video=video_bytes),
                         timeout=60
                     )
+
                     context.user_data["input_images"] = []
                     context.user_data["last_images"] = []
                     continue
 
-                # ================= FAL IMAGE MODELS =================
+                # ================= FAL IMAGE =================
                 if model in FAL_MODELS:
                     image_bytes = await fal_generate(model, prompt, images)
 
-                # ================= OPENAI MODELS =================
+                # ================= OPENAI IMAGE =================
                 else:
+
                     if images:
                         upload_images = []
+
                         for img in images:
                             upload_images.append(("image.png", img))
+
                         result = client.images.edit(
                             model="gpt-image-1",
                             image=upload_images,
                             prompt=prompt,
                             size=size,
                         )
+
                     else:
                         result = client.images.generate(
                             model="gpt-image-1",
                             prompt=prompt,
                             size=size,
                         )
+
                     image_base64 = result.data[0].b64_json
                     image_bytes = base64.b64decode(image_base64)
 
-                generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
-                # ===== очистка кэша если он слишком большой =====
+                generation_cache[cache_key] = {
+                    "image": image_bytes,
+                    "time": time.time()
+                }
+
+                # ===== очистка кэша =====
                 if len(generation_cache) > 100:
-                    oldest_key = min(generation_cache, key=lambda k: generation_cache[k]["time"])
+                    oldest_key = min(
+                        generation_cache,
+                        key=lambda k: generation_cache[k]["time"]
+                    )
                     del generation_cache[oldest_key]
 
                 keyboard = InlineKeyboardMarkup([
@@ -860,7 +930,8 @@ async def generation_worker():
                 ])
 
                 try:
-                    await status.delete()
+                    if status:
+                        await status.delete()
                 except:
                     pass
 
@@ -871,6 +942,7 @@ async def generation_worker():
                     ),
                     timeout=30
                 )
+
                 context.user_data["mode"] = "image"
 
                 async with db_lock:
@@ -884,23 +956,30 @@ async def generation_worker():
                 context.user_data["last_images"] = []
 
             except Exception as e:
+
                 logging.error(f"Generation error: {e}")
                 error_text = str(e)
+
                 if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
                     await update.message.reply_text(
                         "⚠️ Запрос не прошёл фильтр безопасности.\nПопробуйте изменить текст."
                     )
+
                 else:
                     await update.message.reply_text(
                         "⚠ Ошибка генерации. Попробуйте позже."
                     )
 
             finally:
+
                 generation_queue.task_done()
+
                 if user_id in active_generations:
                     active_generations.remove(user_id)
+
                 if user_id in user_generation_count:
                     user_generation_count[user_id] -= 1
+
                     if user_generation_count[user_id] <= 0:
                         del user_generation_count[user_id]
 # ================= START =================
