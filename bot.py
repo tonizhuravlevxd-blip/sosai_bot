@@ -8,6 +8,11 @@ import gc
 import aiohttp
 import json
 
+# ================= GLOBAL QUEUES =================
+image_queue = asyncio.Queue(maxsize=200)
+video_queue = asyncio.Queue(maxsize=100)
+music_queue = asyncio.Queue(maxsize=100)
+
 from telegram import (
     Update,
     InlineKeyboardMarkup,
@@ -145,6 +150,7 @@ def check_rate_limit(user_id):
     return True
 
 
+# ================= RATE LIMIT / QUEUE =================
 def get_queue_position(mode="image"):
 
     if mode == "video":
