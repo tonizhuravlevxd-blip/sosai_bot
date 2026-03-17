@@ -150,14 +150,17 @@ def check_rate_limit(user_id):
 
 # ================= RATE LIMIT / QUEUE =================
 def get_queue_position(mode="image"):
+    """
+    Возвращает текущую позицию пользователя в нужной очереди.
+    """
+    global image_queue, video_queue, music_queue
 
     if mode == "video":
         return video_queue.qsize()
-
-    if mode == "music":
+    elif mode == "music":
         return music_queue.qsize()
-
-    return image_queue.qsize()
+    else:
+        return image_queue.qsize()
 
 
 # ================= DATABASE =================
