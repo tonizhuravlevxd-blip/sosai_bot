@@ -643,7 +643,7 @@ async def fake_photo_upload(bot, chat_id):
 
 # ================= WORKER =================
 async def generation_worker_single(job):
-        
+        while True:
 
         update = job["update"]
         context = job["context"]
