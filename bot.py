@@ -50,7 +50,7 @@ PREMIUM_MUSIC_LIMIT = 50
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
-MAX_WORKERS = 4
+MAX_WORKERS = 8
 
 generation_queue = None
 
@@ -1639,11 +1639,12 @@ async def set_commands(app):
 async def post_init(app):
     global generation_queue
 
-    # создаём очередь в правильном event loop
-    generation_queue = asyncio.Queue(maxsize=200)
+    # создаём очередь генераций
+    generation_queue = asyncio.Queue(maxsize=10000)  # увеличиваем до 10k для большого трафика
 
-    # создаём воркеров генерации в том же event loop
+    # создаём пул воркеров
     for _ in range(MAX_WORKERS):
+        # каждый воркер в отдельном таске, без блокировок
         asyncio.create_task(generation_worker())
 
     # запускаем очистку кеша
@@ -1651,6 +1652,8 @@ async def post_init(app):
 
     # регистрируем команды бота
     await set_commands(app)
+
+    logging.info("✅ Постинициализация завершена: очереди и воркеры готовы")
 
 
 app.post_init = post_init
