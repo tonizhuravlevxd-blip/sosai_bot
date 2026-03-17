@@ -1679,13 +1679,6 @@ async def set_commands(app):
 
 # ================= POST INIT =================
 async def post_init(app):
-    global image_queue, video_queue, music_queue
-
-    # ===== создаём очереди =====
-    image_queue = asyncio.Queue(maxsize=200)
-    video_queue = asyncio.Queue(maxsize=100)
-    music_queue = asyncio.Queue(maxsize=100)
-
     # ===== IMAGE WORKERS =====
     for _ in range(IMAGE_WORKERS):
         asyncio.create_task(generation_worker_wrapper(image_queue, "image"))
@@ -1700,6 +1693,7 @@ async def post_init(app):
 
     # ===== очистка кеша =====
     asyncio.create_task(cache_cleaner())
+
 
     await set_commands(app)
 
