@@ -1682,15 +1682,15 @@ async def set_commands(app):
 async def post_init(app):
     # ===== IMAGE WORKERS =====
     for _ in range(IMAGE_WORKERS):
-        asyncio.create_task(generation_worker_wrapper(image_queue, "image"))
+        asyncio.create_task(generation_worker_single(job)(image_queue, "image"))
 
     # ===== VIDEO WORKERS =====
     for _ in range(VIDEO_WORKERS):
-        asyncio.create_task(generation_worker_wrapper(video_queue, "video"))
+        asyncio.create_task(generation_worker_single(job)(video_queue, "video"))
 
     # ===== MUSIC WORKERS =====
     for _ in range(MUSIC_WORKERS):
-        asyncio.create_task(generation_worker_wrapper(music_queue, "music"))
+        asyncio.create_task(generation_worker_single(job)(music_queue, "music"))
 
     # ===== очистка кеша =====
     asyncio.create_task(cache_cleaner())
