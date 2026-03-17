@@ -50,7 +50,19 @@ PREMIUM_MUSIC_LIMIT = 50
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
-MAX_WORKERS = 4
+# ===== WORKERS x10 SCALE =====
+
+IMAGE_WORKERS = 5
+VIDEO_WORKERS = 3
+MUSIC_WORKERS = 2
+
+image_queue = None
+video_queue = None
+music_queue = None
+
+image_semaphore = asyncio.Semaphore(IMAGE_WORKERS)
+video_semaphore = asyncio.Semaphore(VIDEO_WORKERS)
+music_semaphore = asyncio.Semaphore(MUSIC_WORKERS)
 
 generation_queue = None
 
@@ -133,8 +145,15 @@ def check_rate_limit(user_id):
     return True
 
 
-def get_queue_position():
-    return generation_queue.qsize()
+def get_queue_position(mode="image"):
+
+    if mode == "video":
+        return video_queue.qsize()
+
+    if mode == "music":
+        return music_queue.qsize()
+
+    return image_queue.qsize()
 
 
 # ================= DATABASE =================
@@ -623,9 +642,9 @@ async def fake_photo_upload(bot, chat_id):
         pass
 
 # ================= WORKER =================
-async def generation_worker():
+async def generation_worker_single(job):
     while True:
-        job = await generation_queue.get()
+        
 
         update = job["update"]
         context = job["context"]
@@ -638,7 +657,17 @@ async def generation_worker():
 
         mode = job.get("mode", "image")
 
-        async with generation_semaphore:
+        
+
+                # ===== правильный семафор =====
+        if mode == "video" or mode == "cartoon":
+            semaphore = video_semaphore
+        elif mode == "music":
+            semaphore = music_semaphore
+        else:
+            semaphore = image_semaphore
+
+        async with semaphore:
             try:
                 # ===== проверка лимита видео =====
                 user = get_user(user_id)
@@ -1154,7 +1183,6 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "🍩 Поздравляем!\n\n"
         "Вы получили Пончик-статус Premium на 30 дней!"
     )
-
     # ================= CALLBACK =================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1245,13 +1273,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "emotional pop song about lost love"
         )
 
-
-    
-
-    
-
     # ================= CARTOON STYLE SELECT =================
-
     elif data.startswith("cartoon_"):
 
         style_key = data.replace("cartoon_", "")
@@ -1271,20 +1293,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Бот создаст мультфильм 🎥"
         )
 
-
-
     elif data == "repeat":
 
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
+        mode = context.user_data.get("mode")
 
-        position = get_queue_position() + 1
+        position = get_queue_position(mode) + 1
 
         status = await query.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
         )
 
-        await generation_queue.put({
+        job_data = {
             "update": update,
             "context": context,
             "prompt": prompt,
@@ -1292,9 +1313,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model","banana2"),
             "images": images,
             "user_id": query.from_user.id,
-            "mode": context.user_data.get("mode"),
+            "mode": mode,
             "status": status
-        })
+        }
+
+        if mode == "video" or mode == "cartoon":
+            await video_queue.put(job_data)
+
+        elif mode == "music":
+            await music_queue.put(job_data)
+
+        else:
+            await image_queue.put(job_data)
 
 
 # ================= PHOTO / TEXT HANDLERS =================
@@ -1317,19 +1347,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
 
-    # защита RAM — очищаем если слишком много изображений
     if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
         context.user_data["input_images"] = []
 
     photo = update.message.photo[-1]
 
-    # защита от огромных файлов
     if photo.file_size and photo.file_size > 5_000_000:
         await update.message.reply_text("⚠️ Фото слишком большое (макс 5MB)")
         return
 
     file = await photo.get_file()
-
     image_bytes = bytes(await file.download_as_bytearray())
 
     context.user_data["input_images"].append(image_bytes)
@@ -1341,7 +1368,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_prompt"] = caption
         context.user_data["last_images"] = context.user_data["input_images"]
 
-        position = get_queue_position() + 1
+        mode = context.user_data.get("mode")
+        position = get_queue_position(mode) + 1
 
         status = await update.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
@@ -1355,7 +1383,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lock_user_generation(user_id)
 
-        await generation_queue.put({
+        job_data = {
             "update": update,
             "context": context,
             "prompt": caption,
@@ -1363,9 +1391,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model", "banana2"),
             "images": context.user_data["input_images"],
             "user_id": user_id,
-            "mode": context.user_data.get("mode"),
+            "mode": mode,
             "status": status
-        })
+        }
+
+        if mode == "video" or mode == "cartoon":
+            await video_queue.put(job_data)
+
+        elif mode == "music":
+            await music_queue.put(job_data)
+
+        else:
+            await image_queue.put(job_data)
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1373,13 +1411,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     print("MODE:", context.user_data.get("mode"))
 
-    # ================= USER GENERATION LIMIT =================
     count = user_generation_count.get(user_id, 0)
     if count >= MAX_USER_GENERATIONS:
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
 
-    # ================= GLOBAL ANTI SPAM =================
     if not check_rate_limit(user_id):
         await update.message.reply_text("⏳ Не так быстро. Подождите 2 секунды.")
         return
@@ -1388,7 +1424,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-    # ================= CHATGPT MODE =================
     if context.user_data.get("chat_mode"):
         try:
             response = client.chat.completions.create(
@@ -1402,13 +1437,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
         return
 
-    # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
     if context.user_data.get("mode") not in ["video", "music"]:
         if "model" not in context.user_data:
             await update.message.reply_text("⚠ Сначала выберите модель.\n\nВведите /photo")
             return
 
-    # ================= GENERATION MODE =================
     if user_id in active_generations:
         await update.message.reply_text("⏳ Ваша генерация уже выполняется")
         return
@@ -1430,7 +1463,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         remaining = FREE_LIMIT + bonus - used
 
-    # музыка не использует лимит изображений
     if context.user_data.get("mode") == "music":
         remaining = 9999
 
@@ -1445,26 +1477,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Бесплатные генерации закончились.\nПригласите друзей через /ref")
         return
 
-    if generation_queue.full():
+    # ВАЖНО: проверяем нужную очередь
+    mode = context.user_data.get("mode")
+    queue = video_queue if mode in ["video", "cartoon"] else music_queue if mode == "music" else image_queue
+
+    if queue.full():
         await update.message.reply_text("⚠️ Сервер перегружен. Попробуйте через несколько секунд.")
         return
 
-    # блокируем генерацию
     user_generation_count[user_id] = count + 1
     active_generations.add(user_id)
 
     context.user_data["last_prompt"] = text
     context.user_data["last_images"] = context.user_data.get("input_images", [])
 
-    position = get_queue_position() + 1
-    status = await update.message.reply_text(f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать...")
+    position = get_queue_position(mode) + 1
+    status = await update.message.reply_text(
+        f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
+    )
 
-    # ================= ПРАВИЛЬНЫЙ MODE =================
-    mode = context.user_data.get("mode")
     if mode not in ["image", "video", "cartoon", "music"]:
-        mode = "image"  # дефолт для обычной картинки
+        mode = "image"
 
-    await generation_queue.put({
+    job_data = {
         "update": update,
         "context": context,
         "prompt": text,
@@ -1474,7 +1509,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "user_id": user_id,
         "mode": mode,
         "status": status
-    })
+    }
+
+    if mode == "video" or mode == "cartoon":
+        await video_queue.put(job_data)
+
+    elif mode == "music":
+        await music_queue.put(job_data)
+
+    else:
+        await image_queue.put(job_data)
 # ================= COMMANDS =================
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1637,23 +1681,29 @@ async def set_commands(app):
 
 # ================= POST INIT =================
 async def post_init(app):
-    global generation_queue
+    global image_queue, video_queue, music_queue
 
-    # создаём очередь в правильном event loop
-    generation_queue = asyncio.Queue(maxsize=200)
+    # ===== создаём очереди =====
+    image_queue = asyncio.Queue(maxsize=200)
+    video_queue = asyncio.Queue(maxsize=100)
+    music_queue = asyncio.Queue(maxsize=100)
 
-    # создаём воркеров генерации в том же event loop
-    for _ in range(MAX_WORKERS):
-        asyncio.create_task(generation_worker())
+    # ===== IMAGE WORKERS =====
+    for _ in range(IMAGE_WORKERS):
+        asyncio.create_task(generation_worker_wrapper(image_queue, "image"))
 
-    # запускаем очистку кеша
+    # ===== VIDEO WORKERS =====
+    for _ in range(VIDEO_WORKERS):
+        asyncio.create_task(generation_worker_wrapper(video_queue, "video"))
+
+    # ===== MUSIC WORKERS =====
+    for _ in range(MUSIC_WORKERS):
+        asyncio.create_task(generation_worker_wrapper(music_queue, "music"))
+
+    # ===== очистка кеша =====
     asyncio.create_task(cache_cleaner())
 
-    # регистрируем команды бота
     await set_commands(app)
-
-
-app.post_init = post_init
 
 
 if __name__ == "__main__":
