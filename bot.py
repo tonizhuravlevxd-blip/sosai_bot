@@ -643,7 +643,7 @@ async def fake_photo_upload(bot, chat_id):
 
 # ================= WORKER =================
 async def generation_worker_single(job):
-        while True:
+    while True:
 
         update = job["update"]
         context = job["context"]
@@ -656,9 +656,7 @@ async def generation_worker_single(job):
 
         mode = job.get("mode", "image")
 
-        
-
-                # ===== правильный семафор =====
+        # ===== правильный семафор =====
         if mode == "video" or mode == "cartoon":
             semaphore = video_semaphore
         elif mode == "music":
@@ -694,7 +692,6 @@ async def generation_worker_single(job):
 
                 if model == "banana1":
                     style = "cinematic lighting ultra realistic 8k"
-
                 elif model == "banana2":
                     style = "hyper detailed masterpiece artstation quality"
 
@@ -758,7 +755,6 @@ async def generation_worker_single(job):
                                     audio=cached_audio,
                                     title="Generated Song"
                                 )
-
                             except Exception:
                                 async with aiohttp.ClientSession() as session:
                                     async with session.get(cached_audio) as r:
@@ -799,7 +795,6 @@ async def generation_worker_single(job):
                         )
 
                         audio_url = await fal_music_generate(prompt)
-
                         progress_task.cancel()
 
                         try:
@@ -816,7 +811,6 @@ async def generation_worker_single(job):
                                 audio=audio_url,
                                 title="Generated Song"
                             )
-
                         except Exception:
                             async with aiohttp.ClientSession() as session:
                                 async with session.get(audio_url) as r:
@@ -918,7 +912,6 @@ async def generation_worker_single(job):
                     )
 
                     video_bytes = await fal_video_generate(prompt, images)
-
                     progress_task.cancel()
 
                     try:
