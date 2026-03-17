@@ -1537,8 +1537,8 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🆔 ID: {tg_user.id}\n"
         f"👤 Username: @{tg_user.username}\n\n"
         f"🎁 Бонусы: {bonus}\n"
-        f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user[4]}"
+        f"🌆 Доступно: {remaining}\n"
+        f"👥 Рефералов: {user[5]}"
     )
 
 
