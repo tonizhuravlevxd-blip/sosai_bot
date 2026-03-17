@@ -981,7 +981,7 @@ async def generation_worker():
 
                 # ===== сообщение что фото отправляется =====
                 sending_status = await update.message.reply_text(
-                    "📤 Отправляем изображение..."
+                    "📤 Отправляем шедевр,он готов..."
                 )
 
                 await asyncio.wait_for(
@@ -1281,7 +1281,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         position = get_queue_position() + 1
 
         status = await query.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
+            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
         )
 
         await generation_queue.put({
@@ -1344,7 +1344,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         position = get_queue_position() + 1
 
         status = await update.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации..."
+            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
         )
 
         allowed, msg = check_user_generation_limit(user_id)
@@ -1457,7 +1457,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_images"] = context.user_data.get("input_images", [])
 
     position = get_queue_position() + 1
-    status = await update.message.reply_text(f"⏳ Вы в очереди: {position}\n🎨 Подготовка генерации...")
+    status = await update.message.reply_text(f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать...")
 
     # ================= ПРАВИЛЬНЫЙ MODE =================
     mode = context.user_data.get("mode")
