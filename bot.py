@@ -61,15 +61,13 @@ IMAGE_WORKERS = 5
 VIDEO_WORKERS = 3
 MUSIC_WORKERS = 2
 
-image_queue = None
-video_queue = None
-music_queue = None
+
 
 image_semaphore = asyncio.Semaphore(IMAGE_WORKERS)
 video_semaphore = asyncio.Semaphore(VIDEO_WORKERS)
 music_semaphore = asyncio.Semaphore(MUSIC_WORKERS)
 
-generation_queue = None
+
 
 
 
