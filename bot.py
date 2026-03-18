@@ -179,36 +179,6 @@ async def init_db():
 
 db_pool = None
 
-# ---------- USERS TABLE ----------
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-user_id INTEGER PRIMARY KEY,
-week_start INTEGER,
-image_count INTEGER DEFAULT 0,
-video_count INTEGER DEFAULT 0,
-accepted_terms INTEGER DEFAULT 0,
-referrals INTEGER DEFAULT 0,
-bonus_images INTEGER DEFAULT 0,
-ref_by INTEGER,
-is_active INTEGER DEFAULT 0,
-
-premium INTEGER DEFAULT 0,
-premium_until INTEGER DEFAULT 0
-)
-""")
-
-# ---------- MUSIC CACHE TABLE ----------
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS music_cache (
-prompt TEXT PRIMARY KEY,
-audio_url TEXT,
-created_at INTEGER
-)
-""")
-
-conn.commit()
 
 
 # ================= MUSIC CACHE FUNCTIONS =================
@@ -254,7 +224,7 @@ async def reset_week_if_needed(user):
 
     now = int(time.time())
 
-    if now - user["week_start"] > WEEK_SECONDS:
+    if not user["week_start"] or now - user["week_start"] > WEEK_SECONDS:
 
         async with db_pool.acquire() as conn:
             await conn.execute(
@@ -270,8 +240,8 @@ def is_premium(user):
     if not user:
         return False
 
-    premium = user[9]
-    premium_until = user[10]
+    premium = user["premium"]
+    premium_until = user["premium_until"]
 
     if premium == 1 and premium_until > int(time.time()):
         return True
@@ -743,7 +713,7 @@ async def generation_worker():
 
                     try:
                         # ===== проверяем кэш =====
-                        cached_audio = get_cached_music(prompt)
+                        cached_audio = await get_cached_music(prompt)
 
                         if cached_audio:
                             logging.info(f"🎵 Music cache hit: {prompt}")
@@ -810,7 +780,7 @@ async def generation_worker():
                         except:
                             pass
 
-                        save_music_cache(prompt, audio_url)
+                        await save_music_cache(prompt, audio_url)
 
                         try:
                             await context.bot.send_audio(
@@ -873,12 +843,13 @@ async def generation_worker():
                 if mode in ["video", "cartoon"]:
 
                     async with db_lock:
-                        cursor.execute(
-                            "SELECT video_count FROM users WHERE user_id=?",
-                            (user_id,)
-                        )
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT video_count FROM users WHERE user_id=$1",
+            user_id
+        )
 
-                        video_used = cursor.fetchone()[0]
+        video_used = row["video_count"]
 
                         if video_used >= FREE_VIDEO_LIMIT:
                             try:
@@ -1120,7 +1091,7 @@ if not db_user:
 
         db_user = await get_user(user.id)
 
-    if db_user[4] == 0:
+    if db_user["accepted_terms"] == 0:
 
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("📄 Пользовательское соглашение", url=USER_AGREEMENT_URL)],
@@ -1405,11 +1376,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         allowed, msg = check_user_generation_limit(user_id)
 
-        if not allowed:
-            await update.message.reply_text(msg)
-            return
+if not allowed:
+    await update.message.reply_text(msg or "⚠️ Лимит генераций достигнут")
+    return
 
-        lock_user_generation(user_id)
+lock_user_generation(user_id)
 
         await generation_queue.put({
             "update": update,
@@ -1474,8 +1445,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
 
-    user = await get_user(user_id)
-    reset_week_if_needed(user)
+    if not user:
+    await update.message.reply_text("⚠ Ошибка пользователя. Напишите /start")
+    return
+    await reset_week_if_needed(user)
 
     used = user["image_count"]
     bonus = user["bonus_images"]
@@ -1594,7 +1567,7 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 Username: @{tg_user.username}\n\n"
         f"🎁 Бонусы: {bonus}\n"
         f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user[4]}"
+        f"👥 Рефералов: {user['referrals']}"
     )
 
 
@@ -1707,6 +1680,8 @@ async def post_init(app):
     await set_commands(app)
 
     logging.info("✅ PostgreSQL подключен и бот готов")
+    if not db_pool:
+    raise Exception("❌ DB не инициализирована")
 
 
 app.post_init = post_init
