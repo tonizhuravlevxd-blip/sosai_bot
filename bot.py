@@ -843,27 +843,25 @@ async def generation_worker():
                 if mode in ["video", "cartoon"]:
 
                     async with db_lock:
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT video_count FROM users WHERE user_id=$1",
-            user_id
-        )
-
-        video_used = row["video_count"]
-
-                        if video_used >= FREE_VIDEO_LIMIT:
-                            try:
-                                if status:
-                                    await status.delete()
-                            except:
-                                pass
-
-                            await update.message.reply_text(
-                                "🎬 Лимит видео/мультфильма на неделю исчерпан."
+                        async with db_pool.acquire() as conn:
+                            row = await conn.fetchrow(
+                                "SELECT video_count FROM users WHERE user_id=$1",
+                                user_id
                             )
-                            continue
 
-                                            async with db_lock:
+                            video_used = row["video_count"]
+
+                            if video_used >= FREE_VIDEO_LIMIT:
+                                try:
+                                    if status:
+                                        await status.delete()
+                                except:
+                                    pass
+
+                                await update.message.reply_text(
+                                    "🎬 Лимит видео/мультфильма на неделю исчерпан."
+                                )
+                                continue
 
                         async with db_pool.acquire() as conn:
                             await conn.execute(
@@ -928,7 +926,6 @@ async def generation_worker():
                     if model in FAL_MODELS:
                         image_bytes = await fal_generate(model, prompt, images)
 
-                    # ================= OPENAI IMAGE =================
                     else:
 
                         if images:
@@ -962,7 +959,6 @@ async def generation_worker():
                     "time": time.time()
                 }
 
-                # ===== очистка кэша =====
                 if len(generation_cache) > 100:
                     oldest_key = min(
                         generation_cache,
@@ -986,7 +982,6 @@ async def generation_worker():
                 except:
                     pass
 
-                # ===== сообщение что фото отправляется =====
                 sending_status = await update.message.reply_text(
                     "📤 Отправляем шедевр,он готов..."
                 )
@@ -999,7 +994,6 @@ async def generation_worker():
                     timeout=30
                 )
 
-                # ===== удаляем сообщение после отправки =====
                 try:
                     await sending_status.delete()
                 except:
@@ -1007,7 +1001,7 @@ async def generation_worker():
 
                 context.user_data["mode"] = "image"
 
-                                async with db_pool.acquire() as conn:
+                async with db_pool.acquire() as conn:
                     await conn.execute(
                         """
                         UPDATE users 
@@ -1063,18 +1057,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db_user = await get_user(user.id)
 
-if not db_user:
+    if not db_user:
 
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            """
-            INSERT INTO users (user_id, week_start, accepted_terms, ref_by)
-            VALUES ($1, $2, 0, $3)
-            """,
-            user.id, int(time.time()), ref_by
-        )
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO users (user_id, week_start, accepted_terms, ref_by)
+                VALUES ($1, $2, 0, $3)
+                """,
+                user.id, int(time.time()), ref_by
+            )
 
-                if ref_by and ref_by != user.id:
+        if ref_by and ref_by != user.id:
 
             async with db_pool.acquire() as conn:
                 await conn.execute(
@@ -1086,8 +1080,6 @@ if not db_user:
                     """,
                     ref_by
                 )
-
-            
 
         db_user = await get_user(user.id)
 
@@ -1131,6 +1123,7 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔄 Сессия перезапущена. Выберите модель через /photo"
     )
 
+
 # ================= PREMIUM COMMAND =================
 async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1155,6 +1148,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=keyboard
     )
 
+
 # ================= PAYMENT SUCCESS =================
 async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1162,7 +1156,7 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     premium_until = int(time.time()) + (30 * 24 * 60 * 60)
 
-        async with db_pool.acquire() as conn:
+    async with db_pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE users 
@@ -1178,7 +1172,8 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "Вы получили Пончик-статус Premium на 30 дней!"
     )
 
-    # ================= CALLBACK =================
+
+# ================= CALLBACK =================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -1190,14 +1185,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             title="🍩 Пончик Premium",
             description="30 дней Premium доступа",
             payload="premium_donut",
-            provider_token="",  # Вставь токен провайдера платежей
+            provider_token="",
             currency="XTR",
             prices=[{"label": "Premium", "amount": 500}]
         )
 
     elif data == "buy_spb":
-        # ссылка на оплату через YooKassa (СПБ)
-        # замените SELLER_ID на ваш магазин
         spb_link = (
             "https://yoomoney.ru/quickpay/shop-widget?"
             "writer=SELLER_ID&"
@@ -1225,7 +1218,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("🔄 Начните заново. Используйте /photo")
 
     elif data == "accept_terms":
-                async with db_pool.acquire() as conn:
+        async with db_pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE users 
@@ -1235,8 +1228,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_id
             )
         await query.edit_message_text("✅ Условия приняты.")
-
-    
 
     elif data == "model_banana1":
         context.user_data["model"] = "banana1"
@@ -1272,13 +1263,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "emotional pop song about lost love"
         )
 
-
-    
-
-    
-
-    # ================= CARTOON STYLE SELECT =================
-
     elif data.startswith("cartoon_"):
 
         style_key = data.replace("cartoon_", "")
@@ -1298,8 +1282,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Бот создаст мультфильм 🎥"
         )
 
-
-
     elif data == "repeat":
 
         prompt = context.user_data.get("last_prompt")
@@ -1315,8 +1297,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "update": update,
             "context": context,
             "prompt": prompt,
-            "size": context.user_data.get("size","1024x1024"),
-            "model": context.user_data.get("model","banana2"),
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
             "images": images,
             "user_id": query.from_user.id,
             "mode": context.user_data.get("mode"),
@@ -1325,40 +1307,32 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================= PHOTO / TEXT HANDLERS =================
-# (оставлены полностью без изменений)
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
 
     if context.user_data.get("mode") not in ["video", "cartoon"]:
-
         if "model" not in context.user_data:
-
             await update.message.reply_text(
                 "⚠ Сначала выберите модель\nВведите /photo"
             )
-
             return
 
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
 
-    # защита RAM — очищаем если слишком много изображений
     if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
         context.user_data["input_images"] = []
 
     photo = update.message.photo[-1]
 
-    # защита от огромных файлов
     if photo.file_size and photo.file_size > 5_000_000:
         await update.message.reply_text("⚠️ Фото слишком большое (макс 5MB)")
         return
 
     file = await photo.get_file()
-
     image_bytes = bytes(await file.download_as_bytearray())
-
     context.user_data["input_images"].append(image_bytes)
 
     caption = update.message.caption
@@ -1376,11 +1350,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         allowed, msg = check_user_generation_limit(user_id)
 
-if not allowed:
-    await update.message.reply_text(msg or "⚠️ Лимит генераций достигнут")
-    return
+        if not allowed:
+            await update.message.reply_text(msg or "⚠️ Лимит генераций достигнут")
+            return
 
-lock_user_generation(user_id)
+        lock_user_generation(user_id)
 
         await generation_queue.put({
             "update": update,
@@ -1400,13 +1374,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     print("MODE:", context.user_data.get("mode"))
 
-    # ================= USER GENERATION LIMIT =================
     count = user_generation_count.get(user_id, 0)
     if count >= MAX_USER_GENERATIONS:
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
 
-    # ================= GLOBAL ANTI SPAM =================
     if not check_rate_limit(user_id):
         await update.message.reply_text("⏳ Не так быстро. Подождите 2 секунды.")
         return
@@ -1415,7 +1387,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-    # ================= CHATGPT MODE =================
     if context.user_data.get("chat_mode"):
         try:
             response = client.chat.completions.create(
@@ -1429,13 +1400,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
         return
 
-    # ================= ПРОВЕРКА ВЫБРАНА ЛИ МОДЕЛЬ =================
     if context.user_data.get("mode") not in ["video", "music"]:
         if "model" not in context.user_data:
             await update.message.reply_text("⚠ Сначала выберите модель.\n\nВведите /photo")
             return
 
-    # ================= GENERATION MODE =================
     if user_id in active_generations:
         await update.message.reply_text("⏳ Ваша генерация уже выполняется")
         return
@@ -1445,9 +1414,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
 
+    user = await get_user(user_id)
+
     if not user:
-    await update.message.reply_text("⚠ Ошибка пользователя. Напишите /start")
-    return
+        await update.message.reply_text("⚠ Ошибка пользователя. Напишите /start")
+        return
+
     await reset_week_if_needed(user)
 
     used = user["image_count"]
@@ -1459,11 +1431,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         remaining = FREE_LIMIT + bonus - used
 
-    # музыка не использует лимит изображений
     if context.user_data.get("mode") == "music":
         remaining = 9999
 
     video_limit = PREMIUM_VIDEO_LIMIT if is_premium(user) else FREE_VIDEO_LIMIT
+
     if context.user_data.get("mode") in ["video", "cartoon"] and video_used >= video_limit:
         await update.message.reply_text(
             "🎬 Бесплатный лимит видео/мультфильма исчерпан.\nНовый будет доступен через неделю."
@@ -1478,7 +1450,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Сервер перегружен. Попробуйте через несколько секунд.")
         return
 
-    # блокируем генерацию
     user_generation_count[user_id] = count + 1
     active_generations.add(user_id)
 
@@ -1486,12 +1457,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_images"] = context.user_data.get("input_images", [])
 
     position = get_queue_position() + 1
-    status = await update.message.reply_text(f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать...")
 
-    # ================= ПРАВИЛЬНЫЙ MODE =================
+    status = await update.message.reply_text(
+        f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
+    )
+
     mode = context.user_data.get("mode")
     if mode not in ["image", "video", "cartoon", "music"]:
-        mode = "image"  # дефолт для обычной картинки
+        mode = "image"
 
     await generation_queue.put({
         "update": update,
@@ -1681,7 +1654,7 @@ async def post_init(app):
 
     logging.info("✅ PostgreSQL подключен и бот готов")
     if not db_pool:
-    raise Exception("❌ DB не инициализирована")
+        raise Exception("❌ DB не инициализирована")
 
 
 app.post_init = post_init
