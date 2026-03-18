@@ -695,7 +695,6 @@ async def handle_generation_job(job):
                     user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
                     return
 
-                # проверяем кэш
                 cached_audio = await get_cached_music(prompt)
                 if cached_audio:
                     logging.info(f"🎵 Music cache hit: {prompt}")
@@ -716,7 +715,6 @@ async def handle_generation_job(job):
                     active_generations.discard(user_id)
                     return
 
-                # генерация музыки
                 logging.info(f"🎵 Generating music for: {prompt}")
                 if status is None:
                     status = await update.message.reply_text("🎵 Музыка генерируется… 0%")
@@ -762,6 +760,12 @@ async def handle_generation_job(job):
                             audio_bytes = await r.read()
                     await context.bot.send_audio(chat_id=chat_id, audio=audio_bytes, title="Generated Song")
 
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
+                        user_id
+                    )
+
                 context.user_data["mode"] = None
                 active_generations.discard(user_id)
                 user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
@@ -783,12 +787,6 @@ async def handle_generation_job(job):
                                 "🎬 Лимит видео/мультфильма на неделю исчерпан."
                             )
                             return
-
-                    async with db_pool.acquire() as conn:
-                        await conn.execute(
-                            "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
-                            user_id
-                        )
 
                 if status is None:
                     status = await update.message.reply_text("🎬 Видео генерируется… 0%")
@@ -812,7 +810,7 @@ async def handle_generation_job(job):
                         pass
 
                 progress_task = asyncio.create_task(video_progress(status))
-                # ==== retry на случай временной недоступности Fal AI ====
+
                 video_bytes = None
                 for attempt in range(3):
                     try:
@@ -821,6 +819,7 @@ async def handle_generation_job(job):
                     except Exception as e:
                         logging.warning(f"Fal video generation failed, attempt {attempt+1}: {e}")
                         await asyncio.sleep(5)
+
                 if video_bytes is None:
                     progress_task.cancel()
                     try:
@@ -843,6 +842,13 @@ async def handle_generation_job(job):
                     pass
 
                 await asyncio.wait_for(update.message.reply_video(video=video_bytes), timeout=60)
+
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                        user_id
+                    )
+
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
                 return
@@ -852,7 +858,6 @@ async def handle_generation_job(job):
             upload_task = asyncio.create_task(fake_photo_upload(context.bot, chat_id))
             try:
                 if model in FAL_MODELS:
-                    # Таймаут генерации 60 секунд
                     image_bytes = await asyncio.wait_for(fal_generate(model, prompt, images), timeout=60)
                 else:
                     if images:
@@ -869,7 +874,6 @@ async def handle_generation_job(job):
                 except asyncio.CancelledError:
                     pass
 
-            # ================= CACHE =================
             generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
             if len(generation_cache) > 100:
                 oldest_key = min(generation_cache, key=lambda k: generation_cache[k]["time"])
@@ -912,8 +916,6 @@ async def handle_generation_job(job):
                 await update.message.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
 
         finally:
-            # ================= TASK DONE =================
-            # !!! больше не добавляем в очередь автоматически, чтобы не зацикливать
             if user_id in active_generations:
                 active_generations.remove(user_id)
             if user_id in user_generation_count:
@@ -924,17 +926,28 @@ async def handle_generation_job(job):
 async def image_worker():
     while True:
         job = await generation_queue_image.get()
-        await handle_generation_job(job)
+        try:
+            await handle_generation_job(job)
+        finally:
+            generation_queue_image.task_done()
+
 
 async def video_worker():
     while True:
         job = await generation_queue_video.get()
-        await handle_generation_job(job)
+        try:
+            await handle_generation_job(job)
+        finally:
+            generation_queue_video.task_done()
+
 
 async def music_worker():
     while True:
         job = await generation_queue_music.get()
-        await handle_generation_job(job)
+        try:
+            await handle_generation_job(job)
+        finally:
+            generation_queue_music.task_done()
 
 
 # ================= START =================
@@ -1269,34 +1282,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        # Оборачиваем генерацию в безопасный try/finally
         async def enqueue_generation():
-            try:
-                await queue_map.get(mode, generation_queue_image).put({
-                    "update": update,
-                    "context": context,
-                    "prompt": caption,
-                    "size": context.user_data.get("size", "1024x1024"),
-                    "model": context.user_data.get("model", "banana2"),
-                    "images": context.user_data["input_images"],
-                    "user_id": user_id,
-                    "mode": mode,
-                    "status": status
-                })
-            finally:
-                active_generations.discard(user_id)
-                # Увеличиваем счетчик после успешной генерации
-                user = await get_user(user_id)
-                if user:
-                    if mode == "image":
-                        user["image_count"] += 1
-                    elif mode in ["video", "cartoon"]:
-                        user["video_count"] += 1
-                    elif mode == "music":
-                        user["music_count"] = user.get("music_count", 0) + 1
-                    await update.message.reply_text(
-                        f"✅ Генерация {mode} завершена! Всего сгенерировано: {user.get('video_count', 0) if mode in ['video', 'cartoon'] else user.get('music_count', 0) if mode=='music' else user['image_count']}"
-                    )
+            await queue_map.get(mode, generation_queue_image).put({
+                "update": update,
+                "context": context,
+                "prompt": caption,
+                "size": context.user_data.get("size", "1024x1024"),
+                "model": context.user_data.get("model", "banana2"),
+                "images": context.user_data["input_images"],
+                "user_id": user_id,
+                "mode": mode,
+                "status": status
+            })
 
         if user_id not in active_generations:
             active_generations.add(user_id)
@@ -1393,34 +1390,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
     )
 
-    # Безопасная генерация с флагом active_generations
     async def enqueue_text_generation():
-        try:
-            await queue_map.get(mode, generation_queue_image).put({
-                "update": update,
-                "context": context,
-                "prompt": text,
-                "size": context.user_data.get("size", "1024x1024"),
-                "model": context.user_data.get("model", "banana2"),
-                "images": context.user_data.get("input_images", []),
-                "user_id": user_id,
-                "mode": mode,
-                "status": status
-            })
-        finally:
-            active_generations.discard(user_id)
-            # Увеличиваем счетчик после успешной генерации
-            user = await get_user(user_id)
-            if user:
-                if mode == "image":
-                    user["image_count"] += 1
-                elif mode in ["video", "cartoon"]:
-                    user["video_count"] += 1
-                elif mode == "music":
-                    user["music_count"] = user.get("music_count", 0) + 1
-                await update.message.reply_text(
-                    f"✅ Генерация {mode} завершена! Всего сгенерировано: {user.get('video_count', 0) if mode in ['video', 'cartoon'] else user.get('music_count', 0) if mode=='music' else user['image_count']}"
-                )
+        await queue_map.get(mode, generation_queue_image).put({
+            "update": update,
+            "context": context,
+            "prompt": text,
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
+            "images": context.user_data.get("input_images", []),
+            "user_id": user_id,
+            "mode": mode,
+            "status": status
+        })
 
     if user_id not in active_generations:
         active_generations.add(user_id)
