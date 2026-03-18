@@ -8,6 +8,9 @@ import gc
 import aiohttp
 import json
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+db_pool = await asyncpg.create_pool(DATABASE_URL)
 from telegram import (
     Update,
     InlineKeyboardMarkup,
