@@ -1073,21 +1073,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Логи очереди
     logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
 
-    # Проверка, чтобы не добавлять дубликаты
+    # Проверка, чтобы не добавлять дубликаты и соблюдение лимита
     if user_id in active_generations:
         logging.info(f"⚠ User {user_id} already has an active job, skipping enqueue")
     else:
-        # Пример для повторного запроса или enqueue (если есть job)
+        # ✅ Фикс: проверка пустого prompt для video/cartoon
+        last_prompt = context.user_data.get("last_prompt")
+        last_images = context.user_data.get("last_images", [])
+
+        if mode in ["video", "cartoon"] and not last_prompt and not last_images:
+            await query.message.reply_text("⚠️ Пустой запрос для видео/мультфильма")
+            return
+
+        # Проверка лимитов через функцию (если есть)
+        allowed, msg = check_user_generation_limit(user_id)
+        if not allowed:
+            await query.message.reply_text(msg)
+            return
+
+        # Создаём job
         job = {
             "update": update,
             "context": context,
-            "prompt": context.user_data.get("last_prompt"),
+            "prompt": last_prompt,
             "size": context.user_data.get("size", "1024x1024"),
             "model": context.user_data.get("model", "banana2"),
-            "images": context.user_data.get("last_images", []),
+            "images": last_images,
             "user_id": user_id,
             "mode": mode
         }
+
+        # Блокировка генерации для пользователя
+        lock_user_generation(user_id)
+
+        # Добавляем в очередь
         await queue_map.get(mode, generation_queue_image).put(job)
         logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
         active_generations.add(user_id)
@@ -1180,13 +1199,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("cartoon_"):
         style_key = data.replace("cartoon_", "")
-
         if style_key not in CARTOON_STYLES:
             return
-
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
         context.user_data["mode"] = "video"
-
         await query.message.reply_text(
             f"🎬 Стиль выбран: {style_key.upper()}\n\n"
             "📸 Теперь отправьте:\n"
@@ -1206,7 +1222,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         position = get_queue_position() + 1
-
         status = await query.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
         )
