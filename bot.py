@@ -1,6 +1,6 @@
 import os
 import time
-import sqlite3
+import asyncpg
 import base64
 import asyncio
 import logging
@@ -139,12 +139,45 @@ def get_queue_position():
 
 # ================= DATABASE =================
 
-conn = sqlite3.connect("bot.db", check_same_thread=False, timeout=30)
+async def init_db():
+    global db_pool
 
-conn.execute("PRAGMA journal_mode=WAL")
-conn.execute("PRAGMA synchronous=NORMAL")
+    db_pool = await asyncpg.create_pool(
+        user="postgres",
+        password="password",
+        database="botdb",
+        host="localhost",
+        min_size=1,
+        max_size=10
+    )
 
-cursor = conn.cursor()
+    async with db_pool.acquire() as conn:
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id BIGINT PRIMARY KEY,
+            week_start BIGINT,
+            image_count INTEGER DEFAULT 0,
+            video_count INTEGER DEFAULT 0,
+            accepted_terms INTEGER DEFAULT 0,
+            referrals INTEGER DEFAULT 0,
+            bonus_images INTEGER DEFAULT 0,
+            ref_by BIGINT,
+            is_active INTEGER DEFAULT 0,
+            premium INTEGER DEFAULT 0,
+            premium_until BIGINT DEFAULT 0
+        )
+        """)
+
+        await conn.execute("""
+        CREATE TABLE IF NOT EXISTS music_cache (
+            prompt TEXT PRIMARY KEY,
+            audio_url TEXT,
+            created_at BIGINT
+        )
+        """)
+
+db_pool = None
 
 # ---------- USERS TABLE ----------
 
@@ -180,61 +213,58 @@ conn.commit()
 
 # ================= MUSIC CACHE FUNCTIONS =================
 
-def get_cached_music(prompt):
+async def get_cached_music(prompt):
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT audio_url FROM music_cache WHERE prompt=$1",
+            prompt
+        )
 
-    cursor.execute(
-        "SELECT audio_url FROM music_cache WHERE prompt=?",
-        (prompt,)
-    )
+        if row:
+            return row["audio_url"]
 
-    row = cursor.fetchone()
-
-    if row:
-        return row[0]
-
-    return None
+        return None
 
 
-def save_music_cache(prompt, audio_url):
-
-    cursor.execute(
-        "INSERT OR REPLACE INTO music_cache (prompt, audio_url, created_at) VALUES (?, ?, ?)",
-        (prompt, audio_url, int(time.time()))
-    )
-
-    conn.commit()
+async def save_music_cache(prompt, audio_url):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO music_cache (prompt, audio_url, created_at)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (prompt) DO UPDATE
+            SET audio_url = EXCLUDED.audio_url,
+                created_at = EXCLUDED.created_at
+            """,
+            prompt, audio_url, int(time.time())
+        )
 
 
 # ================= USER FUNCTIONS =================
 
-def get_user(user_id):
-
-    cursor.execute(
-        "SELECT * FROM users WHERE user_id=?",
-        (user_id,)
-    )
-
-    return cursor.fetchone()
+async def get_user(user_id):
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT * FROM users WHERE user_id=$1",
+            user_id
+        )
 
 
-def reset_week_if_needed(user):
+async def reset_week_if_needed(user):
 
     now = int(time.time())
 
-    if now - user[1] > WEEK_SECONDS:
+    if now - user["week_start"] > WEEK_SECONDS:
 
-        async def update():
-
-            async with db_lock:
-
-                cursor.execute(
-                    "UPDATE users SET week_start=?, video_count=0, image_count=0 WHERE user_id=?",
-                    (now, user[0])
-                )
-
-                conn.commit()
-
-        asyncio.create_task(update())
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users 
+                SET week_start=$1, video_count=0, image_count=0 
+                WHERE user_id=$2
+                """,
+                now, user["user_id"]
+            )
 def is_premium(user):
 
     if not user:
@@ -641,13 +671,13 @@ async def generation_worker():
         async with generation_semaphore:
             try:
                 # ===== проверка лимита видео =====
-                user = get_user(user_id)
+                user = await get_user(user_id)
 
                 if not user:
                     continue
 
                 reset_week_if_needed(user)
-                video_used = user[3]
+                video_used = user["video_count"]
 
                 if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
                     try:
@@ -862,11 +892,17 @@ async def generation_worker():
                             )
                             continue
 
-                        cursor.execute(
-                            "UPDATE users SET video_count = video_count + 1 WHERE user_id=?",
-                            (user_id,)
-                        )
-                        conn.commit()
+                                            async with db_lock:
+
+                        async with db_pool.acquire() as conn:
+                            await conn.execute(
+                                """
+                                UPDATE users 
+                                SET video_count = video_count + 1 
+                                WHERE user_id = $1
+                                """,
+                                user_id
+                            )
 
                     if status is None:
                         status = await update.message.reply_text(
@@ -1000,12 +1036,15 @@ async def generation_worker():
 
                 context.user_data["mode"] = "image"
 
-                async with db_lock:
-                    cursor.execute(
-                        "UPDATE users SET image_count=image_count+1 WHERE user_id=?",
-                        (user_id,)
+                                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE users 
+                        SET image_count = image_count + 1 
+                        WHERE user_id = $1
+                        """,
+                        user_id
                     )
-                    conn.commit()
 
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
@@ -1051,26 +1090,35 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-    db_user = get_user(user.id)
+    db_user = await get_user(user.id)
 
-    if not db_user:
+if not db_user:
 
-        cursor.execute(
-            "INSERT INTO users (user_id, week_start, accepted_terms, ref_by) VALUES (?, ?, 0, ?)",
-            (user.id, int(time.time()), ref_by)
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO users (user_id, week_start, accepted_terms, ref_by)
+            VALUES ($1, $2, 0, $3)
+            """,
+            user.id, int(time.time()), ref_by
         )
 
-        conn.commit()
+                if ref_by and ref_by != user.id:
 
-        if ref_by and ref_by != user.id:
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE users 
+                    SET referrals = referrals + 1,
+                        bonus_images = bonus_images + 1
+                    WHERE user_id = $1
+                    """,
+                    ref_by
+                )
 
-            cursor.execute(
-                "UPDATE users SET referrals=referrals+1, bonus_images=bonus_images+1 WHERE user_id=?",
-                (ref_by,)
-            )
-            conn.commit()
+            
 
-        db_user = get_user(user.id)
+        db_user = await get_user(user.id)
 
     if db_user[4] == 0:
 
@@ -1143,12 +1191,16 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     premium_until = int(time.time()) + (30 * 24 * 60 * 60)
 
-    cursor.execute(
-        "UPDATE users SET premium=1, premium_until=? WHERE user_id=?",
-        (premium_until, user_id)
-    )
-
-    conn.commit()
+        async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE users 
+            SET premium = 1,
+                premium_until = $1
+            WHERE user_id = $2
+            """,
+            premium_until, user_id
+        )
 
     await update.message.reply_text(
         "🍩 Поздравляем!\n\n"
@@ -1202,11 +1254,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("🔄 Начните заново. Используйте /photo")
 
     elif data == "accept_terms":
-        cursor.execute(
-            "UPDATE users SET accepted_terms=1 WHERE user_id=?",
-            (user_id,)
-        )
-        conn.commit()
+                async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users 
+                SET accepted_terms = 1 
+                WHERE user_id = $1
+                """,
+                user_id
+            )
         await query.edit_message_text("✅ Условия приняты.")
 
     
@@ -1418,12 +1474,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
         return
 
-    user = get_user(user_id)
+    user = await get_user(user_id)
     reset_week_if_needed(user)
 
-    used = user[2]
-    bonus = user[6]
-    video_used = user[3]
+    used = user["image_count"]
+    bonus = user["bonus_images"]
+    video_used = user["video_count"]
 
     if is_premium(user):
         remaining = PREMIUM_IMAGE_LIMIT - used
@@ -1525,10 +1581,10 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tg_user = update.effective_user
 
-    user = get_user(tg_user.id)
+    user = await get_user(tg_user.id)
 
-    used = user[2]
-    bonus = user[6]
+    used = user["image_count"]
+    bonus = user["bonus_images"]
 
     remaining = FREE_LIMIT + bonus - used
 
@@ -1639,21 +1695,18 @@ async def set_commands(app):
 async def post_init(app):
     global generation_queue
 
-    # создаём очередь генераций
-    generation_queue = asyncio.Queue(maxsize=10000)  # увеличиваем до 10k для большого трафика
+    await init_db()  # 🔥 ВАЖНО
 
-    # создаём пул воркеров
+    generation_queue = asyncio.Queue(maxsize=10000)
+
     for _ in range(MAX_WORKERS):
-        # каждый воркер в отдельном таске, без блокировок
         asyncio.create_task(generation_worker())
 
-    # запускаем очистку кеша
     asyncio.create_task(cache_cleaner())
 
-    # регистрируем команды бота
     await set_commands(app)
 
-    logging.info("✅ Постинициализация завершена: очереди и воркеры готовы")
+    logging.info("✅ PostgreSQL подключен и бот готов")
 
 
 app.post_init = post_init
