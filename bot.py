@@ -1090,16 +1090,35 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
 
+    # Получаем mode безопасно
+    mode = context.user_data.get("mode", "image")
+
     queue_map = {
         "image": generation_queue_image,
         "video": generation_queue_video,
         "cartoon": generation_queue_video,
         "music": generation_queue_music
     }
+
+    # Логи очереди
     logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
+
+    # Пример для повторного запроса или enqueue (если есть job)
+    job = {
+        "update": update,
+        "context": context,
+        "prompt": context.user_data.get("last_prompt"),
+        "size": context.user_data.get("size", "1024x1024"),
+        "model": context.user_data.get("model", "banana2"),
+        "images": context.user_data.get("last_images", []),
+        "user_id": user_id,
+        "mode": mode
+    }
+
     await queue_map.get(mode, generation_queue_image).put(job)
     logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
 
+    # ================= Обработка кнопок =================
     if data == "buy_stars":
         await query.message.reply_invoice(
             title="🍩 Пончик Premium",
@@ -1214,7 +1233,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
         )
 
-        # Кладем в правильную очередь
         await queue_map.get(mode, generation_queue_image).put({
             "update": update,
             "context": context,
@@ -1222,11 +1240,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "size": context.user_data.get("size", "1024x1024"),
             "model": context.user_data.get("model", "banana2"),
             "images": images,
-            "user_id": query.from_user.id,
+            "user_id": user_id,
             "mode": mode,
             "status": status
         })
-
 
 # ================= PHOTO / TEXT HANDLERS =================
 
