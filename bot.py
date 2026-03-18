@@ -628,7 +628,7 @@ generation_semaphore = asyncio.Semaphore(5)  # Ограничение парал
 async def handle_generation_job(job):
     update = job["update"]
     context = job["context"]
-    prompt = job["prompt"]
+    prompt = job.get("prompt")
     size = job.get("size", "1024x1024")
     model = job.get("model", "banana2")
     images = job.get("images", [])
@@ -639,6 +639,13 @@ async def handle_generation_job(job):
     # безопасно получаем объект сообщения
     msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
 
+    # Если это мультфильм и нет промта и картинок — не запускаем
+    if mode in ["cartoon", "video"] and not prompt and not images:
+        await msg.reply_text(
+            "📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео."
+        )
+        return
+
     async with generation_semaphore:
         try:
             # ===== проверка лимита видео =====
@@ -647,7 +654,7 @@ async def handle_generation_job(job):
                 return
 
             await reset_week_if_needed(user)
-            video_used = user["video_count"]
+            video_used = user.get("video_count", 0)
 
             if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
                 try:
@@ -668,17 +675,17 @@ async def handle_generation_job(job):
                 style = "hyper detailed masterpiece artstation quality"
 
             cartoon_style = context.user_data.get("cartoon_style")
-            if cartoon_style:
+            if cartoon_style and prompt:
                 prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
-            if mode != "music":
+            if mode != "music" and prompt:
                 prompt = f"{style} {prompt}"
 
             # ================= SAFETY FILTER =================
-            if mode != "music":
+            if mode != "music" and prompt:
                 prompt = clean_prompt(prompt)
 
-            cache_key = f"{prompt}_{model}_{size}"
-            cached = generation_cache.get(cache_key)
+            cache_key = f"{prompt}_{model}_{size}" if prompt else None
+            cached = generation_cache.get(cache_key) if cache_key else None
             if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
                 try:
                     if status:
@@ -691,8 +698,9 @@ async def handle_generation_job(job):
             images = images[:MAX_INPUT_IMAGES]
 
             # ================= MUSIC MODE =================
-            if mode == "music":
-                chat_id = update.effective_chat.id if update and getattr(update, "effective_chat", None) else None
+            if mode == "music" and prompt:
+                chat_id = getattr(update, "effective_chat", None)
+                chat_id = chat_id.id if chat_id else None
                 if not chat_id:
                     logging.warning(f"Skipping music job for user {user_id}, invalid update")
                     active_generations.discard(user_id)
@@ -777,10 +785,13 @@ async def handle_generation_job(job):
 
             # ================= VIDEO MODE =================
             if mode in ["video", "cartoon"]:
+                if not prompt and not images:
+                    return  # безопасно не стартуем без данных
+
                 async with db_lock:
                     async with db_pool.acquire() as conn:
                         row = await conn.fetchrow("SELECT video_count FROM users WHERE user_id=$1", user_id)
-                        video_used = row["video_count"]
+                        video_used = row.get("video_count", 0)
                         if video_used >= FREE_VIDEO_LIMIT:
                             try:
                                 if status:
@@ -858,66 +869,71 @@ async def handle_generation_job(job):
                 return
 
             # ================= IMAGE MODE =================
-            chat_id = update.effective_chat.id
-            upload_task = asyncio.create_task(fake_photo_upload(context.bot, chat_id))
-            try:
-                if model in FAL_MODELS:
-                    image_bytes = await asyncio.wait_for(fal_generate(model, prompt, images), timeout=60)
-                else:
-                    if images:
-                        upload_images = [("image.png", img) for img in images]
-                        result = client.images.edit(model="gpt-image-1", image=upload_images, prompt=prompt, size=size)
-                    else:
-                        result = client.images.generate(model="gpt-image-1", prompt=prompt, size=size)
-                    image_base64 = result.data[0].b64_json
-                    image_bytes = base64.b64decode(image_base64)
-            finally:
-                upload_task.cancel()
+            if prompt:  # только если есть текст
+                chat_id = update.effective_chat.id
+                upload_task = asyncio.create_task(fake_photo_upload(context.bot, chat_id))
                 try:
-                    await upload_task
-                except asyncio.CancelledError:
+                    if model in FAL_MODELS:
+                        image_bytes = await asyncio.wait_for(fal_generate(model, prompt, images), timeout=60)
+                    else:
+                        if images:
+                            upload_images = [("image.png", img) for img in images]
+                            result = client.images.edit(model="gpt-image-1", image=upload_images, prompt=prompt, size=size)
+                        else:
+                            result = client.images.generate(model="gpt-image-1", prompt=prompt, size=size)
+                        image_base64 = result.data[0].b64_json
+                        image_bytes = base64.b64decode(image_base64)
+                finally:
+                    upload_task.cancel()
+                    try:
+                        await upload_task
+                    except asyncio.CancelledError:
+                        pass
+
+                if cache_key:
+                    generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
+                    if len(generation_cache) > 100:
+                        oldest_key = min(generation_cache, key=lambda k: generation_cache[k]["time"])
+                        del generation_cache[oldest_key]
+
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                     InlineKeyboardButton("🆕 Начать заново", callback_data="restart")],
+                    [InlineKeyboardButton("❌ Закончить", callback_data="finish")]
+                ])
+
+                try:
+                    if status:
+                        await status.delete()
+                except:
                     pass
 
-            generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
-            if len(generation_cache) > 100:
-                oldest_key = min(generation_cache, key=lambda k: generation_cache[k]["time"])
-                del generation_cache[oldest_key]
+                sending_status = await msg.reply_text("📤 Отправляем шедевр, он готов...")
+                await asyncio.wait_for(msg.reply_photo(photo=image_bytes, reply_markup=keyboard), timeout=30)
 
-            keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-                 InlineKeyboardButton("🆕 Начать заново", callback_data="restart")],
-                [InlineKeyboardButton("❌ Закончить", callback_data="finish")]
-            ])
+                try:
+                    await sending_status.delete()
+                except:
+                    pass
 
-            try:
-                if status:
-                    await status.delete()
-            except:
-                pass
-
-            sending_status = await msg.reply_text("📤 Отправляем шедевр, он готов...")
-            await asyncio.wait_for(msg.reply_photo(photo=image_bytes, reply_markup=keyboard), timeout=30)
-
-            try:
-                await sending_status.delete()
-            except:
-                pass
-
-            context.user_data["mode"] = "image"
-            async with db_pool.acquire() as conn:
-                await conn.execute("UPDATE users SET image_count = image_count + 1 WHERE user_id = $1", user_id)
-            context.user_data["input_images"] = []
-            context.user_data["last_images"] = []
+                context.user_data["mode"] = "image"
+                async with db_pool.acquire() as conn:
+                    await conn.execute("UPDATE users SET image_count = image_count + 1 WHERE user_id = $1", user_id)
+                context.user_data["input_images"] = []
+                context.user_data["last_images"] = []
 
         except Exception as e:
             logging.error(f"Generation error: {e}")
             error_text = str(e)
-            if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
-                await msg.reply_text(
-                    "⚠️ Запрос не прошёл фильтр безопасности.\nПопробуйте изменить текст."
-                )
-            else:
-                await msg.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
+            try:
+                if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
+                    await msg.reply_text(
+                        "⚠️ Запрос не прошёл фильтр безопасности.\nПопробуйте изменить текст."
+                    )
+                else:
+                    await msg.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
+            except:
+                pass
 
         finally:
             if user_id in active_generations:
