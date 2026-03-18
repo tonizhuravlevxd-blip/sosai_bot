@@ -1504,13 +1504,21 @@ async def post_init(app):
 
     await init_db()  # 🔥 ВАЖНО
 
+    generation_queue_image = asyncio.Queue(maxsize=5000)
+    generation_queue_video = asyncio.Queue(maxsize=2000)
+    generation_queue_music = asyncio.Queue(maxsize=2000)
+    
     generation_queue = asyncio.Queue(maxsize=10000)
 
-    for _ in range(MAX_WORKERS):
-        asyncio.create_task(generation_worker())
+    # Запуск воркеров в контексте event loop
+    for _ in range(5):
+        asyncio.create_task(image_worker())
+    for _ in range(2):
+        asyncio.create_task(video_worker())
+    for _ in range(1):
+        asyncio.create_task(music_worker())
 
     asyncio.create_task(cache_cleaner())
-
     await set_commands(app)
 
     logging.info("✅ PostgreSQL подключен и бот готов")
