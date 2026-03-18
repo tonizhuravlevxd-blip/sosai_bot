@@ -723,11 +723,19 @@ async def handle_generation_job(job):
 
                 async def music_progress(msg, interval=1):
                     pct = 0
+                    last_text = ""
                     try:
                         while True:
                             await asyncio.sleep(interval)
                             pct = min(pct + 10, 100)
-                            await msg.edit_text(f"🎵 Музыка генерируется… {pct}%")
+                            new_text = f"🎵 Музыка генерируется… {pct}%"
+                            if new_text != last_text:
+                                try:
+                                    await msg.edit_text(new_text)
+                                    last_text = new_text
+                                except BadRequest as e:
+                                    if "Message is not modified" not in str(e):
+                                        raise
                     except asyncio.CancelledError:
                         pass
 
@@ -787,16 +795,41 @@ async def handle_generation_job(job):
 
                 async def video_progress(msg, interval=1):
                     pct = 0
+                    last_text = ""
                     try:
                         while True:
                             await asyncio.sleep(interval)
                             pct = min(pct + 10, 100)
-                            await msg.edit_text(f"🎬 Видео генерируется… {pct}%")
+                            new_text = f"🎬 Видео генерируется… {pct}%"
+                            if new_text != last_text:
+                                try:
+                                    await msg.edit_text(new_text)
+                                    last_text = new_text
+                                except BadRequest as e:
+                                    if "Message is not modified" not in str(e):
+                                        raise
                     except asyncio.CancelledError:
                         pass
 
                 progress_task = asyncio.create_task(video_progress(status))
-                video_bytes = await fal_video_generate(prompt, images)
+                # ==== retry на случай временной недоступности Fal AI ====
+                video_bytes = None
+                for attempt in range(3):
+                    try:
+                        video_bytes = await fal_video_generate(prompt, images)
+                        break
+                    except Exception as e:
+                        logging.warning(f"Fal video generation failed, attempt {attempt+1}: {e}")
+                        await asyncio.sleep(5)
+                if video_bytes is None:
+                    progress_task.cancel()
+                    try:
+                        await progress_task
+                    except asyncio.CancelledError:
+                        pass
+                    await update.message.reply_text("⚠️ Сервис генерации видео временно недоступен, попробуйте позже.")
+                    return
+
                 progress_task.cancel()
                 try:
                     await progress_task
