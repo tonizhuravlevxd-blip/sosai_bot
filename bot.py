@@ -653,9 +653,11 @@ async def handle_generation_job(job):
             if mode in ["video", "cartoon"]:
                 video_used = user.get("video_count", 0)
                 if video_used >= FREE_VIDEO_LIMIT:
-                    try: 
-                        if status: await status.delete()
-                    except: pass
+                    try:
+                        if status:
+                            await status.delete()
+                    except:
+                        pass
                     await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
                     return
 
@@ -668,8 +670,12 @@ async def handle_generation_job(job):
 
             cartoon_style = context.user_data.get("cartoon_style")
             if cartoon_style and prompt:
-                prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
-            if mode != "music" and prompt:
+                # Добавляем cartoon_style только для мультфильмов/видео
+                if mode in ["cartoon", "video"]:
+                    prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
+
+            # Применяем стиль Banana1/2 только для изображений
+            if mode == "image" and style and prompt:
                 prompt = f"{style} {prompt}"
 
             if mode != "music" and prompt:
@@ -679,9 +685,11 @@ async def handle_generation_job(job):
             cache_key = f"{prompt}_{model}_{size}" if prompt else None
             cached = generation_cache.get(cache_key) if cache_key else None
             if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
-                try: 
-                    if status: await status.delete()
-                except: pass
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
                 await msg.reply_photo(photo=cached["image"])
                 return
 
@@ -698,9 +706,11 @@ async def handle_generation_job(job):
 
                 cached_audio = await get_cached_music(prompt)
                 if cached_audio:
-                    try: 
-                        if status: await status.delete()
-                    except: pass
+                    try:
+                        if status:
+                            await status.delete()
+                    except:
+                        pass
                     await context.bot.send_audio(chat_id=chat_id, audio=cached_audio, title="Generated Song")
                     active_generations.discard(user_id)
                     return
@@ -720,19 +730,24 @@ async def handle_generation_job(job):
                                 try:
                                     await msg.edit_text(new_text)
                                     last_text = new_text
-                                except: pass
+                                except:
+                                    pass
                     except asyncio.CancelledError:
                         pass
 
                 progress_task = asyncio.create_task(music_progress(status))
                 audio_url = await fal_music_generate(prompt)
                 progress_task.cancel()
-                try: await progress_task
-                except asyncio.CancelledError: pass
+                try:
+                    await progress_task
+                except asyncio.CancelledError:
+                    pass
 
-                try: 
-                    if status: await status.delete()
-                except: pass
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
 
                 await save_music_cache(prompt, audio_url)
                 await context.bot.send_audio(chat_id=chat_id, audio=audio_url, title="Generated Song")
@@ -764,7 +779,8 @@ async def handle_generation_job(job):
                                 try:
                                     await msg.edit_text(new_text)
                                     last_text = new_text
-                                except: pass
+                                except:
+                                    pass
                     except asyncio.CancelledError:
                         pass
 
@@ -781,18 +797,24 @@ async def handle_generation_job(job):
 
                 if video_bytes is None:
                     progress_task.cancel()
-                    try: await progress_task
-                    except asyncio.CancelledError: pass
+                    try:
+                        await progress_task
+                    except asyncio.CancelledError:
+                        pass
                     await msg.reply_text("⚠️ Сервис генерации видео временно недоступен, попробуйте позже.")
                     return
 
                 progress_task.cancel()
-                try: await progress_task
-                except asyncio.CancelledError: pass
+                try:
+                    await progress_task
+                except asyncio.CancelledError:
+                    pass
 
-                try: 
-                    if status: await status.delete()
-                except: pass
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
 
                 await msg.reply_video(video=video_bytes)
                 async with db_pool.acquire() as conn:
@@ -813,15 +835,19 @@ async def handle_generation_job(job):
                     image_bytes = await fal_generate(model, prompt, images)
                 finally:
                     upload_task.cancel()
-                    try: await upload_task
-                    except asyncio.CancelledError: pass
+                    try:
+                        await upload_task
+                    except asyncio.CancelledError:
+                        pass
 
                 if cache_key:
                     generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
 
-                try: 
-                    if status: await status.delete()
-                except: pass
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
 
                 keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
@@ -840,7 +866,8 @@ async def handle_generation_job(job):
             logging.error(f"Generation error: {e}")
             try:
                 await msg.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
-            except: pass
+            except:
+                pass
 
         finally:
             active_generations.discard(user_id)
