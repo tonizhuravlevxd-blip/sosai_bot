@@ -1050,6 +1050,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
 
+    queue_map = {
+        "image": generation_queue_image,
+        "video": generation_queue_video,
+        "cartoon": generation_queue_video,
+        "music": generation_queue_music
+    }
+
     if data == "buy_stars":
         await query.message.reply_invoice(
             title="🍩 Пончик Premium",
@@ -1136,7 +1143,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data.startswith("cartoon_"):
-
         style_key = data.replace("cartoon_", "")
 
         if style_key not in CARTOON_STYLES:
@@ -1155,17 +1161,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "repeat":
-
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
+        mode = context.user_data.get("mode", "image")
 
         position = get_queue_position() + 1
 
         status = await query.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
+            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
         )
 
-        await generation_queue.put({
+        # Кладем в правильную очередь
+        await queue_map.get(mode, generation_queue_image).put({
             "update": update,
             "context": context,
             "prompt": prompt,
@@ -1173,7 +1180,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model", "banana2"),
             "images": images,
             "user_id": query.from_user.id,
-            "mode": context.user_data.get("mode"),
+            "mode": mode,
             "status": status
         })
 
@@ -1182,7 +1189,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
     mode = context.user_data.get("mode")
 
     if mode not in ["video", "cartoon", "image"]:
@@ -1230,7 +1236,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         lock_user_generation(user_id)
 
-        await generation_queue.put({
+        queue_map = {
+            "image": generation_queue_image,
+            "video": generation_queue_video,
+            "cartoon": generation_queue_video,
+            "music": generation_queue_music
+        }
+
+        await queue_map.get(mode, generation_queue_image).put({
             "update": update,
             "context": context,
             "prompt": caption,
@@ -1244,7 +1257,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+    user_id = update.message.text
     text = update.message.text
     mode = context.user_data.get("mode")
 
@@ -1317,9 +1330,12 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    if generation_queue.full():
-        await update.message.reply_text("⚠️ Сервер перегружен. Попробуйте через несколько секунд.")
-        return
+    queue_map = {
+        "image": generation_queue_image,
+        "video": generation_queue_video,
+        "cartoon": generation_queue_video,
+        "music": generation_queue_music
+    }
 
     user_generation_count[user_id] = count + 1
     active_generations.add(user_id)
@@ -1336,7 +1352,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if mode not in ["image", "video", "cartoon", "music"]:
         mode = "image"
 
-    await generation_queue.put({
+    await queue_map.get(mode, generation_queue_image).put({
         "update": update,
         "context": context,
         "prompt": text,
@@ -1347,7 +1363,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "mode": mode,
         "status": status
     })
-
 
 # ================= COMMANDS =================
 
