@@ -554,6 +554,7 @@ async def fal_video_generate(prompt, images=None):
             "duration": 4,
             "resolution": "720p"
         }
+        logging.info(f"🎬 Video generation started for prompt: {prompt}")
 
         # если есть картинка — используем как стартовый кадр
         if images and image_urls:
@@ -1095,6 +1096,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "cartoon": generation_queue_video,
         "music": generation_queue_music
     }
+    logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
+    await queue_map.get(mode, generation_queue_image).put(job)
+    logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
 
     if data == "buy_stars":
         await query.message.reply_invoice(
