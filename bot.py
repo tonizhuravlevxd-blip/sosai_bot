@@ -1269,17 +1269,38 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        await queue_map.get(mode, generation_queue_image).put({
-            "update": update,
-            "context": context,
-            "prompt": caption,
-            "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),
-            "images": context.user_data["input_images"],
-            "user_id": user_id,
-            "mode": mode,
-            "status": status
-        })
+        # Оборачиваем генерацию в безопасный try/finally
+        async def enqueue_generation():
+            try:
+                await queue_map.get(mode, generation_queue_image).put({
+                    "update": update,
+                    "context": context,
+                    "prompt": caption,
+                    "size": context.user_data.get("size", "1024x1024"),
+                    "model": context.user_data.get("model", "banana2"),
+                    "images": context.user_data["input_images"],
+                    "user_id": user_id,
+                    "mode": mode,
+                    "status": status
+                })
+            finally:
+                active_generations.discard(user_id)
+                # Увеличиваем счетчик после успешной генерации
+                user = await get_user(user_id)
+                if user:
+                    if mode == "image":
+                        user["image_count"] += 1
+                    elif mode in ["video", "cartoon"]:
+                        user["video_count"] += 1
+                    elif mode == "music":
+                        user["music_count"] = user.get("music_count", 0) + 1
+                    await update.message.reply_text(
+                        f"✅ Генерация {mode} завершена! Всего сгенерировано: {user.get('video_count', 0) if mode in ['video', 'cartoon'] else user.get('music_count', 0) if mode=='music' else user['image_count']}"
+                    )
+
+        if user_id not in active_generations:
+            active_generations.add(user_id)
+            await enqueue_generation()
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1363,9 +1384,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "music": generation_queue_music
     }
 
-    user_generation_count[user_id] = count + 1
-    active_generations.add(user_id)
-
     context.user_data["last_prompt"] = text
     context.user_data["last_images"] = context.user_data.get("input_images", [])
 
@@ -1375,20 +1393,38 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
     )
 
-    if mode not in ["image", "video", "cartoon", "music"]:
-        mode = "image"
+    # Безопасная генерация с флагом active_generations
+    async def enqueue_text_generation():
+        try:
+            await queue_map.get(mode, generation_queue_image).put({
+                "update": update,
+                "context": context,
+                "prompt": text,
+                "size": context.user_data.get("size", "1024x1024"),
+                "model": context.user_data.get("model", "banana2"),
+                "images": context.user_data.get("input_images", []),
+                "user_id": user_id,
+                "mode": mode,
+                "status": status
+            })
+        finally:
+            active_generations.discard(user_id)
+            # Увеличиваем счетчик после успешной генерации
+            user = await get_user(user_id)
+            if user:
+                if mode == "image":
+                    user["image_count"] += 1
+                elif mode in ["video", "cartoon"]:
+                    user["video_count"] += 1
+                elif mode == "music":
+                    user["music_count"] = user.get("music_count", 0) + 1
+                await update.message.reply_text(
+                    f"✅ Генерация {mode} завершена! Всего сгенерировано: {user.get('video_count', 0) if mode in ['video', 'cartoon'] else user.get('music_count', 0) if mode=='music' else user['image_count']}"
+                )
 
-    await queue_map.get(mode, generation_queue_image).put({
-        "update": update,
-        "context": context,
-        "prompt": text,
-        "size": context.user_data.get("size", "1024x1024"),
-        "model": context.user_data.get("model", "banana2"),
-        "images": context.user_data.get("input_images", []),
-        "user_id": user_id,
-        "mode": mode,
-        "status": status
-    })
+    if user_id not in active_generations:
+        active_generations.add(user_id)
+        await enqueue_text_generation()
 
 # ================= COMMANDS =================
 
