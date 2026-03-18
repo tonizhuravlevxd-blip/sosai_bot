@@ -1304,7 +1304,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.text
+    user_id = update.effective_user.id
     text = update.message.text
     mode = context.user_data.get("mode")
 
