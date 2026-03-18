@@ -1226,6 +1226,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= PHOTO / TEXT HANDLERS =================
 
+def get_queue_position():
+    """
+    Возвращает текущую общую длину очередей генераций.
+    Учитывает: изображения, видео, мультфильмы и музыку.
+    """
+    # Видео и мультфильмы в одной очереди
+    video_cartoon_queue = generation_queue_video.qsize()
+    
+    return (
+        generation_queue_image.qsize() +  # Очередь изображений
+        video_cartoon_queue +             # Очередь видео + мультфильмы
+        generation_queue_music.qsize()    # Очередь музыки
+    )
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     mode = context.user_data.get("mode")
