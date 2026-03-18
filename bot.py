@@ -1301,8 +1301,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
         return
 
-    if mode in ["image", "video", "cartoon"] and "model" not in context.user_data:
-        await update.message.reply_text("⚠ Сначала выберите модель.\nВведите /photo")
+    if mode == "image" and "model" not in context.user_data:
+        await msg.reply_text("⚠ Сначала выберите модель для изображения")
+    elif mode in ["video", "cartoon"] and not prompt and not images:
+        await msg.reply_text("⚠ Пожалуйста, отправьте текст или фото для генерации видео/мультфильма")
         return
 
     user = await get_user(user_id)
