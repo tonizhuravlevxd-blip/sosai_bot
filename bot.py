@@ -880,20 +880,13 @@ async def handle_generation_job(job):
 
         finally:
             # ================= TASK DONE =================
-            if mode == "image":
-                await generation_queue_image.put(job)
-            elif mode in ["video", "cartoon"]:
-                await generation_queue_video.put(job)
-            elif mode == "music":
-                await generation_queue_music.put(job)
-
+            # !!! больше не добавляем в очередь автоматически, чтобы не зацикливать
             if user_id in active_generations:
                 active_generations.remove(user_id)
             if user_id in user_generation_count:
                 user_generation_count[user_id] -= 1
                 if user_generation_count[user_id] <= 0:
                     del user_generation_count[user_id]
-
 # ================== WORKERS ==================
 async def image_worker():
     while True:
