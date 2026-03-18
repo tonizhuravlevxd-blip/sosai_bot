@@ -898,13 +898,7 @@ async def music_worker():
         job = await generation_queue_music.get()
         await handle_generation_job(job)
 
-# ================== START WORKERS ==================
-for _ in range(5):
-    asyncio.create_task(image_worker())
-for _ in range(2):
-    asyncio.create_task(video_worker())
-for _ in range(1):
-    asyncio.create_task(music_worker())
+
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
