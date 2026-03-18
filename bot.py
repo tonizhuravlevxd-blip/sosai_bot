@@ -9,8 +9,8 @@ import aiohttp
 import json
 
 DATABASE_URL = os.getenv("DATABASE_URL")
+db_pool = None
 
-db_pool = await asyncpg.create_pool(DATABASE_URL)
 from telegram import (
     Update,
     InlineKeyboardMarkup,
@@ -142,20 +142,16 @@ def get_queue_position():
 
 # ================= DATABASE =================
 
+db_pool = None
+
 async def init_db():
     global db_pool
 
-    db_pool = await asyncpg.create_pool(
-        user="postgres",
-        password="password",
-        database="botdb",
-        host="localhost",
-        min_size=1,
-        max_size=10
-    )
+    # Подключаемся к БД через DATABASE_URL
+    db_pool = await asyncpg.create_pool(DATABASE_URL)
 
+    # Создаем таблицы, если их нет
     async with db_pool.acquire() as conn:
-
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -179,8 +175,6 @@ async def init_db():
             created_at BIGINT
         )
         """)
-
-db_pool = None
 
 
 
