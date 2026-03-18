@@ -669,10 +669,11 @@ async def handle_generation_job(job):
                 style = "hyper detailed masterpiece artstation quality"
 
             cartoon_style = context.user_data.get("cartoon_style")
-            if cartoon_style and prompt:
-                # Добавляем cartoon_style только для мультфильмов/видео
-                if mode in ["cartoon", "video"]:
-                    prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
+            if prompt:
+                if mode == "image":
+                    prompt = f"{style} {prompt}"
+                elif mode in ["cartoon", "video"] and cartoon_style:
+                    prompt = f"{cartoon_style}, {prompt}"
 
             # Применяем стиль Banana1/2 только для изображений
             if mode == "image" and style and prompt:
