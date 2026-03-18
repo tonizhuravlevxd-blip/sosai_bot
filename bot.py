@@ -137,7 +137,11 @@ def check_rate_limit(user_id):
 
 
 def get_queue_position():
-    return generation_queue.qsize()
+    return (
+        generation_queue_image.qsize() +
+        generation_queue_video.qsize() +
+        generation_queue_music.qsize()
+    )
 
 
 # ================= DATABASE =================
@@ -636,7 +640,9 @@ async def handle_generation_job(job):
     status = job.get("status")
     mode = job.get("mode", "image")
 
-    msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
+    msg = getattr(update, "message", None)
+    if not msg and getattr(update, "callback_query", None):
+        msg = update.callback_query.message
 
     if mode in ["cartoon", "video"] and not prompt and not images:
         await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
@@ -696,12 +702,13 @@ async def handle_generation_job(job):
 
             # ================= MUSIC MODE =================
             if mode == "music" and prompt:
-                chat_id = getattr(update, "effective_chat", None)
-                chat_id = chat_id.id if chat_id else None
-                if not chat_id:
+                chat = getattr(update, "effective_chat", None)
+                if not chat:
                     active_generations.discard(user_id)
                     user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
                     return
+
+                chat_id = chat.id
 
                 cached_audio = await get_cached_music(prompt)
                 if cached_audio:
@@ -763,6 +770,11 @@ async def handle_generation_job(job):
 
             # ================= VIDEO / CARTOON MODE =================
             if mode in ["video", "cartoon"]:
+                # ✅ FIX: защита от пустого prompt
+                if not prompt and not images:
+                    await msg.reply_text("⚠️ Пустой запрос")
+                    return
+
                 if status is None:
                     status = await msg.reply_text("🎬 Видео генерируется… 0%")
 
@@ -828,7 +840,12 @@ async def handle_generation_job(job):
 
             # ================= IMAGE MODE =================
             if prompt:
-                chat_id = update.effective_chat.id
+                chat = getattr(update, "effective_chat", None)
+                if not chat:
+                    return
+
+                chat_id = chat.id
+
                 upload_task = asyncio.create_task(fake_photo_upload(context.bot, chat_id))
                 try:
                     image_bytes = await fal_generate(model, prompt, images)
@@ -856,8 +873,13 @@ async def handle_generation_job(job):
 
                 await msg.reply_photo(photo=image_bytes, reply_markup=keyboard)
                 context.user_data["mode"] = "image"
+
                 async with db_pool.acquire() as conn:
-                    await conn.execute("UPDATE users SET image_count = image_count + 1 WHERE user_id = $1", user_id)
+                    await conn.execute(
+                        "UPDATE users SET image_count = image_count + 1 WHERE user_id = $1",
+                        user_id
+                    )
+
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
 
