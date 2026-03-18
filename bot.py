@@ -646,7 +646,7 @@ async def handle_generation_job(job):
             if not user:
                 return
 
-            reset_week_if_needed(user)
+            await reset_week_if_needed(user)
             video_used = user["video_count"]
 
             if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
