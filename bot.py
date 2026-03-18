@@ -1025,20 +1025,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Логи очереди
     logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
 
-    # Пример для повторного запроса или enqueue (если есть job)
-    job = {
-        "update": update,
-        "context": context,
-        "prompt": context.user_data.get("last_prompt"),
-        "size": context.user_data.get("size", "1024x1024"),
-        "model": context.user_data.get("model", "banana2"),
-        "images": context.user_data.get("last_images", []),
-        "user_id": user_id,
-        "mode": mode
-    }
-
-    await queue_map.get(mode, generation_queue_image).put(job)
-    logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
+    # Проверка, чтобы не добавлять дубликаты
+    if user_id in active_generations:
+        logging.info(f"⚠ User {user_id} already has an active job, skipping enqueue")
+    else:
+        # Пример для повторного запроса или enqueue (если есть job)
+        job = {
+            "update": update,
+            "context": context,
+            "prompt": context.user_data.get("last_prompt"),
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
+            "images": context.user_data.get("last_images", []),
+            "user_id": user_id,
+            "mode": mode
+        }
+        await queue_map.get(mode, generation_queue_image).put(job)
+        logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
+        active_generations.add(user_id)
 
     # ================= Обработка кнопок =================
     if data == "buy_stars":
@@ -1149,6 +1153,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         images = context.user_data.get("last_images", [])
         mode = context.user_data.get("mode", "image")
 
+        if user_id in active_generations:
+            await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+            return
+
         position = get_queue_position() + 1
 
         status = await query.message.reply_text(
@@ -1166,21 +1174,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": mode,
             "status": status
         })
+        active_generations.add(user_id)
+
 
 # ================= PHOTO / TEXT HANDLERS =================
-
 def get_queue_position():
     """
     Возвращает текущую общую длину очередей генераций.
     Учитывает: изображения, видео, мультфильмы и музыку.
     """
-    # Видео и мультфильмы в одной очереди
     video_cartoon_queue = generation_queue_video.qsize()
-    
     return (
-        generation_queue_image.qsize() +  # Очередь изображений
-        video_cartoon_queue +             # Очередь видео + мультфильмы
-        generation_queue_music.qsize()    # Очередь музыки
+        generation_queue_image.qsize() +
+        video_cartoon_queue +
+        generation_queue_music.qsize()
     )
 
 
@@ -1220,8 +1227,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_prompt"] = caption
         context.user_data["last_images"] = context.user_data["input_images"]
 
-        position = get_queue_position() + 1
+        if user_id in active_generations:
+            await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+            return
 
+        position = get_queue_position() + 1
         status = await update.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
         )
@@ -1240,22 +1250,18 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        async def enqueue_generation():
-            await queue_map.get(mode, generation_queue_image).put({
-                "update": update,
-                "context": context,
-                "prompt": caption,
-                "size": context.user_data.get("size", "1024x1024"),
-                "model": context.user_data.get("model", "banana2"),
-                "images": context.user_data["input_images"],
-                "user_id": user_id,
-                "mode": mode,
-                "status": status
-            })
-
-        if user_id not in active_generations:
-            active_generations.add(user_id)
-            await enqueue_generation()
+        await queue_map.get(mode, generation_queue_image).put({
+            "update": update,
+            "context": context,
+            "prompt": caption,
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
+            "images": context.user_data["input_images"],
+            "user_id": user_id,
+            "mode": mode,
+            "status": status
+        })
+        active_generations.add(user_id)
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1342,29 +1348,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_prompt"] = text
     context.user_data["last_images"] = context.user_data.get("input_images", [])
 
-    position = get_queue_position() + 1
+    if user_id in active_generations:
+        await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+        return
 
+    position = get_queue_position() + 1
     status = await update.message.reply_text(
         f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
     )
 
-    async def enqueue_text_generation():
-        await queue_map.get(mode, generation_queue_image).put({
-            "update": update,
-            "context": context,
-            "prompt": text,
-            "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),
-            "images": context.user_data.get("input_images", []),
-            "user_id": user_id,
-            "mode": mode,
-            "status": status
-        })
-
-    if user_id not in active_generations:
-        active_generations.add(user_id)
-        await enqueue_text_generation()
-
+    await queue_map.get(mode, generation_queue_image).put({
+        "update": update,
+        "context": context,
+        "prompt": text,
+        "size": context.user_data.get("size", "1024x1024"),
+        "model": context.user_data.get("model", "banana2"),
+        "images": context.user_data.get("input_images", []),
+        "user_id": user_id,
+        "mode": mode,
+        "status": status
+    })
+    active_generations.add(user_id)
 # ================= COMMANDS =================
 
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
