@@ -1089,6 +1089,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "model_banana1":
         context.user_data["model"] = "banana1"
+        context.user_data["mode"] = "image"
         await query.message.reply_text(
             "✅ Выбрана модель:\n🍌 Nano Banana 1\n\n"
             "✏ Напишите текст или отправьте 1-4 фото"
@@ -1096,6 +1097,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "model_banana2":
         context.user_data["model"] = "banana2"
+        context.user_data["mode"] = "image"
         await query.message.reply_text(
             "✅ Выбрана модель:\n🍌 Nano Banana 2\n\n"
             "✏ Напишите текст или отправьте 1-4 фото"
