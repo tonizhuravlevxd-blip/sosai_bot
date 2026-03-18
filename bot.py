@@ -619,359 +619,123 @@ async def fake_photo_upload(bot, chat_id):
     except asyncio.CancelledError:
         pass
 
-# ================= WORKER =================
-async def generation_worker():
-    while True:
-        job = await generation_queue.get()
-
-        update = job["update"]
-        context = job["context"]
-        prompt = job["prompt"]
-        size = job["size"]
-        model = job["model"]
-        images = job["images"]
-        user_id = job["user_id"]
-        status = job["status"]
-
-        mode = job.get("mode", "image")
-
-        async with generation_semaphore:
-            try:
-                # ===== проверка лимита видео =====
-                user = await get_user(user_id)
-
-                if not user:
-                    continue
-
-                reset_week_if_needed(user)
-                video_used = user["video_count"]
-
-                if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
-                    try:
-                        if status:
-                            await status.delete()
-                    except:
-                        pass
-
-                    await update.message.reply_text(
-                        "🎬 Лимит видео/мультфильма на неделю исчерпан."
-                    )
-                    continue
-
-                # ===== стиль генерации =====
-                style = ""
-
-                if model == "banana1":
-                    style = "cinematic lighting ultra realistic 8k"
-
-                elif model == "banana2":
-                    style = "hyper detailed masterpiece artstation quality"
-
-                cartoon_style = context.user_data.get("cartoon_style")
-
-                if cartoon_style:
-                    prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
-
-                if mode != "music":
-                    prompt = f"{style} {prompt}"
-
-                # ================= SAFETY FILTER =================
-                if mode != "music":
-                    prompt = clean_prompt(prompt)
-
-                cache_key = f"{prompt}_{model}_{size}"
-                cached = generation_cache.get(cache_key)
-
-                if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
-                    try:
-                        if status:
-                            await status.delete()
-                    except:
-                        pass
-
-                    await update.message.reply_photo(photo=cached["image"])
-                    continue
-
-                images = images[:MAX_INPUT_IMAGES]
-
-                # ================= MUSIC MODE =================
-                if mode == "music":
-
-                    if not update or not getattr(update, "effective_chat", None):
-                        logging.warning(f"Skipping music job for user {user_id}, invalid update")
-                        active_generations.discard(user_id)
-                        user_generation_count[user_id] = max(
-                            0,
-                            user_generation_count.get(user_id, 1) - 1
-                        )
-                        continue
-
-                    chat_id = update.effective_chat.id
-
-                    try:
-                        # ===== проверяем кэш =====
-                        cached_audio = await get_cached_music(prompt)
-
-                        if cached_audio:
-                            logging.info(f"🎵 Music cache hit: {prompt}")
-
-                            try:
-                                if status:
-                                    await status.delete()
-                            except:
-                                pass
-
-                            try:
-                                await context.bot.send_audio(
-                                    chat_id=chat_id,
-                                    audio=cached_audio,
-                                    title="Generated Song"
-                                )
-
-                            except Exception:
-                                async with aiohttp.ClientSession() as session:
-                                    async with session.get(cached_audio) as r:
-                                        audio_bytes = await r.read()
-
-                                await context.bot.send_audio(
-                                    chat_id=chat_id,
-                                    audio=audio_bytes,
-                                    title="Generated Song"
-                                )
-
-                            context.user_data["mode"] = None
-                            active_generations.discard(user_id)
-                            continue
-
-                        # ===== генерация музыки =====
-                        logging.info(f"🎵 Generating music for: {prompt}")
-
-                        if status is None:
-                            status = await update.message.reply_text(
-                                "🎵 Музыка генерируется… 0%"
-                            )
-
-                        async def music_progress(msg, interval=1):
-                            pct = 0
-                            try:
-                                while True:
-                                    await asyncio.sleep(interval)
-                                    pct = min(pct + 10, 100)
-                                    await msg.edit_text(
-                                        f"🎵 Музыка генерируется… {pct}%"
-                                    )
-                            except asyncio.CancelledError:
-                                pass
-
-                        progress_task = asyncio.create_task(
-                            music_progress(status)
-                        )
-
-                        audio_url = await fal_music_generate(prompt)
-
-                        progress_task.cancel()
-
-                        try:
-                            if status:
-                                await status.delete()
-                        except:
-                            pass
-
-                        await save_music_cache(prompt, audio_url)
-
-                        try:
-                            await context.bot.send_audio(
-                                chat_id=chat_id,
-                                audio=audio_url,
-                                title="Generated Song"
-                            )
-
-                        except Exception:
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(audio_url) as r:
-                                    audio_bytes = await r.read()
-
-                            await context.bot.send_audio(
-                                chat_id=chat_id,
-                                audio=audio_bytes,
-                                title="Generated Song"
-                            )
-
-                        context.user_data["mode"] = None
-                        active_generations.discard(user_id)
-
-                        user_generation_count[user_id] = max(
-                            0,
-                            user_generation_count.get(user_id, 1) - 1
-                        )
-
-                        continue
-
-                    except Exception as e:
-                        logging.error(
-                            f"🎵 Music generation error for user {user_id}: {e}"
-                        )
-
-                        try:
-                            if status:
-                                await status.delete()
-                        except:
-                            pass
-
-                        try:
-                            await context.bot.send_message(
-                                chat_id=chat_id,
-                                text="⚠ Ошибка генерации песни. Попробуйте позже."
-                            )
-                        except:
-                            pass
-
-                        context.user_data["mode"] = None
-                        active_generations.discard(user_id)
-
-                        user_generation_count[user_id] = max(
-                            0,
-                            user_generation_count.get(user_id, 1) - 1
-                        )
-
-                        continue
-
-                # ================= VIDEO MODE =================
-                if mode in ["video", "cartoon"]:
-
-                    async with db_lock:
-                        async with db_pool.acquire() as conn:
-                            row = await conn.fetchrow(
-                                "SELECT video_count FROM users WHERE user_id=$1",
-                                user_id
-                            )
-
-                            video_used = row["video_count"]
-
-                            if video_used >= FREE_VIDEO_LIMIT:
-                                try:
-                                    if status:
-                                        await status.delete()
-                                except:
-                                    pass
-
-                                await update.message.reply_text(
-                                    "🎬 Лимит видео/мультфильма на неделю исчерпан."
-                                )
-                                continue
-
-                        async with db_pool.acquire() as conn:
-                            await conn.execute(
-                                """
-                                UPDATE users 
-                                SET video_count = video_count + 1 
-                                WHERE user_id = $1
-                                """,
-                                user_id
-                            )
-
-                    if status is None:
-                        status = await update.message.reply_text(
-                            "🎬 Видео генерируется… 0%"
-                        )
-
-                    async def video_progress(msg, interval=1):
-                        pct = 0
-                        try:
-                            while True:
-                                await asyncio.sleep(interval)
-                                pct = min(pct + 10, 100)
-                                await msg.edit_text(
-                                    f"🎬 Видео генерируется… {pct}%"
-                                )
-                        except asyncio.CancelledError:
-                            pass
-
-                    progress_task = asyncio.create_task(
-                        video_progress(status)
-                    )
-
-                    video_bytes = await fal_video_generate(prompt, images)
-
-                    progress_task.cancel()
-
-                    try:
-                        if status:
-                            await status.delete()
-                    except:
-                        pass
-
-                    await asyncio.wait_for(
-                        update.message.reply_video(video=video_bytes),
-                        timeout=60
-                    )
-
-                    context.user_data["input_images"] = []
-                    context.user_data["last_images"] = []
-                    continue
-
-                # ================= FAL IMAGE =================
-
-                chat_id = update.effective_chat.id
-
-                upload_task = asyncio.create_task(
-                    fake_photo_upload(context.bot, chat_id)
-                )
-
+# ================= QUEUES AND SEMAPHORES =================
+generation_queue_image = asyncio.Queue(maxsize=5000)
+generation_queue_video = asyncio.Queue(maxsize=2000)
+generation_queue_music = asyncio.Queue(maxsize=2000)
+generation_semaphore = asyncio.Semaphore(5)  # Ограничение параллельных генераций
+
+# ================== UNIVERSAL HANDLER ==================
+async def handle_generation_job(job):
+    update = job["update"]
+    context = job["context"]
+    prompt = job["prompt"]
+    size = job.get("size", "1024x1024")
+    model = job.get("model", "banana2")
+    images = job.get("images", [])
+    user_id = job["user_id"]
+    status = job.get("status")
+    mode = job.get("mode", "image")
+
+    async with generation_semaphore:
+        try:
+            # ===== проверка лимита видео =====
+            user = await get_user(user_id)
+            if not user:
+                return
+
+            reset_week_if_needed(user)
+            video_used = user["video_count"]
+
+            if mode in ["video", "cartoon"] and video_used >= FREE_VIDEO_LIMIT:
                 try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
+                await update.message.reply_text(
+                    "🎬 Лимит видео/мультфильма на неделю исчерпан."
+                )
+                return
 
-                    if model in FAL_MODELS:
-                        image_bytes = await fal_generate(model, prompt, images)
+            # ===== стиль генерации =====
+            style = ""
+            if model == "banana1":
+                style = "cinematic lighting ultra realistic 8k"
+            elif model == "banana2":
+                style = "hyper detailed masterpiece artstation quality"
 
-                    else:
+            cartoon_style = context.user_data.get("cartoon_style")
+            if cartoon_style:
+                prompt = f"{cartoon_style}, animated cartoon video, {prompt}"
+            if mode != "music":
+                prompt = f"{style} {prompt}"
 
-                        if images:
-                            upload_images = []
+            # ================= SAFETY FILTER =================
+            if mode != "music":
+                prompt = clean_prompt(prompt)
 
-                            for img in images:
-                                upload_images.append(("image.png", img))
+            cache_key = f"{prompt}_{model}_{size}"
+            cached = generation_cache.get(cache_key)
+            if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
+                await update.message.reply_photo(photo=cached["image"])
+                return
 
-                            result = client.images.edit(
-                                model="gpt-image-1",
-                                image=upload_images,
-                                prompt=prompt,
-                                size=size,
-                            )
+            images = images[:MAX_INPUT_IMAGES]
 
-                        else:
-                            result = client.images.generate(
-                                model="gpt-image-1",
-                                prompt=prompt,
-                                size=size,
-                            )
+            # ================= MUSIC MODE =================
+            if mode == "music":
+                chat_id = update.effective_chat.id if update and getattr(update, "effective_chat", None) else None
+                if not chat_id:
+                    logging.warning(f"Skipping music job for user {user_id}, invalid update")
+                    active_generations.discard(user_id)
+                    user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                    return
 
-                        image_base64 = result.data[0].b64_json
-                        image_bytes = base64.b64decode(image_base64)
+                # проверяем кэш
+                cached_audio = await get_cached_music(prompt)
+                if cached_audio:
+                    logging.info(f"🎵 Music cache hit: {prompt}")
+                    try:
+                        if status:
+                            await status.delete()
+                    except:
+                        pass
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=cached_audio, title="Generated Song")
+                    except Exception:
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(cached_audio) as r:
+                                audio_bytes = await r.read()
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_bytes, title="Generated Song")
 
-                finally:
-                    upload_task.cancel()
+                    context.user_data["mode"] = None
+                    active_generations.discard(user_id)
+                    return
 
-                generation_cache[cache_key] = {
-                    "image": image_bytes,
-                    "time": time.time()
-                }
+                # генерация музыки
+                logging.info(f"🎵 Generating music for: {prompt}")
+                if status is None:
+                    status = await update.message.reply_text("🎵 Музыка генерируется… 0%")
 
-                if len(generation_cache) > 100:
-                    oldest_key = min(
-                        generation_cache,
-                        key=lambda k: generation_cache[k]["time"]
-                    )
-                    del generation_cache[oldest_key]
+                async def music_progress(msg, interval=1):
+                    pct = 0
+                    try:
+                        while True:
+                            await asyncio.sleep(interval)
+                            pct = min(pct + 10, 100)
+                            await msg.edit_text(f"🎵 Музыка генерируется… {pct}%")
+                    except asyncio.CancelledError:
+                        pass
 
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-                        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
-                    ],
-                    [
-                        InlineKeyboardButton("❌ Закончить", callback_data="finish")
-                    ]
-                ])
+                progress_task = asyncio.create_task(music_progress(status))
+                audio_url = await fal_music_generate(prompt)
+                progress_task.cancel()
 
                 try:
                     if status:
@@ -979,65 +743,168 @@ async def generation_worker():
                 except:
                     pass
 
-                sending_status = await update.message.reply_text(
-                    "📤 Отправляем шедевр,он готов..."
-                )
+                await save_music_cache(prompt, audio_url)
+                try:
+                    await context.bot.send_audio(chat_id=chat_id, audio=audio_url, title="Generated Song")
+                except Exception:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(audio_url) as r:
+                            audio_bytes = await r.read()
+                    await context.bot.send_audio(chat_id=chat_id, audio=audio_bytes, title="Generated Song")
 
-                await asyncio.wait_for(
-                    update.message.reply_photo(
-                        photo=image_bytes,
-                        reply_markup=keyboard
-                    ),
-                    timeout=30
-                )
+                context.user_data["mode"] = None
+                active_generations.discard(user_id)
+                user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                return
+
+            # ================= VIDEO MODE =================
+            if mode in ["video", "cartoon"]:
+                async with db_lock:
+                    async with db_pool.acquire() as conn:
+                        row = await conn.fetchrow("SELECT video_count FROM users WHERE user_id=$1", user_id)
+                        video_used = row["video_count"]
+                        if video_used >= FREE_VIDEO_LIMIT:
+                            try:
+                                if status:
+                                    await status.delete()
+                            except:
+                                pass
+                            await update.message.reply_text(
+                                "🎬 Лимит видео/мультфильма на неделю исчерпан."
+                            )
+                            return
+
+                    async with db_pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                            user_id
+                        )
+
+                if status is None:
+                    status = await update.message.reply_text("🎬 Видео генерируется… 0%")
+
+                async def video_progress(msg, interval=1):
+                    pct = 0
+                    try:
+                        while True:
+                            await asyncio.sleep(interval)
+                            pct = min(pct + 10, 100)
+                            await msg.edit_text(f"🎬 Видео генерируется… {pct}%")
+                    except asyncio.CancelledError:
+                        pass
+
+                progress_task = asyncio.create_task(video_progress(status))
+                video_bytes = await fal_video_generate(prompt, images)
+                progress_task.cancel()
 
                 try:
-                    await sending_status.delete()
+                    if status:
+                        await status.delete()
                 except:
                     pass
 
-                context.user_data["mode"] = "image"
-
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        """
-                        UPDATE users 
-                        SET image_count = image_count + 1 
-                        WHERE user_id = $1
-                        """,
-                        user_id
-                    )
-
+                await asyncio.wait_for(update.message.reply_video(video=video_bytes), timeout=60)
                 context.user_data["input_images"] = []
                 context.user_data["last_images"] = []
+                return
 
-            except Exception as e:
-
-                logging.error(f"Generation error: {e}")
-                error_text = str(e)
-
-                if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
-                    await update.message.reply_text(
-                        "⚠️ Запрос не прошёл фильтр безопасности.\nПопробуйте изменить текст."
-                    )
-
+            # ================= IMAGE MODE =================
+            chat_id = update.effective_chat.id
+            upload_task = asyncio.create_task(fake_photo_upload(context.bot, chat_id))
+            try:
+                if model in FAL_MODELS:
+                    image_bytes = await fal_generate(model, prompt, images)
                 else:
-                    await update.message.reply_text(
-                        "⚠ Ошибка генерации. Попробуйте позже."
-                    )
-
+                    if images:
+                        upload_images = [("image.png", img) for img in images]
+                        result = client.images.edit(model="gpt-image-1", image=upload_images, prompt=prompt, size=size)
+                    else:
+                        result = client.images.generate(model="gpt-image-1", prompt=prompt, size=size)
+                    image_base64 = result.data[0].b64_json
+                    image_bytes = base64.b64decode(image_base64)
             finally:
+                upload_task.cancel()
 
-                generation_queue.task_done()
+            generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
+            if len(generation_cache) > 100:
+                oldest_key = min(generation_cache, key=lambda k: generation_cache[k]["time"])
+                del generation_cache[oldest_key]
 
-                if user_id in active_generations:
-                    active_generations.remove(user_id)
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                 InlineKeyboardButton("🆕 Начать заново", callback_data="restart")],
+                [InlineKeyboardButton("❌ Закончить", callback_data="finish")]
+            ])
 
-                if user_id in user_generation_count:
-                    user_generation_count[user_id] -= 1
+            try:
+                if status:
+                    await status.delete()
+            except:
+                pass
 
-                    if user_generation_count[user_id] <= 0:
-                        del user_generation_count[user_id]
+            sending_status = await update.message.reply_text("📤 Отправляем шедевр,он готов...")
+            await asyncio.wait_for(update.message.reply_photo(photo=image_bytes, reply_markup=keyboard), timeout=30)
+
+            try:
+                await sending_status.delete()
+            except:
+                pass
+
+            context.user_data["mode"] = "image"
+            async with db_pool.acquire() as conn:
+                await conn.execute("UPDATE users SET image_count = image_count + 1 WHERE user_id = $1", user_id)
+            context.user_data["input_images"] = []
+            context.user_data["last_images"] = []
+
+        except Exception as e:
+            logging.error(f"Generation error: {e}")
+            error_text = str(e)
+            if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
+                await update.message.reply_text(
+                    "⚠️ Запрос не прошёл фильтр безопасности.\nПопробуйте изменить текст."
+                )
+            else:
+                await update.message.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
+
+        finally:
+            # ================= TASK DONE =================
+            if mode == "image":
+                await generation_queue_image.task_done()
+            elif mode in ["video", "cartoon"]:
+                await generation_queue_video.task_done()
+            elif mode == "music":
+                await generation_queue_music.task_done()
+
+            if user_id in active_generations:
+                active_generations.remove(user_id)
+            if user_id in user_generation_count:
+                user_generation_count[user_id] -= 1
+                if user_generation_count[user_id] <= 0:
+                    del user_generation_count[user_id]
+
+# ================== WORKERS ==================
+async def image_worker():
+    while True:
+        job = await generation_queue_image.get()
+        await handle_generation_job(job)
+
+async def video_worker():
+    while True:
+        job = await generation_queue_video.get()
+        await handle_generation_job(job)
+
+async def music_worker():
+    while True:
+        job = await generation_queue_music.get()
+        await handle_generation_job(job)
+
+# ================== START WORKERS ==================
+for _ in range(5):
+    asyncio.create_task(image_worker())
+for _ in range(2):
+    asyncio.create_task(video_worker())
+for _ in range(1):
+    asyncio.create_task(music_worker())
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1306,7 +1173,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= PHOTO / TEXT HANDLERS =================
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     user_id = update.effective_user.id
 
     if context.user_data.get("mode") not in ["video", "cartoon"]:
@@ -1335,14 +1201,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption
 
     if caption:
-
         context.user_data["last_prompt"] = caption
         context.user_data["last_images"] = context.user_data["input_images"]
 
         position = get_queue_position() + 1
 
         status = await update.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
+            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
         )
 
         allowed, msg = check_user_generation_limit(user_id)
@@ -1364,6 +1229,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": context.user_data.get("mode"),
             "status": status
         })
+
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1412,7 +1278,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = await get_user(user_id)
-
     if not user:
         await update.message.reply_text("⚠ Ошибка пользователя. Напишите /start")
         return
@@ -1456,7 +1321,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     position = get_queue_position() + 1
 
     status = await update.message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается,немного надо подождать..."
+        f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
     )
 
     mode = context.user_data.get("mode")
@@ -1474,17 +1339,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "mode": mode,
         "status": status
     })
+
+
 # ================= COMMANDS =================
+
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     context.user_data["mode"] = "video"
-
     await update.message.reply_text(
         "🎬 Режим видео включён (Sora2)\n\n"
         "Отправьте промпт или фото + текст."
     )
-async def cartoon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+
+async def cartoon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("🎬 Pixar", callback_data="cartoon_pixar"),
@@ -1504,21 +1371,18 @@ async def cartoon(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     context.user_data["mode"] = "cartoon"
-
     await update.message.reply_text(
         "🎨 Выберите стиль мультфильма:",
         reply_markup=keyboard
     )
 
+
 async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     context.user_data["chat_mode"] = True
-
     await update.message.reply_text(
         "🤖 Режим ChatGPT включен\n\n"
         "Напишите чем вам помочь."
     )
-
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
