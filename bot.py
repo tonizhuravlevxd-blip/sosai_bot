@@ -606,9 +606,7 @@ async def fal_video_generate(prompt, images=None):
         raise Exception("Sora video timeout")
 
 # ================= FAKE PHOTO UPLOAD ACTION =================
-
 async def fake_photo_upload(bot, chat_id):
-
     try:
         while True:
             await bot.send_chat_action(
@@ -736,6 +734,10 @@ async def handle_generation_job(job):
                 progress_task = asyncio.create_task(music_progress(status))
                 audio_url = await fal_music_generate(prompt)
                 progress_task.cancel()
+                try:
+                    await progress_task
+                except asyncio.CancelledError:
+                    pass
 
                 try:
                     if status:
@@ -796,6 +798,10 @@ async def handle_generation_job(job):
                 progress_task = asyncio.create_task(video_progress(status))
                 video_bytes = await fal_video_generate(prompt, images)
                 progress_task.cancel()
+                try:
+                    await progress_task
+                except asyncio.CancelledError:
+                    pass
 
                 try:
                     if status:
@@ -813,7 +819,8 @@ async def handle_generation_job(job):
             upload_task = asyncio.create_task(fake_photo_upload(context.bot, chat_id))
             try:
                 if model in FAL_MODELS:
-                    image_bytes = await fal_generate(model, prompt, images)
+                    # Таймаут генерации 60 секунд
+                    image_bytes = await asyncio.wait_for(fal_generate(model, prompt, images), timeout=60)
                 else:
                     if images:
                         upload_images = [("image.png", img) for img in images]
@@ -824,7 +831,12 @@ async def handle_generation_job(job):
                     image_bytes = base64.b64decode(image_base64)
             finally:
                 upload_task.cancel()
+                try:
+                    await upload_task
+                except asyncio.CancelledError:
+                    pass
 
+            # ================= CACHE =================
             generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
             if len(generation_cache) > 100:
                 oldest_key = min(generation_cache, key=lambda k: generation_cache[k]["time"])
@@ -842,7 +854,7 @@ async def handle_generation_job(job):
             except:
                 pass
 
-            sending_status = await update.message.reply_text("📤 Отправляем шедевр,он готов...")
+            sending_status = await update.message.reply_text("📤 Отправляем шедевр, он готов...")
             await asyncio.wait_for(update.message.reply_photo(photo=image_bytes, reply_markup=keyboard), timeout=30)
 
             try:
