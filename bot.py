@@ -636,6 +636,9 @@ async def handle_generation_job(job):
     status = job.get("status")
     mode = job.get("mode", "image")
 
+    # безопасно получаем объект сообщения
+    msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
+
     async with generation_semaphore:
         try:
             # ===== проверка лимита видео =====
@@ -652,7 +655,7 @@ async def handle_generation_job(job):
                         await status.delete()
                 except:
                     pass
-                await update.message.reply_text(
+                await msg.reply_text(
                     "🎬 Лимит видео/мультфильма на неделю исчерпан."
                 )
                 return
@@ -682,7 +685,7 @@ async def handle_generation_job(job):
                         await status.delete()
                 except:
                     pass
-                await update.message.reply_photo(photo=cached["image"])
+                await msg.reply_photo(photo=cached["image"])
                 return
 
             images = images[:MAX_INPUT_IMAGES]
@@ -718,7 +721,7 @@ async def handle_generation_job(job):
 
                 logging.info(f"🎵 Generating music for: {prompt}")
                 if status is None:
-                    status = await update.message.reply_text("🎵 Музыка генерируется… 0%")
+                    status = await msg.reply_text("🎵 Музыка генерируется… 0%")
 
                 async def music_progress(msg, interval=1):
                     pct = 0
@@ -784,13 +787,13 @@ async def handle_generation_job(job):
                                     await status.delete()
                             except:
                                 pass
-                            await update.message.reply_text(
+                            await msg.reply_text(
                                 "🎬 Лимит видео/мультфильма на неделю исчерпан."
                             )
                             return
 
                 if status is None:
-                    status = await update.message.reply_text("🎬 Видео генерируется… 0%")
+                    status = await msg.reply_text("🎬 Видео генерируется… 0%")
 
                 async def video_progress(msg, interval=1):
                     pct = 0
@@ -827,7 +830,7 @@ async def handle_generation_job(job):
                         await progress_task
                     except asyncio.CancelledError:
                         pass
-                    await update.message.reply_text("⚠️ Сервис генерации видео временно недоступен, попробуйте позже.")
+                    await msg.reply_text("⚠️ Сервис генерации видео временно недоступен, попробуйте позже.")
                     return
 
                 progress_task.cancel()
@@ -842,7 +845,7 @@ async def handle_generation_job(job):
                 except:
                     pass
 
-                await asyncio.wait_for(update.message.reply_video(video=video_bytes), timeout=60)
+                await asyncio.wait_for(msg.reply_video(video=video_bytes), timeout=60)
 
                 async with db_pool.acquire() as conn:
                     await conn.execute(
@@ -892,8 +895,8 @@ async def handle_generation_job(job):
             except:
                 pass
 
-            sending_status = await update.message.reply_text("📤 Отправляем шедевр, он готов...")
-            await asyncio.wait_for(update.message.reply_photo(photo=image_bytes, reply_markup=keyboard), timeout=30)
+            sending_status = await msg.reply_text("📤 Отправляем шедевр, он готов...")
+            await asyncio.wait_for(msg.reply_photo(photo=image_bytes, reply_markup=keyboard), timeout=30)
 
             try:
                 await sending_status.delete()
@@ -910,11 +913,11 @@ async def handle_generation_job(job):
             logging.error(f"Generation error: {e}")
             error_text = str(e)
             if "moderation" in error_text or "safety" in error_text or "content_policy" in error_text:
-                await update.message.reply_text(
+                await msg.reply_text(
                     "⚠️ Запрос не прошёл фильтр безопасности.\nПопробуйте изменить текст."
                 )
             else:
-                await update.message.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
+                await msg.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
 
         finally:
             if user_id in active_generations:
