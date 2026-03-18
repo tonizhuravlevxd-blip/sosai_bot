@@ -869,11 +869,11 @@ async def handle_generation_job(job):
         finally:
             # ================= TASK DONE =================
             if mode == "image":
-                await generation_queue_image.task_done()
+                await generation_queue_image.put(job)
             elif mode in ["video", "cartoon"]:
-                await generation_queue_video.task_done()
+                await generation_queue_video.put(job)
             elif mode == "music":
-                await generation_queue_music.task_done()
+                await generation_queue_music.put(job)
 
             if user_id in active_generations:
                 active_generations.remove(user_id)
@@ -1169,12 +1169,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    if context.user_data.get("mode") not in ["video", "cartoon"]:
-        if "model" not in context.user_data:
-            await update.message.reply_text(
-                "⚠ Сначала выберите модель\nВведите /photo"
-            )
-            return
+    mode = context.user_data.get("mode")
+
+    if mode not in ["video", "cartoon", "image"]:
+        await update.message.reply_text(
+            "⚠ Сначала выберите режим генерации: /photo, /video, /cartoon или /suno"
+        )
+        return
+
+    if mode in ["image", "cartoon"] and "model" not in context.user_data:
+        await update.message.reply_text("⚠ Сначала выберите модель\nВведите /photo")
+        return
 
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
@@ -1201,11 +1206,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         position = get_queue_position() + 1
 
         status = await update.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
+            f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
         )
 
         allowed, msg = check_user_generation_limit(user_id)
-
         if not allowed:
             await update.message.reply_text(msg or "⚠️ Лимит генераций достигнут")
             return
@@ -1220,7 +1224,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model", "banana2"),
             "images": context.user_data["input_images"],
             "user_id": user_id,
-            "mode": context.user_data.get("mode"),
+            "mode": mode,
             "status": status
         })
 
@@ -1228,8 +1232,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     text = update.message.text
+    mode = context.user_data.get("mode")
 
-    print("MODE:", context.user_data.get("mode"))
+    print("MODE:", mode)
+
+    if user_id in active_generations:
+        await update.message.reply_text("⏳ Ваша генерация уже выполняется")
+        return
 
     count = user_generation_count.get(user_id, 0)
     if count >= MAX_USER_GENERATIONS:
@@ -1257,18 +1266,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
         return
 
-    if context.user_data.get("mode") not in ["video", "music"]:
-        if "model" not in context.user_data:
-            await update.message.reply_text("⚠ Сначала выберите модель.\n\nВведите /photo")
-            return
-
-    if user_id in active_generations:
-        await update.message.reply_text("⏳ Ваша генерация уже выполняется")
-        return
-
-    count = user_generation_count.get(user_id, 0)
-    if count >= MAX_USER_GENERATIONS:
-        await update.message.reply_text("⚠️ Подождите завершения текущих генераций")
+    if mode in ["image", "video", "cartoon"] and "model" not in context.user_data:
+        await update.message.reply_text("⚠ Сначала выберите модель.\nВведите /photo")
         return
 
     user = await get_user(user_id)
@@ -1278,28 +1277,30 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reset_week_if_needed(user)
 
-    used = user["image_count"]
+    used_images = user["image_count"]
+    used_videos = user["video_count"]
     bonus = user["bonus_images"]
-    video_used = user["video_count"]
 
     if is_premium(user):
-        remaining = PREMIUM_IMAGE_LIMIT - used
+        remaining_images = PREMIUM_IMAGE_LIMIT - used_images
+        video_limit = PREMIUM_VIDEO_LIMIT
     else:
-        remaining = FREE_LIMIT + bonus - used
+        remaining_images = FREE_LIMIT + bonus - used_images
+        video_limit = FREE_VIDEO_LIMIT
 
-    if context.user_data.get("mode") == "music":
-        remaining = 9999
+    if mode == "music":
+        remaining_images = 9999
 
-    video_limit = PREMIUM_VIDEO_LIMIT if is_premium(user) else FREE_VIDEO_LIMIT
-
-    if context.user_data.get("mode") in ["video", "cartoon"] and video_used >= video_limit:
+    if mode in ["video", "cartoon"] and used_videos >= video_limit:
         await update.message.reply_text(
             "🎬 Бесплатный лимит видео/мультфильма исчерпан.\nНовый будет доступен через неделю."
         )
         return
 
-    if remaining <= 0:
-        await update.message.reply_text("❌ Бесплатные генерации закончились.\nПригласите друзей через /ref")
+    if remaining_images <= 0 and mode == "image":
+        await update.message.reply_text(
+            "❌ Бесплатные генерации изображений закончились.\nПригласите друзей через /ref"
+        )
         return
 
     if generation_queue.full():
@@ -1315,10 +1316,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     position = get_queue_position() + 1
 
     status = await update.message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
+        f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
     )
 
-    mode = context.user_data.get("mode")
     if mode not in ["image", "video", "cartoon", "music"]:
         mode = "image"
 
@@ -1493,18 +1493,23 @@ async def set_commands(app):
 
 
 # ================= POST INIT =================
+# Убираем повторное создание очередей в post_init
+# Вместо этого используем глобальные очереди
+
 async def post_init(app):
-    global generation_queue
+    global generation_queue_image, generation_queue_video, generation_queue_music
 
-    await init_db()  # 🔥 ВАЖНО
+    await init_db()
 
-    generation_queue_image = asyncio.Queue(maxsize=5000)
-    generation_queue_video = asyncio.Queue(maxsize=2000)
-    generation_queue_music = asyncio.Queue(maxsize=2000)
+    # Уже объявленные глобальные очереди, не создаем новые
+    # generation_queue_image = asyncio.Queue(maxsize=5000)
+    # generation_queue_video = asyncio.Queue(maxsize=2000)
+    # generation_queue_music = asyncio.Queue(maxsize=2000)
     
+    # Общая очередь для статистики / повторов
+    global generation_queue
     generation_queue = asyncio.Queue(maxsize=10000)
 
-    # Запуск воркеров в контексте event loop
     for _ in range(5):
         asyncio.create_task(image_worker())
     for _ in range(2):
@@ -1514,7 +1519,6 @@ async def post_init(app):
 
     asyncio.create_task(cache_cleaner())
     await set_commands(app)
-
     logging.info("✅ PostgreSQL подключен и бот готов")
     if not db_pool:
         raise Exception("❌ DB не инициализирована")
