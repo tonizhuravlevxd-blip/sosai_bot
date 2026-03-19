@@ -1,4 +1,4 @@
-1import os
+import os
 import time
 import asyncpg
 import base64
@@ -12,7 +12,7 @@ import io
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool = None
 
-from telegram import (
+f rom telegram import (
     Update,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
