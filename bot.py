@@ -786,7 +786,7 @@ async def handle_generation_job(job):
                     status = await msg.reply_text("🎵 Музыка генерируется… 1%")
 
                 # ===== БЕСКОНЕЧНЫЙ ПРОГРЕСС =====
-                async def music_progress(msg, interval=1):
+                async def music_progress(msg, interval=3):
                     pct = 1
                     last_text = ""
                     try:
@@ -872,7 +872,7 @@ async def handle_generation_job(job):
                 if status is None:
                     status = await msg.reply_text("🎬 Видео генерируется… 0%")
 
-                async def video_progress(msg, interval=1):
+                async def video_progress(msg, interval=2):
                     pct = 0
                     last_text = ""
                     try:
