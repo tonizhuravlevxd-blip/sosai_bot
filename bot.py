@@ -1073,6 +1073,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     user_id = query.from_user.id
+    # ================= ADMIN (РАННИЙ ВЫХОД) =================
+    if data == "reset_limits":
+
+        if user_id != ADMIN_ID:
+            await query.message.reply_text("❌ Нет доступа")
+            return
+
+        await reset_user_limits(user_id)
+
+        await query.message.reply_text("♻️ Лимиты обнулены")
+        return
 
     # Получаем mode безопасно
     mode = context.user_data.get("mode", "image")
@@ -1260,16 +1271,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         active_generations.add(user_id)
 
-    # ================= ADMIN =================
-    elif data == "reset_limits":
 
-        if user_id != ADMIN_ID:
-            await query.message.reply_text("❌ Нет доступа")
-            return
-
-        await reset_user_limits(user_id)
-
-        await query.message.reply_text("♻️ Лимиты обнулены")
 
 # ================= PHOTO / TEXT HANDLERS =================
 def get_queue_position():
