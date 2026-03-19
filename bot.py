@@ -495,7 +495,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
             text = await r.text()
             try:
                 data = json.loads(text)
-            except:
+            except Exception:
                 raise Exception(f"Fal bad response: {text}")
 
         if "request_id" not in data:
@@ -535,28 +535,32 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
                 logging.info(f"🎵 FAL RAW RESULT: {result}")
 
                 # ==== ВСЕ ВАРИАНТЫ URL ====
+                audio_url = None
+
                 if "audio" in result and result["audio"]:
-                    return result["audio"].get("url")
+                    audio_url = result["audio"].get("url")
 
-                if "audios" in result and result["audios"]:
-                    return result["audios"][0].get("url")
+                elif "audios" in result and result["audios"]:
+                    audio_url = result["audios"][0].get("url")
 
-                if "audio_url" in result:
-                    return result["audio_url"]
+                elif "audio_url" in result:
+                    audio_url = result["audio_url"]
 
-                if "url" in result:
-                    return result["url"]
+                elif "url" in result:
+                    audio_url = result["url"]
 
-                if "output" in result:
+                elif "output" in result and isinstance(result["output"], dict):
                     output = result["output"]
+                    if "audio" in output:
+                        audio_url = output["audio"].get("url")
+                    elif "audios" in output and output["audios"]:
+                        audio_url = output["audios"][0].get("url")
 
-                    if isinstance(output, dict):
-                        if "audio" in output:
-                            return output["audio"].get("url")
-                        if "audios" in output and output["audios"]:
-                            return output["audios"][0].get("url")
+                if not audio_url:
+                    raise Exception(f"Fal returned no audio for prompt: {prompt} | result={result}")
 
-                raise Exception(f"Fal returned no audio for prompt: {prompt} | result={result}")
+                logging.info(f"🎧 FAL Audio URL: {audio_url}")
+                return audio_url
 
             # ===== ОШИБКА =====
             if status == "FAILED":
