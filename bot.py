@@ -1151,9 +1151,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         await query.edit_message_text("✅ Условия приняты.")
 
+    # ================= MODE / MODEL =================
     elif data == "model_banana1":
         context.user_data["model"] = "banana1"
         context.user_data["mode"] = "image"
+        context.user_data["cartoon_style"] = None
+        context.user_data["last_prompt"] = None
+        context.user_data["last_images"] = []
         await query.message.reply_text(
             "✅ Выбрана модель:\n🍌 Nano Banana 1\n\n"
             "✏ Напишите текст или отправьте 1-4 фото"
@@ -1162,11 +1166,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "model_banana2":
         context.user_data["model"] = "banana2"
         context.user_data["mode"] = "image"
+        context.user_data["cartoon_style"] = None
+        context.user_data["last_prompt"] = None
+        context.user_data["last_images"] = []
         await query.message.reply_text(
             "✅ Выбрана модель:\n🍌 Nano Banana 2\n\n"
             "✏ Напишите текст или отправьте 1-4 фото"
         )
 
+    # ================= SIZE =================
     elif data == "size_square":
         context.user_data["size"] = SIZE_CONFIG["square"]
         await query.message.reply_text("⬜ Разрешение 1:1 выбрано")
@@ -1179,14 +1187,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["size"] = SIZE_CONFIG["phone"]
         await query.message.reply_text("📱 Вертикальное разрешение выбрано")
 
+    # ================= MUSIC =================
     elif data == "suno_hit":
         context.user_data["mode"] = "music"
+        context.user_data["cartoon_style"] = None
+        context.user_data["last_prompt"] = None
+        context.user_data["last_images"] = []
         await query.message.reply_text(
             "🎵 Напишите тему песни\n\n"
             "Пример:\n"
             "emotional pop song about lost love"
         )
 
+    # ================= CARTOON STYLES =================
     elif data.startswith("cartoon_"):
         style_key = data.replace("cartoon_", "")
         if style_key not in CARTOON_STYLES:
@@ -1194,7 +1207,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
         context.user_data["mode"] = "cartoon"
-
         if "model" not in context.user_data:
             context.user_data["model"] = "banana2"
 
@@ -1212,6 +1224,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ================= REPEAT =================
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
@@ -1248,6 +1261,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": mode,
             "status": status
         })
+
+    # ================= CLEAR OLD STYLES FOR NON-CARTOON =================
+    else:
+        # Если любая другая кнопка/действие и не мультфильм — сброс стиля
+        if context.user_data.get("mode") not in ["cartoon"]:
+            context.user_data["cartoon_style"] = None
 
     # ================= Проверка очереди и лимитов =================
     mode = context.user_data.get("mode", "image")
