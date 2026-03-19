@@ -508,7 +508,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
         start_time = time.time()
         last_status = None
 
-        # ===== ОЖИДАНИЕ =====
+        # ===== ОЖИДАНИЕ ЗАВЕРШЕНИЯ =====
         while True:
             await asyncio.sleep(2)
 
@@ -534,6 +534,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
 
                 logging.info(f"🎵 FAL RAW RESULT: {result}")
 
+                # ==== ВСЕ ВАРИАНТЫ URL ====
                 if "audio" in result and result["audio"]:
                     return result["audio"].get("url")
 
@@ -561,7 +562,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
             if status == "FAILED":
                 raise Exception(f"Fal music generation failed: {status_data}")
 
-            # ===== АНТИ-ЗАВИСАНИЕ =====
+            # ===== АНТИ-ЗАВИСАНИЕ (IN_PROGRESS / QUEUED) =====
             if status in ["IN_PROGRESS", "QUEUED"]:
                 if time.time() - start_time > max_wait:
                     raise Exception(f"Music stuck (timeout) for prompt: {prompt}")
