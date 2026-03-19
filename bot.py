@@ -767,37 +767,64 @@ async def handle_generation_job(job):
                             await status.delete()
                     except:
                         pass
-                    await context.bot.send_audio(chat_id=chat_id, audio=cached_audio, title="Generated Song")
+
+                    await context.bot.send_audio(
+                        chat_id=chat_id,
+                        audio=cached_audio,
+                        title="Generated Song"
+                    )
+
                     active_generations.discard(user_id)
                     return
 
                 if status is None:
-                    status = await msg.reply_text("🎵 Музыка генерируется… 0%")
+                    status = await msg.reply_text("🎵 Музыка генерируется… 1%")
 
+                # ===== БЕСКОНЕЧНЫЙ ПРОГРЕСС =====
                 async def music_progress(msg, interval=1):
-                    pct = 0
+                    pct = 1
                     last_text = ""
+
                     try:
                         while True:
                             await asyncio.sleep(interval)
-                            pct = min(pct + 10, 100)
+
+                            pct += 3
+                            if pct >= 99:
+                                pct = 1
+
                             new_text = f"🎵 Музыка генерируется… {pct}%"
+
                             if new_text != last_text:
                                 try:
                                     await msg.edit_text(new_text)
                                     last_text = new_text
                                 except:
                                     pass
+
                     except asyncio.CancelledError:
                         pass
 
                 progress_task = asyncio.create_task(music_progress(status))
+
+                # ===== ГЕНЕРАЦИЯ =====
                 audio_url = await fal_music_generate(prompt)
+
+                # ===== ОСТАНОВКА ПРОГРЕССА =====
                 progress_task.cancel()
                 try:
                     await progress_task
                 except asyncio.CancelledError:
                     pass
+
+                # ===== 100% =====
+                try:
+                    if status:
+                        await status.edit_text("🎵 Музыка генерируется… 100%")
+                except:
+                    pass
+
+                await asyncio.sleep(1)
 
                 try:
                     if status:
@@ -805,8 +832,23 @@ async def handle_generation_job(job):
                 except:
                     pass
 
+                # ===== СКАЧИВАЕМ АУДИО =====
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(audio_url) as resp:
+                        if resp.status != 200:
+                            raise Exception(f"Failed to download audio: {audio_url}")
+
+                        audio_bytes = await resp.read()
+
+                # ===== СОХРАНЯЕМ КЕШ =====
                 await save_music_cache(prompt, audio_url)
-                await context.bot.send_audio(chat_id=chat_id, audio=audio_url, title="Generated Song")
+
+                # ===== ОТПРАВКА =====
+                await context.bot.send_audio(
+                    chat_id=chat_id,
+                    audio=audio_bytes,
+                    title="Generated Song"
+                )
 
                 async with db_pool.acquire() as conn:
                     await conn.execute(
@@ -820,10 +862,9 @@ async def handle_generation_job(job):
 
             # ================= VIDEO / CARTOON MODE =================
             if mode in ["video", "cartoon"]:
-                # Сброс стиля мультфильма для обычного видео
                 if mode == "video":
                     context.user_data["cartoon_style"] = None
-                # ✅ FIX: защита от пустого prompt
+
                 if not prompt and not images:
                     await msg.reply_text("⚠️ Пустой запрос")
                     return
@@ -881,6 +922,7 @@ async def handle_generation_job(job):
                     pass
 
                 await msg.reply_video(video=video_bytes)
+
                 async with db_pool.acquire() as conn:
                     await conn.execute(
                         "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
@@ -893,9 +935,9 @@ async def handle_generation_job(job):
 
             # ================= IMAGE MODE =================
             if prompt:
-                # Сброс стиля мультфильма для обычного изображения
                 if mode == "image":
                     context.user_data["cartoon_style"] = None
+
                 chat = getattr(update, "effective_chat", None)
                 if not chat:
                     return
