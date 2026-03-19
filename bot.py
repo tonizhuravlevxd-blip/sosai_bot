@@ -755,15 +755,17 @@ async def handle_generation_job(job):
 
             images = images[:MAX_INPUT_IMAGES]
 
-            # ================= MUSIC MODE =================
+           # ================= MUSIC MODE =================
             if mode == "music" and prompt:
-                chat = getattr(update, "effective_chat", None)
-                if not chat:
+                # Получаем chat_id независимо от типа апдейта
+                if getattr(update, "effective_chat", None):
+                    chat_id = update.effective_chat.id
+                elif getattr(update, "callback_query", None):
+                    chat_id = update.callback_query.message.chat.id
+                else:
                     active_generations.discard(user_id)
                     user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
                     return
-
-                chat_id = chat.id
 
                 cached_audio = await get_cached_music(prompt)
                 if cached_audio:
@@ -773,11 +775,15 @@ async def handle_generation_job(job):
                     except Exception:
                         pass
 
-                    await context.bot.send_audio(
-                        chat_id=chat_id,
-                        audio=cached_audio,
-                        title="Generated Song"
-                    )
+                    try:
+                        logging.info(f"Sending cached audio, size: {len(cached_audio)} bytes")
+                        await context.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=cached_audio,
+                            title="Generated Song"
+                        )
+                    except Exception as e:
+                        logging.error(f"Failed to send cached audio: {e}")
 
                     active_generations.discard(user_id)
                     return
@@ -839,16 +845,21 @@ async def handle_generation_job(job):
                         if resp.status != 200:
                             raise Exception(f"Failed to download audio: {audio_url}")
                         audio_bytes = await resp.read()
+                        logging.info(f"Downloaded generated audio, size: {len(audio_bytes)} bytes")
 
                 # ===== СОХРАНЯЕМ КЕШ =====
                 await save_music_cache(prompt, audio_bytes)
 
                 # ===== ОТПРАВКА =====
-                await context.bot.send_audio(
-                    chat_id=chat_id,
-                    audio=audio_bytes,
-                    title="Generated Song"
-                )
+                try:
+                    logging.info(f"Sending generated audio to chat_id {chat_id}")
+                    await context.bot.send_audio(
+                        chat_id=chat_id,
+                        audio=audio_bytes,
+                        title="Generated Song"
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to send generated audio: {e}")
 
                 async with db_pool.acquire() as conn:
                     await conn.execute(
