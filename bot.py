@@ -389,6 +389,7 @@ async def download_fal_image(session, url):
 # ================= UNIVERSAL FAL GENERATOR =================
 
 async def fal_generate(model, prompt, images=None):
+    prompt = clean_prompt(prompt)  # ✅ очистка перед отправкой
 
     model_cfg = FAL_MODELS[model]
 
@@ -476,6 +477,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
     :param max_wait: максимальное время ожидания генерации (в секундах)
     :return: URL с аудио
     """
+    prompt = clean_prompt(prompt)  # ✅ очистка перед отправкой
     base_url = "https://queue.fal.run/fal-ai/lyria2"
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -547,6 +549,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
 # ================= FAL VIDEO GENERATOR =================
 
 async def fal_video_generate(prompt, images=None):
+    prompt = clean_prompt(prompt)  # ✅ очистка перед отправкой
 
     if images:
         base_url = FAL_VIDEO_MODELS["image"]["url"]
