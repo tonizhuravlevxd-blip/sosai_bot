@@ -1184,13 +1184,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
-        context.user_data["mode"] = "cartoon"  # ❗ ВАЖНО
+        context.user_data["mode"] = "cartoon"
 
-        # ✅ Автоустановка модели для мультфильмов как текущая модель видео
         if "model" not in context.user_data:
             context.user_data["model"] = "banana2"
 
-        # ❗ СБРОС старых данных
         context.user_data["last_prompt"] = None
         context.user_data["last_images"] = []
         context.user_data["input_images"] = []
@@ -1203,7 +1201,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• фото + текст\n\n"
             "После этого бот создаст мультфильм 🎥"
         )
-        return  # ✅ чтобы дальше не шло к проверке пустого запроса
+        return
 
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
@@ -1225,6 +1223,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "cartoon": generation_queue_video,
             "music": generation_queue_music
         }
+
+        # ✅ Применяем clean_prompt для видео и мультфильмов
+        if mode in ["video", "cartoon"] and prompt:
+            prompt = clean_prompt(prompt)
 
         await queue_map.get(mode, generation_queue_image).put({
             "update": update,
@@ -1255,7 +1257,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_prompt = context.user_data.get("last_prompt")
         last_images = context.user_data.get("last_images", [])
 
-        # ✅ Исправлено: не блокировать выбор стиля
         if mode in ["video", "cartoon"] and not last_prompt and not last_images:
             await query.message.reply_text("⚠️ Пустой запрос для видео/мультфильма")
             return
@@ -1265,12 +1266,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(msg)
             return
 
+        # ✅ Применяем clean_prompt перед отправкой в очередь
+        safe_prompt = last_prompt
+        if mode in ["video", "cartoon"] and last_prompt:
+            safe_prompt = clean_prompt(last_prompt)
+
         job = {
             "update": update,
             "context": context,
-            "prompt": last_prompt,
+            "prompt": safe_prompt,
             "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),  # ✅ мультфильмы используют видео-модель
+            "model": context.user_data.get("model", "banana2"),
             "images": last_images,
             "user_id": user_id,
             "mode": mode
