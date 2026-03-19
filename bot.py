@@ -792,6 +792,9 @@ async def handle_generation_job(job):
 
             # ================= VIDEO / CARTOON MODE =================
             if mode in ["video", "cartoon"]:
+                # Сброс стиля мультфильма для обычного видео
+                if mode == "video":
+                    context.user_data["cartoon_style"] = None
                 # ✅ FIX: защита от пустого prompt
                 if not prompt and not images:
                     await msg.reply_text("⚠️ Пустой запрос")
@@ -862,6 +865,9 @@ async def handle_generation_job(job):
 
             # ================= IMAGE MODE =================
             if prompt:
+                # Сброс стиля мультфильма для обычного изображения
+                if mode == "image":
+                    context.user_data["cartoon_style"] = None
                 chat = getattr(update, "effective_chat", None)
                 if not chat:
                     return
@@ -1471,6 +1477,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "video"
+    context.user_data["cartoon_style"] = None  # ✅ сброс старого стиля мультфильма
     await update.message.reply_text(
         "🎬 Режим видео включён (Sora2)\n\n"
         "Отправьте промпт или фото + текст."
