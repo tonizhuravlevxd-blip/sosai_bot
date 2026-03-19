@@ -172,6 +172,11 @@ async def init_db():
             premium_until BIGINT DEFAULT 0
         )
         """)
+                # ✅ ДОБАВЬ ВОТ ЭТО
+        await conn.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS music_count INTEGER DEFAULT 0
+        """)
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS music_cache (
