@@ -7,6 +7,7 @@ import logging
 import gc
 import aiohttp
 import json
+import io
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool = None
@@ -755,7 +756,9 @@ async def handle_generation_job(job):
 
             images = images[:MAX_INPUT_IMAGES]
 
-           # ================= MUSIC MODE =================
+
+
+# ================= MUSIC MODE =================
             if mode == "music" and prompt:
                 # Получаем chat_id независимо от типа апдейта
                 if getattr(update, "effective_chat", None):
@@ -777,9 +780,11 @@ async def handle_generation_job(job):
 
                     try:
                         logging.info(f"Sending cached audio, size: {len(cached_audio)} bytes")
+                        audio_file = io.BytesIO(cached_audio)
+                        audio_file.name = "song.mp3"
                         await context.bot.send_audio(
                             chat_id=chat_id,
-                            audio=cached_audio,
+                            audio=audio_file,
                             title="Generated Song"
                         )
                     except Exception as e:
@@ -853,9 +858,11 @@ async def handle_generation_job(job):
                 # ===== ОТПРАВКА =====
                 try:
                     logging.info(f"Sending generated audio to chat_id {chat_id}")
+                    audio_file = io.BytesIO(audio_bytes)
+                    audio_file.name = "song.mp3"
                     await context.bot.send_audio(
                         chat_id=chat_id,
-                        audio=audio_bytes,
+                        audio=audio_file,
                         title="Generated Song"
                     )
                 except Exception as e:
