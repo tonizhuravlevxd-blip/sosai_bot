@@ -478,6 +478,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
     :return: URL с аудио
     """
     prompt = clean_prompt(prompt)  # ✅ очистка перед отправкой
+
     base_url = "https://queue.fal.run/fal-ai/lyria2"
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -509,6 +510,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
 
         while True:
             await asyncio.sleep(2)
+
             async with session.get(status_url, headers=headers) as r:
                 try:
                     status_data = await r.json()
@@ -516,29 +518,52 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
                     continue
 
             status = status_data.get("status")
+
             if status != last_status:
                 logging.info(f"🎵 Music generation status: {status} for prompt: {prompt}")
                 last_status = status
 
+            # ===== УСПЕШНО =====
             if status == "COMPLETED":
                 async with session.get(result_url, headers=headers) as r:
                     try:
                         result = await r.json()
                     except Exception:
                         raise Exception("Failed to parse FAL music result")
-                
-                # проверяем варианты ответа
-                if "audio" in result:
-                    return result["audio"]["url"]
-                if "audios" in result:
-                    return result["audios"][0]["url"]
+
+                # 🔥 ЛОГ ДЛЯ ДЕБАГА (очень важно)
+                logging.info(f"🎵 FAL RAW RESULT: {result}")
+
+                # ===== ВСЕ ВОЗМОЖНЫЕ ВАРИАНТЫ =====
+                if "audio" in result and result["audio"]:
+                    return result["audio"].get("url")
+
+                if "audios" in result and result["audios"]:
+                    return result["audios"][0].get("url")
+
                 if "audio_url" in result:
                     return result["audio_url"]
-                raise Exception(f"Fal returned no audio for prompt: {prompt}")
 
+                if "url" in result:
+                    return result["url"]
+
+                if "output" in result:
+                    output = result["output"]
+
+                    if isinstance(output, dict):
+                        if "audio" in output:
+                            return output["audio"].get("url")
+                        if "audios" in output and output["audios"]:
+                            return output["audios"][0].get("url")
+
+                # ❌ если вообще ничего нет
+                raise Exception(f"Fal returned no audio for prompt: {prompt} | result={result}")
+
+            # ===== ОШИБКА =====
             if status == "FAILED":
                 raise Exception(f"Fal music generation failed: {status_data}")
 
+            # ===== ТАЙМАУТ =====
             if time.time() - start_time > max_wait:
                 raise Exception(f"Music generation timeout (> {max_wait}s) for prompt: {prompt}")
 
