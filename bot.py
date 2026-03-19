@@ -1091,59 +1091,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("♻️ Лимиты обнулены")
         return
 
-    # Получаем mode безопасно
-    mode = context.user_data.get("mode", "image")
-
-    queue_map = {
-        "image": generation_queue_image,
-        "video": generation_queue_video,
-        "cartoon": generation_queue_video,
-        "music": generation_queue_music
-    }
-
-    # Логи очереди
-    logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
-
-    # Проверка, чтобы не добавлять дубликаты и соблюдение лимита
-    if user_id in active_generations:
-        logging.info(f"⚠ User {user_id} already has an active job, skipping enqueue")
-    else:
-        # ✅ Фикс: проверка пустого prompt для video/cartoon
-        last_prompt = context.user_data.get("last_prompt")
-        last_images = context.user_data.get("last_images", [])
-
-        if mode in ["video", "cartoon"] and not last_prompt and not last_images:
-            await query.message.reply_text("⚠️ Пустой запрос для видео/мультфильма")
-            return
-
-        # ✅ ФИКС: проверка лимита генераций (анти-спам)
-        allowed, msg = check_user_generation_limit(user_id)
-        if not allowed:
-            await query.message.reply_text(msg)
-            return
-
-        # Создаём job
-        job = {
-            "update": update,
-            "context": context,
-            "prompt": last_prompt,
-            "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),
-            "images": last_images,
-            "user_id": user_id,
-            "mode": mode
-        }
-
-        # ✅ ФИКС: правильная блокировка
-        lock_user_generation(user_id)
-
-        # Добавляем в очередь
-        await queue_map.get(mode, generation_queue_image).put(job)
-
-        logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
-
-        active_generations.add(user_id)
-
     # ================= Обработка кнопок =================
     if data == "buy_stars":
         await query.message.reply_invoice(
@@ -1252,6 +1199,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• фото + текст\n\n"
             "После этого бот создаст мультфильм 🎥"
         )
+        return  # ✅ добавлено, чтобы не шло дальше к проверке пустого запроса
 
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
@@ -1280,6 +1228,55 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "status": status
         })
 
+    # ================= Проверка очереди и лимитов =================
+    # Получаем mode безопасно
+    mode = context.user_data.get("mode", "image")
+
+    queue_map = {
+        "image": generation_queue_image,
+        "video": generation_queue_video,
+        "cartoon": generation_queue_video,
+        "music": generation_queue_music
+    }
+
+    # Логи очереди
+    logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
+
+    # Проверка, чтобы не добавлять дубликаты и соблюдение лимита
+    if user_id in active_generations:
+        logging.info(f"⚠ User {user_id} already has an active job, skipping enqueue")
+    else:
+        last_prompt = context.user_data.get("last_prompt")
+        last_images = context.user_data.get("last_images", [])
+
+        # ✅ Исправлено: не блокировать выбор стиля
+        if mode in ["video", "cartoon"] and not last_prompt and not last_images:
+            await query.message.reply_text("⚠️ Пустой запрос для видео/мультфильма")
+            return
+
+        allowed, msg = check_user_generation_limit(user_id)
+        if not allowed:
+            await query.message.reply_text(msg)
+            return
+
+        job = {
+            "update": update,
+            "context": context,
+            "prompt": last_prompt,
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
+            "images": last_images,
+            "user_id": user_id,
+            "mode": mode
+        }
+
+        lock_user_generation(user_id)
+
+        await queue_map.get(mode, generation_queue_image).put(job)
+
+        logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
+
+        active_generations.add(user_id)
 
 # ================= PHOTO / TEXT HANDLERS =================
 def get_queue_position():
