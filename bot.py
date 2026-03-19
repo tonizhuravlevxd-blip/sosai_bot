@@ -1081,13 +1081,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= ADMIN (РАННИЙ ВЫХОД) =================
     if data == "reset_limits":
-
         if user_id != ADMIN_ID:
             await query.message.reply_text("❌ Нет доступа")
             return
-
         await reset_user_limits(user_id)
-
         await query.message.reply_text("♻️ Лимиты обнулены")
         return
 
@@ -1179,12 +1176,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("cartoon_"):
         style_key = data.replace("cartoon_", "")
-
         if style_key not in CARTOON_STYLES:
             return
 
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
         context.user_data["mode"] = "cartoon"  # ❗ ВАЖНО
+
+        # ✅ Автоустановка модели для мультфильмов как текущая модель видео
+        if "model" not in context.user_data:
+            context.user_data["model"] = "banana2"
 
         # ❗ СБРОС старых данных
         context.user_data["last_prompt"] = None
@@ -1199,7 +1199,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• фото + текст\n\n"
             "После этого бот создаст мультфильм 🎥"
         )
-        return  # ✅ добавлено, чтобы не шло дальше к проверке пустого запроса
+        return  # ✅ чтобы дальше не шло к проверке пустого запроса
 
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
@@ -1211,10 +1211,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         position = get_queue_position() + 1
-
         status = await query.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
         )
+
+        queue_map = {
+            "image": generation_queue_image,
+            "video": generation_queue_video,
+            "cartoon": generation_queue_video,
+            "music": generation_queue_music
+        }
 
         await queue_map.get(mode, generation_queue_image).put({
             "update": update,
@@ -1229,9 +1235,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
 
     # ================= Проверка очереди и лимитов =================
-    # Получаем mode безопасно
     mode = context.user_data.get("mode", "image")
-
     queue_map = {
         "image": generation_queue_image,
         "video": generation_queue_video,
@@ -1239,10 +1243,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "music": generation_queue_music
     }
 
-    # Логи очереди
     logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
 
-    # Проверка, чтобы не добавлять дубликаты и соблюдение лимита
     if user_id in active_generations:
         logging.info(f"⚠ User {user_id} already has an active job, skipping enqueue")
     else:
@@ -1264,222 +1266,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "context": context,
             "prompt": last_prompt,
             "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),
+            "model": context.user_data.get("model", "banana2"),  # ✅ мультфильмы используют видео-модель
             "images": last_images,
             "user_id": user_id,
             "mode": mode
         }
 
         lock_user_generation(user_id)
-
         await queue_map.get(mode, generation_queue_image).put(job)
-
         logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
-
         active_generations.add(user_id)
-
-# ================= PHOTO / TEXT HANDLERS =================
-def get_queue_position():
-    """
-    Возвращает текущую общую длину очередей генераций.
-    Учитывает: изображения, видео, мультфильмы и музыку.
-    """
-    video_cartoon_queue = generation_queue_video.qsize()
-    return (
-        generation_queue_image.qsize() +
-        video_cartoon_queue +
-        generation_queue_music.qsize()
-    )
-
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    mode = context.user_data.get("mode")
-
-    if mode not in ["video", "cartoon", "image"]:
-        await update.message.reply_text(
-            "⚠ Сначала выберите режим генерации: /photo, /video, /cartoon или /suno"
-        )
-        return
-
-    if mode in ["image", "cartoon"] and "model" not in context.user_data:
-        await update.message.reply_text("⚠ Сначала выберите модель\nВведите /photo")
-        return
-
-    if "input_images" not in context.user_data:
-        context.user_data["input_images"] = []
-
-    if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
-        context.user_data["input_images"] = []
-
-    photo = update.message.photo[-1]
-
-    if photo.file_size and photo.file_size > 5_000_000:
-        await update.message.reply_text("⚠️ Фото слишком большое (макс 5MB)")
-        return
-
-    file = await photo.get_file()
-    image_bytes = bytes(await file.download_as_bytearray())
-    context.user_data["input_images"].append(image_bytes)
-
-    caption = update.message.caption
-
-    if caption:
-        context.user_data["last_prompt"] = caption
-        context.user_data["last_images"] = context.user_data["input_images"]
-
-        if user_id in active_generations:
-            await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
-            return
-
-        position = get_queue_position() + 1
-        status = await update.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
-        )
-
-        allowed, msg = check_user_generation_limit(user_id)
-        if not allowed:
-            await update.message.reply_text(msg or "⚠️ Лимит генераций достигнут")
-            return
-
-        lock_user_generation(user_id)
-
-        queue_map = {
-            "image": generation_queue_image,
-            "video": generation_queue_video,
-            "cartoon": generation_queue_video,
-            "music": generation_queue_music
-        }
-
-        await queue_map.get(mode, generation_queue_image).put({
-            "update": update,
-            "context": context,
-            "prompt": caption,
-            "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),
-            "images": context.user_data["input_images"],
-            "user_id": user_id,
-            "mode": mode,
-            "status": status
-        })
-        active_generations.add(user_id)
-
-
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    message = update.message
-
-    if not message:
-        return
-
-    # ✅ ВАЖНО: теперь prompt существует
-    prompt = message.text if message.text else None
-    images = context.user_data.get("input_images", [])
-    mode = context.user_data.get("mode")
-
-    print("MODE:", mode)
-
-    if user_id in active_generations:
-        await message.reply_text("⏳ Ваша генерация уже выполняется")
-        return
-
-    count = user_generation_count.get(user_id, 0)
-    if count >= MAX_USER_GENERATIONS:
-        await message.reply_text("⚠️ Подождите завершения текущих генераций")
-        return
-
-    if not check_rate_limit(user_id):
-        await message.reply_text("⏳ Не так быстро. Подождите 2 секунды.")
-        return
-
-    if prompt and len(prompt) > 800:
-        await message.reply_text("⚠ Слишком длинный запрос.")
-        return
-
-    if context.user_data.get("chat_mode"):
-        try:
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            answer = response.choices[0].message.content
-            await message.reply_text(answer)
-        except Exception as e:
-            logging.error(f"ChatGPT error: {e}")
-            await message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
-        return
-
-    if mode == "image" and "model" not in context.user_data:
-        await message.reply_text("⚠ Сначала выберите модель для изображения")
-
-    elif mode in ["video", "cartoon"] and not prompt and not images:
-        await message.reply_text("⚠ Пожалуйста, отправьте текст или фото для генерации видео/мультфильма")
-        return
-
-    user = await get_user(user_id)
-    if not user:
-        await message.reply_text("⚠ Ошибка пользователя. Напишите /start")
-        return
-
-    await reset_week_if_needed(user)
-
-    used_images = user["image_count"]
-    used_videos = user["video_count"]
-    bonus = user["bonus_images"]
-
-    if is_premium(user):
-        remaining_images = PREMIUM_IMAGE_LIMIT - used_images
-        video_limit = PREMIUM_VIDEO_LIMIT
-    else:
-        remaining_images = FREE_LIMIT + bonus - used_images
-        video_limit = FREE_VIDEO_LIMIT
-
-    if mode == "music":
-        remaining_images = 9999
-
-    if mode in ["video", "cartoon"] and used_videos >= video_limit:
-        await message.reply_text(
-            "🎬 Бесплатный лимит видео/мультфильма исчерпан.\nНовый будет доступен через неделю."
-        )
-        return
-
-    if remaining_images <= 0 and mode == "image":
-        await message.reply_text(
-            "❌ Бесплатные генерации изображений закончились.\nПригласите друзей через /ref"
-        )
-        return
-
-    queue_map = {
-        "image": generation_queue_image,
-        "video": generation_queue_video,
-        "cartoon": generation_queue_video,
-        "music": generation_queue_music
-    }
-
-    context.user_data["last_prompt"] = prompt
-    context.user_data["last_images"] = images
-
-    if user_id in active_generations:
-        await message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
-        return
-
-    position = get_queue_position() + 1
-    status = await message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
-    )
-
-    await queue_map.get(mode, generation_queue_image).put({
-        "update": update,
-        "context": context,
-        "prompt": prompt,
-        "size": context.user_data.get("size", "1024x1024"),
-        "model": context.user_data.get("model", "banana2"),
-        "images": images,
-        "user_id": user_id,
-        "mode": mode,
-        "status": status
-    })
-    active_generations.add(user_id)
 # ================= COMMANDS =================
 
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
