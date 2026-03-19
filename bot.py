@@ -468,7 +468,7 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
-async def fal_music_generate(prompt, duration=30, max_wait=900):
+async def fal_music_generate(prompt, duration=30, max_wait=180):
     """
     Генерация музыки через FAL с прогресс-логированием.
     
@@ -477,9 +477,9 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
     :param max_wait: максимальное время ожидания генерации (в секундах)
     :return: URL с аудио
     """
-    prompt = prompt.strip()  # ✅ очистка перед отправкой
+    prompt = clean_prompt(prompt)
 
-    base_url = "https://queue.fal.run/fal-ai/minimax-music/v1.5"
+    base_url = "https://queue.fal.run/sonauto/v2/text-to-music"  # ✅ FIX URL
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
@@ -490,7 +490,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
     }
 
     async with aiohttp.ClientSession() as session:
-        # создаём генерацию
+        # ===== СОЗДАНИЕ ЗАДАЧИ =====
         async with session.post(base_url, json=payload, headers=headers) as r:
             text = await r.text()
             try:
@@ -508,6 +508,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
         start_time = time.time()
         last_status = None
 
+        # ===== ОЖИДАНИЕ =====
         while True:
             await asyncio.sleep(2)
 
@@ -523,7 +524,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
                 logging.info(f"🎵 Music generation status: {status} for prompt: {prompt}")
                 last_status = status
 
-            # ===== УСПЕШНО =====
+            # ===== УСПЕХ =====
             if status == "COMPLETED":
                 async with session.get(result_url, headers=headers) as r:
                     try:
@@ -531,10 +532,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
                     except Exception:
                         raise Exception("Failed to parse FAL music result")
 
-                # 🔥 ЛОГ ДЛЯ ДЕБАГА (очень важно)
                 logging.info(f"🎵 FAL RAW RESULT: {result}")
 
-                # ===== ВСЕ ВОЗМОЖНЫЕ ВАРИАНТЫ =====
                 if "audio" in result and result["audio"]:
                     return result["audio"].get("url")
 
@@ -556,14 +555,18 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
                         if "audios" in output and output["audios"]:
                             return output["audios"][0].get("url")
 
-                # ❌ если вообще ничего нет
                 raise Exception(f"Fal returned no audio for prompt: {prompt} | result={result}")
 
             # ===== ОШИБКА =====
             if status == "FAILED":
                 raise Exception(f"Fal music generation failed: {status_data}")
 
-            # ===== ТАЙМАУТ =====
+            # ===== АНТИ-ЗАВИСАНИЕ =====
+            if status in ["IN_PROGRESS", "QUEUED"]:
+                if time.time() - start_time > max_wait:
+                    raise Exception(f"Music stuck (timeout) for prompt: {prompt}")
+
+            # ===== ГЛОБАЛЬНЫЙ ТАЙМАУТ =====
             if time.time() - start_time > max_wait:
                 raise Exception(f"Music generation timeout (> {max_wait}s) for prompt: {prompt}")
 
