@@ -758,15 +758,13 @@ async def handle_generation_job(job):
 
             # ================= MUSIC MODE =================
             if mode == "music" and prompt:
-                # Получаем chat_id независимо от типа апдейта
-                if getattr(update, "effective_chat", None):
-                    chat_id = update.effective_chat.id
-                elif getattr(update, "callback_query", None):
-                    chat_id = update.callback_query.message.chat.id
-                else:
+                # Получаем chat_id через сообщение пользователя
+                msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
+                if not msg:
                     active_generations.discard(user_id)
                     user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
                     return
+                chat_id = msg.chat.id
 
                 cached_audio_url = await get_cached_music(prompt)
                 audio_bytes = None
@@ -788,6 +786,7 @@ async def handle_generation_job(job):
 
                         audio_file = io.BytesIO(audio_bytes)
                         audio_file.name = "song.mp3"
+                        audio_file.seek(0)  # важно для корректной отправки
                         await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
                     except Exception as e:
                         logging.error(f"Failed to send cached audio: {e}")
@@ -862,6 +861,7 @@ async def handle_generation_job(job):
                     logging.info(f"Sending generated audio to chat_id {chat_id}")
                     audio_file = io.BytesIO(audio_bytes)
                     audio_file.name = "song.mp3"
+                    audio_file.seek(0)  # фикс для Telegram
                     await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
                 except Exception as e:
                     logging.error(f"Failed to send generated audio: {e}")
