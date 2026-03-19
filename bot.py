@@ -1078,6 +1078,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     data = query.data
     user_id = query.from_user.id
+
     # ================= ADMIN (РАННИЙ ВЫХОД) =================
     if data == "reset_limits":
 
@@ -1144,143 +1145,140 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         active_generations.add(user_id)
 
     # ================= Обработка кнопок =================
-if data == "buy_stars":
-    await query.message.reply_invoice(
-        title="🍩 Пончик Premium",
-        description="30 дней Premium доступа",
-        payload="premium_donut",
-        provider_token="",
-        currency="XTR",
-        prices=[{"label": "Premium", "amount": 500}]
-    )
-
-elif data == "buy_spb":
-    spb_link = (
-        "https://yoomoney.ru/quickpay/shop-widget?"
-        "writer=SELLER_ID&"
-        "targets=Premium+Donut&"
-        "default-sum=500&"
-        "button-text=11&"
-        "payment-type-choice=on&"
-        "quickpay-form=shop&"
-        f"metadata[user_id]={user_id}&"
-        f"successURL=https://t.me/{context.bot.username}"
-    )
-    await query.message.reply_text(
-        f"💳 Оплата через СПБ (ЮKassa)\n\n"
-        f"Нажмите на ссылку и оплатите:\n{spb_link}\n\n"
-        f"После успешной оплаты ваш статус Premium активируется автоматически."
-    )
-
-elif data == "finish":
-    context.user_data.clear()
-    await query.message.reply_text("✅ Генерация завершена.")
-
-elif data == "restart":
-    context.user_data["input_images"] = []
-    context.user_data["last_images"] = []
-    await query.message.reply_text("🔄 Начните заново. Используйте /photo")
-
-elif data == "accept_terms":
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE users 
-            SET accepted_terms = 1 
-            WHERE user_id = $1
-            """,
-            user_id
+    if data == "buy_stars":
+        await query.message.reply_invoice(
+            title="🍩 Пончик Premium",
+            description="30 дней Premium доступа",
+            payload="premium_donut",
+            provider_token="",
+            currency="XTR",
+            prices=[{"label": "Premium", "amount": 500}]
         )
-    await query.edit_message_text("✅ Условия приняты.")
 
-elif data == "model_banana1":
-    context.user_data["model"] = "banana1"
-    context.user_data["mode"] = "image"
-    await query.message.reply_text(
-        "✅ Выбрана модель:\n🍌 Nano Banana 1\n\n"
-        "✏ Напишите текст или отправьте 1-4 фото"
-    )
+    elif data == "buy_spb":
+        spb_link = (
+            "https://yoomoney.ru/quickpay/shop-widget?"
+            "writer=SELLER_ID&"
+            "targets=Premium+Donut&"
+            "default-sum=500&"
+            "button-text=11&"
+            "payment-type-choice=on&"
+            "quickpay-form=shop&"
+            f"metadata[user_id]={user_id}&"
+            f"successURL=https://t.me/{context.bot.username}"
+        )
+        await query.message.reply_text(
+            f"💳 Оплата через СПБ (ЮKassa)\n\n"
+            f"Нажмите на ссылку и оплатите:\n{spb_link}\n\n"
+            f"После успешной оплаты ваш статус Premium активируется автоматически."
+        )
 
-elif data == "model_banana2":
-    context.user_data["model"] = "banana2"
-    context.user_data["mode"] = "image"
-    await query.message.reply_text(
-        "✅ Выбрана модель:\n🍌 Nano Banana 2\n\n"
-        "✏ Напишите текст или отправьте 1-4 фото"
-    )
+    elif data == "finish":
+        context.user_data.clear()
+        await query.message.reply_text("✅ Генерация завершена.")
 
-elif data == "size_square":
-    context.user_data["size"] = SIZE_CONFIG["square"]
-    await query.message.reply_text("⬜ Разрешение 1:1 выбрано")
+    elif data == "restart":
+        context.user_data["input_images"] = []
+        context.user_data["last_images"] = []
+        await query.message.reply_text("🔄 Начните заново. Используйте /photo")
 
-elif data == "size_wide":
-    context.user_data["size"] = SIZE_CONFIG["wide"]
-    await query.message.reply_text("🖥 Разрешение 16:9 выбрано")
+    elif data == "accept_terms":
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE users 
+                SET accepted_terms = 1 
+                WHERE user_id = $1
+                """,
+                user_id
+            )
+        await query.edit_message_text("✅ Условия приняты.")
 
-elif data == "size_phone":
-    context.user_data["size"] = SIZE_CONFIG["phone"]
-    await query.message.reply_text("📱 Вертикальное разрешение выбрано")
+    elif data == "model_banana1":
+        context.user_data["model"] = "banana1"
+        context.user_data["mode"] = "image"
+        await query.message.reply_text(
+            "✅ Выбрана модель:\n🍌 Nano Banana 1\n\n"
+            "✏ Напишите текст или отправьте 1-4 фото"
+        )
 
-elif data == "suno_hit":
-    context.user_data["mode"] = "music"
-    await query.message.reply_text(
-        "🎵 Напишите тему песни\n\n"
-        "Пример:\n"
-        "emotional pop song about lost love"
-    )
+    elif data == "model_banana2":
+        context.user_data["model"] = "banana2"
+        context.user_data["mode"] = "image"
+        await query.message.reply_text(
+            "✅ Выбрана модель:\n🍌 Nano Banana 2\n\n"
+            "✏ Напишите текст или отправьте 1-4 фото"
+        )
 
-elif data.startswith("cartoon_"):
-    style_key = data.replace("cartoon_", "")
+    elif data == "size_square":
+        context.user_data["size"] = SIZE_CONFIG["square"]
+        await query.message.reply_text("⬜ Разрешение 1:1 выбрано")
 
-    if style_key not in CARTOON_STYLES:
-        return
+    elif data == "size_wide":
+        context.user_data["size"] = SIZE_CONFIG["wide"]
+        await query.message.reply_text("🖥 Разрешение 16:9 выбрано")
 
-    context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
-    context.user_data["mode"] = "cartoon"  # ❗ ВАЖНО
+    elif data == "size_phone":
+        context.user_data["size"] = SIZE_CONFIG["phone"]
+        await query.message.reply_text("📱 Вертикальное разрешение выбрано")
 
-    # ❗ СБРОС старых данных
-    context.user_data["last_prompt"] = None
-    context.user_data["last_images"] = []
-    context.user_data["input_images"] = []
+    elif data == "suno_hit":
+        context.user_data["mode"] = "music"
+        await query.message.reply_text(
+            "🎵 Напишите тему песни\n\n"
+            "Пример:\n"
+            "emotional pop song about lost love"
+        )
 
-    await query.message.reply_text(
-        f"🎬 Стиль выбран: {style_key.upper()}\n\n"
-        "✏ Теперь отправьте:\n"
-        "• текст\n"
-        "или\n"
-        "• фото + текст\n\n"
-        "После этого бот создаст мультфильм 🎥"
-    )
+    elif data.startswith("cartoon_"):
+        style_key = data.replace("cartoon_", "")
 
-elif data == "repeat":
-    prompt = context.user_data.get("last_prompt")
-    images = context.user_data.get("last_images", [])
-    mode = context.user_data.get("mode", "image")
+        if style_key not in CARTOON_STYLES:
+            return
 
-    if user_id in active_generations:
-        await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
-        return
+        context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
+        context.user_data["mode"] = "cartoon"  # ❗ ВАЖНО
 
-    position = get_queue_position() + 1
+        # ❗ СБРОС старых данных
+        context.user_data["last_prompt"] = None
+        context.user_data["last_images"] = []
+        context.user_data["input_images"] = []
 
-    status = await query.message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
-    )
+        await query.message.reply_text(
+            f"🎬 Стиль выбран: {style_key.upper()}\n\n"
+            "✏ Теперь отправьте:\n"
+            "• текст\n"
+            "или\n"
+            "• фото + текст\n\n"
+            "После этого бот создаст мультфильм 🎥"
+        )
 
-    await queue_map.get(mode, generation_queue_image).put({
-        "update": update,
-        "context": context,
-        "prompt": prompt,
-        "size": context.user_data.get("size", "1024x1024"),
-        "model": context.user_data.get("model", "banana2"),
-        "images": images,
-        "user_id": user_id,
-        "mode": mode,
-        "status": status
-    })
+    elif data == "repeat":
+        prompt = context.user_data.get("last_prompt")
+        images = context.user_data.get("last_images", [])
+        mode = context.user_data.get("mode", "image")
 
-        active_generations.add(user_id)
+        if user_id in active_generations:
+            await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+            return
 
+        position = get_queue_position() + 1
+
+        status = await query.message.reply_text(
+            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
+        )
+
+        await queue_map.get(mode, generation_queue_image).put({
+            "update": update,
+            "context": context,
+            "prompt": prompt,
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
+            "images": images,
+            "user_id": user_id,
+            "mode": mode,
+            "status": status
+        })
 
 
 # ================= PHOTO / TEXT HANDLERS =================
