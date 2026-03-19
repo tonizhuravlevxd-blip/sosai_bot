@@ -34,6 +34,7 @@ logging.basicConfig(level=logging.INFO)
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FAL_KEY = os.getenv("FAL_KEY")
+ADMIN_ID = 5523265642  # ← замени на свой Telegram ID
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY не установлен")
@@ -249,7 +250,20 @@ def is_premium(user):
 
     return False        
 
-
+async def reset_user_limits(user_id):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE users
+            SET image_count = 0,
+                video_count = 0,
+                music_count = 0,
+                week_start = $1
+            WHERE user_id = $2
+            """,
+            int(time.time()),
+            user_id
+        )
 
 
 # ================= PROMPT SAFETY FILTER =================
@@ -1085,7 +1099,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("⚠️ Пустой запрос для видео/мультфильма")
             return
 
-        # Проверка лимитов через функцию (если есть)
+        # ✅ ФИКС: проверка лимита генераций (анти-спам)
         allowed, msg = check_user_generation_limit(user_id)
         if not allowed:
             await query.message.reply_text(msg)
@@ -1103,12 +1117,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": mode
         }
 
-        # Блокировка генерации для пользователя
+        # ✅ ФИКС: правильная блокировка
         lock_user_generation(user_id)
 
         # Добавляем в очередь
         await queue_map.get(mode, generation_queue_image).put(job)
+
         logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
+
         active_generations.add(user_id)
 
     # ================= Обработка кнопок =================
@@ -1199,10 +1215,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("cartoon_"):
         style_key = data.replace("cartoon_", "")
+
         if style_key not in CARTOON_STYLES:
             return
+
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
         context.user_data["mode"] = "video"
+
         await query.message.reply_text(
             f"🎬 Стиль выбран: {style_key.upper()}\n\n"
             "📸 Теперь отправьте:\n"
@@ -1222,6 +1241,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         position = get_queue_position() + 1
+
         status = await query.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
         )
@@ -1237,8 +1257,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": mode,
             "status": status
         })
+
         active_generations.add(user_id)
 
+    # ================= ADMIN =================
+    elif data == "reset_limits":
+
+        if user_id != ADMIN_ID:
+            await query.message.reply_text("❌ Нет доступа")
+            return
+
+        await reset_user_limits(user_id)
+
+        await query.message.reply_text("♻️ Лимиты обнулены")
 
 # ================= PHOTO / TEXT HANDLERS =================
 def get_queue_position():
@@ -1495,6 +1526,9 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bonus = user["bonus_images"]
 
     remaining = FREE_LIMIT + bonus - used
+    keyboard = InlineKeyboardMarkup([
+    [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
+])
 
     await update.message.reply_text(
         f"👤 Профиль\n\n"
