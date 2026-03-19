@@ -535,25 +535,35 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
 
                 logging.info(f"🎵 FAL RAW RESULT: {result}")
 
-                # ==== ВСЕ ВАРИАНТЫ URL ====
+                # ==== ВСЕ ВАРИАНТЫ URL (УЛУЧШЕНО ПОД SONAUTO) ====
                 audio_url = None
 
-                if "audio" in result and result["audio"]:
-                    audio_url = result["audio"].get("url")
+                # основной вариант Sonauto: audio = { url: ... }
+                if "audio" in result:
+                    if isinstance(result["audio"], dict):
+                        audio_url = result["audio"].get("url")
+                    elif isinstance(result["audio"], list) and result["audio"]:
+                        audio_url = result["audio"][0].get("url")
 
-                elif "audios" in result and result["audios"]:
+                # запасные варианты
+                if not audio_url and "audios" in result and result["audios"]:
                     audio_url = result["audios"][0].get("url")
 
-                elif "audio_url" in result:
+                if not audio_url and "audio_url" in result:
                     audio_url = result["audio_url"]
 
-                elif "url" in result:
+                if not audio_url and "url" in result:
                     audio_url = result["url"]
 
-                elif "output" in result and isinstance(result["output"], dict):
+                if not audio_url and "output" in result and isinstance(result["output"], dict):
                     output = result["output"]
+
                     if "audio" in output:
-                        audio_url = output["audio"].get("url")
+                        if isinstance(output["audio"], dict):
+                            audio_url = output["audio"].get("url")
+                        elif isinstance(output["audio"], list) and output["audio"]:
+                            audio_url = output["audio"][0].get("url")
+
                     elif "audios" in output and output["audios"]:
                         audio_url = output["audios"][0].get("url")
 
