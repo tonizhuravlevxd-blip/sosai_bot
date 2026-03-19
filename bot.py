@@ -766,7 +766,7 @@ async def handle_generation_job(job):
 
             images = images[:MAX_INPUT_IMAGES]
 
-               # ================= MUSIC MODE =================
+            # ================= MUSIC MODE =================
             if mode == "music" and prompt:
                 # Получаем chat_id через сообщение пользователя
                 msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
