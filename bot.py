@@ -808,7 +808,7 @@ async def handle_generation_job(job):
 
                 progress_task = asyncio.create_task(music_progress(status))
 
-                # ===== ГЕНЕРАЦИЯ =====
+                # ===== ГЕНЕРАЦИЯ ЧЕРЕЗ FAL =====
                 audio_url = await fal_music_generate(prompt)
 
                 # ===== ОСТАНОВКА ПРОГРЕССА =====
