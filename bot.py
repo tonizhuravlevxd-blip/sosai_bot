@@ -756,7 +756,7 @@ async def handle_generation_job(job):
 
             images = images[:MAX_INPUT_IMAGES]
 
-            # ================= MUSIC MODE =================
+               # ================= MUSIC MODE =================
             if mode == "music" and prompt:
                 # Получаем chat_id через сообщение пользователя
                 msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
@@ -785,8 +785,10 @@ async def handle_generation_job(job):
                                 audio_bytes = await resp.read()
 
                         audio_file = io.BytesIO(audio_bytes)
-                        audio_file.name = "song.mp3"
-                        audio_file.seek(0)  # важно для корректной отправки
+                        # Автоматически определяем расширение из URL
+                        ext = cached_audio_url.split(".")[-1]
+                        audio_file.name = f"song.{ext}"
+                        audio_file.seek(0)
                         await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
                     except Exception as e:
                         logging.error(f"Failed to send cached audio: {e}")
@@ -821,7 +823,8 @@ async def handle_generation_job(job):
                 progress_task = asyncio.create_task(music_progress(status))
 
                 # ===== ГЕНЕРАЦИЯ ЧЕРЕЗ FAL =====
-                audio_url = await fal_music_generate(prompt)
+                result = await fal_music_generate(prompt)  # ожидаем объект с audio[0]["url"]
+                audio_url = result["audio"][0]["url"] if isinstance(result.get("audio"), list) else result
 
                 # ===== ОСТАНОВКА ПРОГРЕССА =====
                 progress_task.cancel()
@@ -860,8 +863,10 @@ async def handle_generation_job(job):
                 try:
                     logging.info(f"Sending generated audio to chat_id {chat_id}")
                     audio_file = io.BytesIO(audio_bytes)
-                    audio_file.name = "song.mp3"
-                    audio_file.seek(0)  # фикс для Telegram
+                    # Автоматически определяем расширение из URL
+                    ext = audio_url.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
+                    audio_file.seek(0)
                     await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
                 except Exception as e:
                     logging.error(f"Failed to send generated audio: {e}")
