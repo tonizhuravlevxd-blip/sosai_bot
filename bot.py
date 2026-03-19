@@ -490,10 +490,13 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
         "duration": duration
     }
 
+    logging.info(f"🎵 FAL REQUEST: {payload}")
+
     async with aiohttp.ClientSession() as session:
         # ===== СОЗДАНИЕ ЗАДАЧИ =====
         async with session.post(base_url, json=payload, headers=headers) as r:
             text = await r.text()
+            logging.info(f"🎵 FAL CREATE RESPONSE: {text}")
             try:
                 data = json.loads(text)
             except Exception:
@@ -503,6 +506,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
             raise Exception(f"Fal music error: {data}")
 
         request_id = data["request_id"]
+        logging.info(f"🎵 FAL REQUEST_ID: {request_id}")
+
         status_url = f"{base_url}/requests/{request_id}/status"
         result_url = f"{base_url}/requests/{request_id}"
 
@@ -516,10 +521,12 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
             async with session.get(status_url, headers=headers) as r:
                 try:
                     status_data = await r.json()
-                except Exception:
+                except Exception as e:
+                    logging.error(f"Status parse error: {e}")
                     continue
 
             status = status_data.get("status")
+            logging.info(f"🎵 STATUS RAW: {status_data}")
 
             if status != last_status:
                 logging.info(f"🎵 Music generation status: {status} for prompt: {prompt}")
@@ -568,6 +575,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
                         audio_url = output["audios"][0].get("url")
 
                 if not audio_url:
+                    logging.error(f"❌ NO AUDIO URL: {result}")
                     raise Exception(f"Fal returned no audio for prompt: {prompt} | result={result}")
 
                 logging.info(f"🎧 FAL Audio URL: {audio_url}")
@@ -575,15 +583,18 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
 
             # ===== ОШИБКА =====
             if status == "FAILED":
+                logging.error(f"❌ FAL FAILED: {status_data}")
                 raise Exception(f"Fal music generation failed: {status_data}")
 
             # ===== АНТИ-ЗАВИСАНИЕ (IN_PROGRESS / QUEUED) =====
             if status in ["IN_PROGRESS", "QUEUED"]:
                 if time.time() - start_time > max_wait:
+                    logging.error(f"❌ TIMEOUT STUCK: {status_data}")
                     raise Exception(f"Music stuck (timeout) for prompt: {prompt}")
 
             # ===== ГЛОБАЛЬНЫЙ ТАЙМАУТ =====
             if time.time() - start_time > max_wait:
+                logging.error(f"❌ GLOBAL TIMEOUT")
                 raise Exception(f"Music generation timeout (> {max_wait}s) for prompt: {prompt}")
 
 
