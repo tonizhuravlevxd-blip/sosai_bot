@@ -756,9 +756,7 @@ async def handle_generation_job(job):
 
             images = images[:MAX_INPUT_IMAGES]
 
-
-
-# ================= MUSIC MODE =================
+            # ================= MUSIC MODE =================
             if mode == "music" and prompt:
                 # Получаем chat_id независимо от типа апдейта
                 if getattr(update, "effective_chat", None):
@@ -770,8 +768,10 @@ async def handle_generation_job(job):
                     user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
                     return
 
-                cached_audio = await get_cached_music(prompt)
-                if cached_audio:
+                cached_audio_url = await get_cached_music(prompt)
+                audio_bytes = None
+
+                if cached_audio_url:
                     try:
                         if status:
                             await status.delete()
@@ -779,14 +779,16 @@ async def handle_generation_job(job):
                         pass
 
                     try:
-                        logging.info(f"Sending cached audio, size: {len(cached_audio)} bytes")
-                        audio_file = io.BytesIO(cached_audio)
+                        # Скачиваем кешированное аудио
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(cached_audio_url) as resp:
+                                if resp.status != 200:
+                                    raise Exception(f"Failed to download cached audio: {cached_audio_url}")
+                                audio_bytes = await resp.read()
+
+                        audio_file = io.BytesIO(audio_bytes)
                         audio_file.name = "song.mp3"
-                        await context.bot.send_audio(
-                            chat_id=chat_id,
-                            audio=audio_file,
-                            title="Generated Song"
-                        )
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
                     except Exception as e:
                         logging.error(f"Failed to send cached audio: {e}")
 
@@ -805,7 +807,7 @@ async def handle_generation_job(job):
                             await asyncio.sleep(interval)
                             pct += 3
                             if pct >= 99:
-                                pct = 1
+                                pct = 1  # сброс прогресса
 
                             new_text = f"🎵 Музыка генерируется… {pct}%"
                             if new_text != last_text:
@@ -853,21 +855,18 @@ async def handle_generation_job(job):
                         logging.info(f"Downloaded generated audio, size: {len(audio_bytes)} bytes")
 
                 # ===== СОХРАНЯЕМ КЕШ =====
-                await save_music_cache(prompt, audio_bytes)
+                await save_music_cache(prompt, audio_url)  # сохраняем URL, чтобы не дублировать байты
 
                 # ===== ОТПРАВКА =====
                 try:
                     logging.info(f"Sending generated audio to chat_id {chat_id}")
                     audio_file = io.BytesIO(audio_bytes)
                     audio_file.name = "song.mp3"
-                    await context.bot.send_audio(
-                        chat_id=chat_id,
-                        audio=audio_file,
-                        title="Generated Song"
-                    )
+                    await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
                 except Exception as e:
                     logging.error(f"Failed to send generated audio: {e}")
 
+                # ===== ОБНОВЛЕНИЕ СЧЕТЧИКА =====
                 async with db_pool.acquire() as conn:
                     await conn.execute(
                         "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
