@@ -477,9 +477,9 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
     :param max_wait: максимальное время ожидания генерации (в секундах)
     :return: URL с аудио
     """
-    prompt = clean_prompt(prompt)  # ✅ очистка перед отправкой
+    prompt = prompt.strip()  # ✅ очистка перед отправкой
 
-    base_url = "//queue.fal.run/fal-ai/minimax-music/v1.5"
+    base_url = "https://queue.fal.run/fal-ai/minimax-music/v1.5"
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
