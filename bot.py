@@ -12,7 +12,7 @@ import io
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool = None
 
-f rom telegram import (
+from telegram import (
     Update,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
