@@ -766,7 +766,7 @@ async def handle_generation_job(job):
 
             images = images[:MAX_INPUT_IMAGES]
 
-            # ================= MUSIC MODE =================
+             # ================= MUSIC MODE =================
             if mode == "music" and prompt:
                 # Получаем chat_id через сообщение пользователя
                 msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
@@ -795,11 +795,16 @@ async def handle_generation_job(job):
                                 audio_bytes = await resp.read()
 
                         audio_file = io.BytesIO(audio_bytes)
-                        # Автоматически определяем расширение из URL
                         ext = cached_audio_url.split(".")[-1]
                         audio_file.name = f"song.{ext}"
                         audio_file.seek(0)
-                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
+
+                        try:
+                            await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
+                        except Exception:
+                            audio_file.seek(0)
+                            await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
                     except Exception as e:
                         logging.error(f"Failed to send cached audio: {e}")
 
@@ -818,7 +823,7 @@ async def handle_generation_job(job):
                             await asyncio.sleep(interval)
                             pct += 3
                             if pct >= 99:
-                                pct = 1  # сброс прогресса
+                                pct = 1
 
                             new_text = f"🎵 Музыка генерируется… {pct}%"
                             if new_text != last_text:
@@ -833,8 +838,19 @@ async def handle_generation_job(job):
                 progress_task = asyncio.create_task(music_progress(status))
 
                 # ===== ГЕНЕРАЦИЯ ЧЕРЕЗ FAL =====
-                result = await fal_music_generate(prompt)  # ожидаем объект с audio[0]["url"]
-                audio_url = result["audio"][0]["url"] if isinstance(result.get("audio"), list) else result
+                result = await fal_music_generate(prompt)
+
+                audio_url = None
+                if isinstance(result, dict):
+                    if isinstance(result.get("audio"), dict):
+                        audio_url = result["audio"].get("url")
+                    elif isinstance(result.get("audio"), list):
+                        audio_url = result["audio"][0].get("url")
+                elif isinstance(result, str):
+                    audio_url = result
+
+                if not audio_url:
+                    raise Exception(f"No audio_url from FAL: {result}")
 
                 # ===== ОСТАНОВКА ПРОГРЕССА =====
                 progress_task.cancel()
@@ -843,7 +859,6 @@ async def handle_generation_job(job):
                 except asyncio.CancelledError:
                     pass
 
-                # ===== 100% =====
                 try:
                     if status:
                         await status.edit_text("🎵 Музыка генерируется… 100%")
@@ -867,17 +882,22 @@ async def handle_generation_job(job):
                         logging.info(f"Downloaded generated audio, size: {len(audio_bytes)} bytes")
 
                 # ===== СОХРАНЯЕМ КЕШ =====
-                await save_music_cache(prompt, audio_url)  # сохраняем URL, чтобы не дублировать байты
+                await save_music_cache(prompt, audio_url)
 
                 # ===== ОТПРАВКА =====
                 try:
                     logging.info(f"Sending generated audio to chat_id {chat_id}")
                     audio_file = io.BytesIO(audio_bytes)
-                    # Автоматически определяем расширение из URL
                     ext = audio_url.split(".")[-1]
                     audio_file.name = f"song.{ext}"
                     audio_file.seek(0)
-                    await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
+
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
+                    except Exception:
+                        audio_file.seek(0)
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
                 except Exception as e:
                     logging.error(f"Failed to send generated audio: {e}")
 
@@ -891,7 +911,6 @@ async def handle_generation_job(job):
                 context.user_data["mode"] = None
                 active_generations.discard(user_id)
                 return
-
             # ================= VIDEO / CARTOON MODE =================
             if mode in ["video", "cartoon"]:
                 if mode == "video":
