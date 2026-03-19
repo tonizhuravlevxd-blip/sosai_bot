@@ -479,7 +479,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=900):
     """
     prompt = clean_prompt(prompt)  # ✅ очистка перед отправкой
 
-    base_url = "https://queue.fal.run/fal-ai/lyria2"
+    base_url = "//queue.fal.run/fal-ai/minimax-music/v1.5"
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
