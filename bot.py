@@ -770,7 +770,7 @@ async def handle_generation_job(job):
                     try:
                         if status:
                             await status.delete()
-                    except:
+                    except Exception:
                         pass
 
                     await context.bot.send_audio(
@@ -789,24 +789,20 @@ async def handle_generation_job(job):
                 async def music_progress(msg, interval=1):
                     pct = 1
                     last_text = ""
-
                     try:
                         while True:
                             await asyncio.sleep(interval)
-
                             pct += 3
                             if pct >= 99:
                                 pct = 1
 
                             new_text = f"🎵 Музыка генерируется… {pct}%"
-
                             if new_text != last_text:
                                 try:
                                     await msg.edit_text(new_text)
                                     last_text = new_text
-                                except:
+                                except Exception:
                                     pass
-
                     except asyncio.CancelledError:
                         pass
 
@@ -826,7 +822,7 @@ async def handle_generation_job(job):
                 try:
                     if status:
                         await status.edit_text("🎵 Музыка генерируется… 100%")
-                except:
+                except Exception:
                     pass
 
                 await asyncio.sleep(1)
@@ -834,7 +830,7 @@ async def handle_generation_job(job):
                 try:
                     if status:
                         await status.delete()
-                except:
+                except Exception:
                     pass
 
                 # ===== СКАЧИВАЕМ АУДИО =====
@@ -842,11 +838,10 @@ async def handle_generation_job(job):
                     async with session.get(audio_url) as resp:
                         if resp.status != 200:
                             raise Exception(f"Failed to download audio: {audio_url}")
-
                         audio_bytes = await resp.read()
 
                 # ===== СОХРАНЯЕМ КЕШ =====
-                await save_music_cache(prompt, audio_url)
+                await save_music_cache(prompt, audio_bytes)
 
                 # ===== ОТПРАВКА =====
                 await context.bot.send_audio(
