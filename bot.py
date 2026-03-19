@@ -1528,9 +1528,14 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bonus = user["bonus_images"]
 
     remaining = FREE_LIMIT + bonus - used
-    keyboard = InlineKeyboardMarkup([
-    [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
-])
+
+    keyboard = None
+
+    # ✅ Кнопка только для админа
+    if tg_user.id == ADMIN_ID:
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
+        ])
 
     await update.message.reply_text(
         f"👤 Профиль\n\n"
@@ -1538,9 +1543,9 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 Username: @{tg_user.username}\n\n"
         f"🎁 Бонусы: {bonus}\n"
         f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user['referrals']}"
+        f"👥 Рефералов: {user['referrals']}",
+        reply_markup=keyboard  # ✅ ВОТ ЭТО ТЫ ЗАБЫЛ
     )
-
 
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
