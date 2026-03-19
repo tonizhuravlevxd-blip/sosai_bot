@@ -884,7 +884,7 @@ async def handle_generation_job(job):
                                 try:
                                     await msg.edit_text(new_text)
                                     last_text = new_text
-                                except:
+                                except Exception:
                                     pass
                     except asyncio.CancelledError:
                         pass
