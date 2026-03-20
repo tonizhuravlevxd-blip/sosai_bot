@@ -472,7 +472,7 @@ async def fal_generate(model, prompt, images=None):
 async def fal_music_generate(prompt, duration=30, max_wait=180):
     """
     Генерация музыки через FAL с прогресс-логированием.
-    
+
     :param prompt: текстовый промпт
     :param duration: длина трека в секундах
     :param max_wait: максимальное время ожидания генерации (в секундах)
@@ -480,7 +480,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
     """
     prompt = clean_prompt(prompt)
 
-    base_url = "https://queue.fal.run/sonauto/v2/text-to-music"  # ✅ FIX URL
+    base_url = "https://queue.fal.run/sonauto/v2/text-to-music"
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
@@ -493,10 +493,12 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
     logging.info(f"🎵 FAL REQUEST: {payload}")
 
     async with aiohttp.ClientSession() as session:
+
         # ===== СОЗДАНИЕ ЗАДАЧИ =====
         async with session.post(base_url, json=payload, headers=headers) as r:
             text = await r.text()
             logging.info(f"🎵 FAL CREATE RESPONSE: {text}")
+
             try:
                 data = json.loads(text)
             except Exception:
@@ -514,7 +516,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
         start_time = time.time()
         last_status = None
 
-        # ===== ОЖИДАНИЕ ЗАВЕРШЕНИЯ =====
+        # ===== ОЖИДАНИЕ =====
         while True:
             await asyncio.sleep(2)
 
@@ -529,7 +531,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
             logging.info(f"🎵 STATUS RAW: {status_data}")
 
             if status != last_status:
-                logging.info(f"🎵 Music generation status: {status} for prompt: {prompt}")
+                logging.info(f"🎵 Music generation status: {status} | prompt: {prompt}")
                 last_status = status
 
             # ===== УСПЕХ =====
@@ -542,18 +544,15 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
 
                 logging.info(f"🎵 FAL RAW RESULT: {result}")
 
-                # ==== ВСЕ ВАРИАНТЫ URL (УЛУЧШЕНО ПОД SONAUTO) ====
                 audio_url = None
 
-                # основной вариант Sonauto: audio = { url: ... }
                 if "audio" in result:
                     if isinstance(result["audio"], dict):
                         audio_url = result["audio"].get("url")
                     elif isinstance(result["audio"], list) and result["audio"]:
                         audio_url = result["audio"][0].get("url")
 
-                # запасные варианты
-                if not audio_url and "audios" in result and result["audios"]:
+                if not audio_url and "audios" in result:
                     audio_url = result["audios"][0].get("url")
 
                 if not audio_url and "audio_url" in result:
@@ -562,21 +561,22 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
                 if not audio_url and "url" in result:
                     audio_url = result["url"]
 
-                if not audio_url and "output" in result and isinstance(result["output"], dict):
+                if not audio_url and "output" in result:
                     output = result["output"]
 
-                    if "audio" in output:
-                        if isinstance(output["audio"], dict):
-                            audio_url = output["audio"].get("url")
-                        elif isinstance(output["audio"], list) and output["audio"]:
-                            audio_url = output["audio"][0].get("url")
+                    if isinstance(output, dict):
+                        if "audio" in output:
+                            if isinstance(output["audio"], dict):
+                                audio_url = output["audio"].get("url")
+                            elif isinstance(output["audio"], list) and output["audio"]:
+                                audio_url = output["audio"][0].get("url")
 
-                    elif "audios" in output and output["audios"]:
-                        audio_url = output["audios"][0].get("url")
+                        elif "audios" in output:
+                            audio_url = output["audios"][0].get("url")
 
                 if not audio_url:
                     logging.error(f"❌ NO AUDIO URL: {result}")
-                    raise Exception(f"Fal returned no audio for prompt: {prompt} | result={result}")
+                    raise Exception(f"Fal returned no audio | result={result}")
 
                 logging.info(f"🎧 FAL Audio URL: {audio_url}")
                 return audio_url
@@ -586,16 +586,10 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
                 logging.error(f"❌ FAL FAILED: {status_data}")
                 raise Exception(f"Fal music generation failed: {status_data}")
 
-            # ===== АНТИ-ЗАВИСАНИЕ (IN_PROGRESS / QUEUED) =====
-            if status in ["IN_PROGRESS", "QUEUED"]:
-                if time.time() - start_time > max_wait:
-                    logging.error(f"❌ TIMEOUT STUCK: {status_data}")
-                    raise Exception(f"Music stuck (timeout) for prompt: {prompt}")
-
-            # ===== ГЛОБАЛЬНЫЙ ТАЙМАУТ =====
+            # ===== ТАЙМАУТЫ =====
             if time.time() - start_time > max_wait:
-                logging.error(f"❌ GLOBAL TIMEOUT")
-                raise Exception(f"Music generation timeout (> {max_wait}s) for prompt: {prompt}")
+                logging.error(f"❌ TIMEOUT: {status_data}")
+                raise Exception(f"Music generation timeout (> {max_wait}s)")
 
 
 
