@@ -771,7 +771,7 @@ async def handle_generation_job(job):
 
             images = images[:MAX_INPUT_IMAGES]
 
-             # ================= MUSIC MODE =================
+            # ================= MUSIC MODE =================
             if mode == "music" and prompt:
                 # Получаем chat_id через сообщение пользователя
                 msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
@@ -843,210 +843,38 @@ async def handle_generation_job(job):
                 progress_task = asyncio.create_task(music_progress(status))
 
                 # ===== ГЕНЕРАЦИЯ ЧЕРЕЗ FAL =====
-                result = await fal_music_generate(prompt)
-
-                audio_url = None
-                if isinstance(result, dict):
-                    if isinstance(result.get("audio"), dict):
-                        audio_url = result["audio"].get("url")
-                    elif isinstance(result.get("audio"), list):
-                        audio_url = result["audio"][0].get("url")
-                elif isinstance(result, str):
-                    audio_url = result
-
-                if not audio_url:
-                    raise Exception(f"No audio_url from FAL: {result}")
-
-                # ===== ОСТАНОВКА ПРОГРЕССА =====
-                progress_task.cancel()
                 try:
-                    await progress_task
-                except asyncio.CancelledError:
-                    pass
+                    logging.info("🚀 CALLING FAL MUSIC GENERATE")
 
-                try:
-                    if status:
-                        await status.edit_text("🎵 Музыка генерируется… 100%")
-                except Exception:
-                    pass
-
-                await asyncio.sleep(1)
-
-                try:
-                    if status:
-                        await status.delete()
-                except Exception:
-                    pass
-
-                # ===== СКАЧИВАЕМ АУДИО =====
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(audio_url) as resp:
-                        if resp.status != 200:
-                            raise Exception(f"Failed to download audio: {audio_url}")
-                        audio_bytes = await resp.read()
-                        logging.info(f"Downloaded generated audio, size: {len(audio_bytes)} bytes")
-
-                # ===== СОХРАНЯЕМ КЕШ =====
-                await save_music_cache(prompt, audio_url)
-
-                # ===== ОТПРАВКА =====
-                try:
-                    logging.info(f"Sending generated audio to chat_id {chat_id}")
-                    audio_file = io.BytesIO(audio_bytes)
-                    ext = audio_url.split(".")[-1]
-                    audio_file.name = f"song.{ext}"
-                    audio_file.seek(0)
-
-                    try:
-                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
-                    except Exception:
-                        audio_file.seek(0)
-                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
-
-                except Exception as e:
-                    logging.error(f"Failed to send generated audio: {e}")
-
-                # ===== ОБНОВЛЕНИЕ СЧЕТЧИКА =====
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
-                        user_id
+                    result = await asyncio.wait_for(
+                        fal_music_generate(prompt),
+                        timeout=200
                     )
 
-                context.user_data["mode"] = None
-                active_generations.discard(user_id)
-                return
-            # ================= VIDEO / CARTOON MODE =================
-            if mode in ["video", "cartoon"]:
-                if mode == "video":
-                    context.user_data["cartoon_style"] = None
+                    logging.info("✅ FAL MUSIC FINISHED")
 
-                if not prompt and not images:
-                    await msg.reply_text("⚠️ Пустой запрос")
-                    return
-
-                if status is None:
-                    status = await msg.reply_text("🎬 Видео генерируется… 0%")
-
-                async def video_progress(msg, interval=2):
-                    pct = 0
-                    last_text = ""
-                    try:
-                        while True:
-                            await asyncio.sleep(interval)
-                            pct = min(pct + 10, 100)
-                            new_text = f"🎬 Видео генерируется… {pct}%"
-                            if new_text != last_text:
-                                try:
-                                    await msg.edit_text(new_text)
-                                    last_text = new_text
-                                except Exception:
-                                    pass
-                    except asyncio.CancelledError:
-                        pass
-
-                progress_task = asyncio.create_task(video_progress(status))
-
-                video_bytes = None
-                for attempt in range(3):
-                    try:
-                        video_bytes = await fal_video_generate(prompt, images)
-                        break
-                    except Exception as e:
-                        logging.warning(f"Fal video generation failed, attempt {attempt+1}: {e}")
-                        await asyncio.sleep(5)
-
-                if video_bytes is None:
+                except asyncio.TimeoutError:
                     progress_task.cancel()
                     try:
                         await progress_task
                     except asyncio.CancelledError:
                         pass
-                    await msg.reply_text("⚠️ Сервис генерации видео временно недоступен, попробуйте позже.")
+
+                    await msg.reply_text("⚠️ FAL завис (timeout)")
+                    active_generations.discard(user_id)
                     return
 
-                progress_task.cancel()
-                try:
-                    await progress_task
-                except asyncio.CancelledError:
-                    pass
-
-                try:
-                    if status:
-                        await status.delete()
-                except:
-                    pass
-
-                await msg.reply_video(video=video_bytes)
-
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
-                        user_id
-                    )
-
-                context.user_data["input_images"] = []
-                context.user_data["last_images"] = []
-                return
-
-            # ================= IMAGE MODE =================
-            if prompt:
-                if mode == "image":
-                    context.user_data["cartoon_style"] = None
-
-                chat = getattr(update, "effective_chat", None)
-                if not chat:
-                    return
-
-                chat_id = chat.id
-
-                upload_task = asyncio.create_task(fake_photo_upload(context.bot, chat_id))
-                try:
-                    image_bytes = await fal_generate(model, prompt, images)
-                finally:
-                    upload_task.cancel()
+                except Exception as e:
+                    progress_task.cancel()
                     try:
-                        await upload_task
+                        await progress_task
                     except asyncio.CancelledError:
                         pass
 
-                if cache_key:
-                    generation_cache[cache_key] = {"image": image_bytes, "time": time.time()}
-
-                try:
-                    if status:
-                        await status.delete()
-                except:
-                    pass
-
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-                     InlineKeyboardButton("🆕 Начать заново", callback_data="restart")],
-                    [InlineKeyboardButton("❌ Закончить", callback_data="finish")]
-                ])
-
-                await msg.reply_photo(photo=image_bytes, reply_markup=keyboard)
-                context.user_data["mode"] = "image"
-
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET image_count = image_count + 1 WHERE user_id = $1",
-                        user_id
-                    )
-
-                context.user_data["input_images"] = []
-                context.user_data["last_images"] = []
-
-        except Exception as e:
-            logging.error(f"Generation error: {e}")
-            try:
-                await msg.reply_text("⚠ Ошибка генерации. Попробуйте позже.")
-            except:
-                pass
-
-        finally:
-            active_generations.discard(user_id)
-            user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                    logging.error(f"❌ FAL ERROR: {e}")
+                    await msg.reply_text("⚠️ Ошибка генерации музыки")
+                    active_generations.discard(user_id)
+                    return
 # ================== WORKERS ==================
 async def image_worker():
     while True:
