@@ -820,16 +820,13 @@ async def handle_generation_job(job):
                     status = await msg.reply_text("🎵 Музыка генерируется… 1%")
 
                 # ===== БЕСКОНЕЧНЫЙ ПРОГРЕСС =====
-                async def music_progress(msg, interval=3):
+                async def music_progress(msg, interval=10):
                     pct = 1
                     last_text = ""
                     try:
                         while True:
                             await asyncio.sleep(interval)
-                            pct += 3
-                            if pct >= 99:
-                                pct = 1
-
+                            pct = min(pct + 5, 99)
                             new_text = f"🎵 Музыка генерируется… {pct}%"
                             if new_text != last_text:
                                 try:
@@ -842,13 +839,13 @@ async def handle_generation_job(job):
 
                 progress_task = asyncio.create_task(music_progress(status))
 
-                # ===== ГЕНЕРАЦИЯ ЧЕРЕЗ FAL =====
+                # ===== ГЕНЕРАЦИЯ ЧЕРЕЗ FAL С ТАЙМАУТОМ 6 МИНУТ =====
                 try:
                     logging.info("🚀 CALLING FAL MUSIC GENERATE")
 
                     result = await asyncio.wait_for(
                         fal_music_generate(prompt),
-                        timeout=200
+                        timeout=360  # 6 минут
                     )
 
                     logging.info("✅ FAL MUSIC FINISHED")
@@ -875,6 +872,82 @@ async def handle_generation_job(job):
                     await msg.reply_text("⚠️ Ошибка генерации музыки")
                     active_generations.discard(user_id)
                     return
+
+                # ===== СКАЧИВАЕМ АУДИО И ОТПРАВЛЯЕМ =====
+                audio_url = None
+                if isinstance(result, dict):
+                    if isinstance(result.get("audio"), dict):
+                        audio_url = result["audio"].get("url")
+                    elif isinstance(result.get("audio"), list):
+                        audio_url = result["audio"][0].get("url")
+                elif isinstance(result, str):
+                    audio_url = result
+
+                if not audio_url:
+                    progress_task.cancel()
+                    await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
+                    active_generations.discard(user_id)
+                    return
+
+                # ===== ОСТАНОВКА ПРОГРЕССА =====
+                progress_task.cancel()
+                try:
+                    await progress_task
+                except asyncio.CancelledError:
+                    pass
+
+                try:
+                    if status:
+                        await status.edit_text("🎵 Музыка генерируется… 100%")
+                except Exception:
+                    pass
+
+                await asyncio.sleep(1)
+
+                try:
+                    if status:
+                        await status.delete()
+                except Exception:
+                    pass
+
+                # ===== СКАЧИВАЕМ АУДИО =====
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(audio_url) as resp:
+                        if resp.status != 200:
+                            await msg.reply_text("⚠️ Ошибка скачивания аудио")
+                            active_generations.discard(user_id)
+                            return
+                        audio_bytes = await resp.read()
+                        logging.info(f"Downloaded generated audio, size: {len(audio_bytes)} bytes")
+
+                # ===== СОХРАНЯЕМ В КЕШ =====
+                await save_music_cache(prompt, audio_url)
+
+                # ===== ОТПРАВКА ПОЛЬЗОВАТЕЛЮ =====
+                try:
+                    audio_file = io.BytesIO(audio_bytes)
+                    ext = audio_url.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
+                    audio_file.seek(0)
+
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
+                    except Exception:
+                        audio_file.seek(0)
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
+                except Exception as e:
+                    logging.error(f"Failed to send generated audio: {e}")
+
+                # ===== ОБНОВЛЯЕМ СЧЕТЧИК =====
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
+                        user_id
+                    )
+
+                context.user_data["mode"] = None
+                active_generations.discard(user_id)
 # ================== WORKERS ==================
 async def image_worker():
     while True:
