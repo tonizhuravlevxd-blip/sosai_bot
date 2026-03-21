@@ -4,9 +4,16 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 import asyncio
 import os
+import logging
+
+# ===== Настройка логов =====
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("sosai_web")
 
 app = FastAPI()
-queue = asyncio.Queue()  # Очередь для генерации (можно расширять)
+queue = asyncio.Queue()
+
+logger.info("FastAPI app created")
 
 # ===== Модель запроса =====
 class Prompt(BaseModel):
@@ -82,23 +89,34 @@ function buy(){ alert('💎 Premium: 500 руб / 30 дней'); }
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
+    logger.info("GET / -> index page")
     return html_content
 
 # ===== Генерация =====
 async def fal_generate(prompt: str, mode: str):
-    # Твой placeholder код для генерации
-    await asyncio.sleep(2)  # имитация работы
+    logger.info(f"Generating: prompt='{prompt}' mode='{mode}'")
+    await asyncio.sleep(1)  # имитация работы
     if mode=="image":
-        return {"type":"image","url":"https://via.placeholder.com/512x512.png?text="+prompt.replace(' ','+')}
-    return {"type":"text","result":f"{mode.upper()} GENERATED: {prompt}"}
+        url = f"https://via.placeholder.com/512x512.png?text={prompt.replace(' ','+')}"
+        logger.info(f"Image URL generated: {url}")
+        return {"type":"image","url":url}
+    result_text = f"{mode.upper()} GENERATED: {prompt}"
+    logger.info(f"Result generated: {result_text}")
+    return {"type":"text","result":result_text}
 
 @app.post("/generate")
 async def generate(data: Prompt):
-    result = await fal_generate(data.prompt, data.mode)
-    return JSONResponse(result)
+    logger.info(f"POST /generate with data: {data}")
+    try:
+        result = await fal_generate(data.prompt, data.mode)
+        return JSONResponse(result)
+    except Exception as e:
+        logger.exception("Error in generate")
+        return JSONResponse({"type":"text","result":"❌ Ошибка генерации"}, status_code=500)
 
 # ===== Запуск =====
 if __name__=="__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))  # Render использует $PORT
+    port = int(os.environ.get("PORT", 8000))
+    logger.info(f"Starting Uvicorn on port {port}")
     uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
