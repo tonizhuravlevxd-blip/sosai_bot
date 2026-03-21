@@ -1150,13 +1150,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= Обработка кнопок =================
     if data == "buy_stars":
+        # Здесь вставьте ваш provider_token от ЮKassa (YooMoney)
+        YOOKASSA_PROVIDER_TOKEN = os.environ.get("YOOKASSA_PROVIDER_TOKEN")
+
         await query.message.reply_invoice(
             title="🍩 Пончик Premium",
             description="30 дней Premium доступа",
             payload="premium_donut",
-            provider_token="",
-            currency="XTR",
-            prices=[{"label": "Premium", "amount": 500}]
+            provider_token=YOOKASSA_PROVIDER_TOKEN,
+            currency="RUB",  # Обычно RUB для ЮKassa
+            prices=[{"label": "Premium", "amount": 50000}],  # 50000 = 500.00 RUB
+            need_name=True,
+            need_phone_number=True,
+            need_email=True,
+            need_shipping_address=False,
+            is_flexible=False
         )
 
     elif data == "buy_spb":
@@ -1174,7 +1182,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             f"💳 Оплата через СПБ (ЮKassa)\n\n"
             f"Нажмите на ссылку и оплатите:\n{spb_link}\n\n"
-            f"После успешной оплаты ваш статус Premium активируется автоматически."
+            f"После успешной оплат ваш статус Premium активируется автоматически."
         )
 
     elif data == "finish":
