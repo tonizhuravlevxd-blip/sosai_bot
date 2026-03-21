@@ -5,5 +5,5 @@ aiohttp
 requests
 asyncpg
 fastapi
-uvicorn
+uvicorn app:app --reload
 pydantic
