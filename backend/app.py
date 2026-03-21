@@ -1,88 +1,20 @@
 # backend/app.py
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 import asyncio
-import aiohttp
 import os
 
-FAL_KEY = os.getenv("FAL_KEY")  # ключ для генерации изображений
-
 app = FastAPI()
-queue = asyncio.Queue()
+queue = asyncio.Queue()  # Очередь для генерации (можно расширять)
 
+# ===== Модель запроса =====
 class Prompt(BaseModel):
     prompt: str
     mode: str
 
-# ===== Очистка запроса =====
-def clean_prompt(prompt: str):
-    replacements = {
-        "gun": "device",
-        "weapon": "device",
-        "kill": "defeat",
-    }
-    prompt = prompt.lower()
-    for k, v in replacements.items():
-        prompt = prompt.replace(k, v)
-    return prompt
-
-# ================= IMAGE =================
-async def generate_image(prompt: str):
-    prompt = clean_prompt(prompt)
-    url = "https://queue.fal.run/fal-ai/nano-banana"
-    headers = {"Authorization": f"Key {FAL_KEY}", "Content-Type": "application/json"}
-    payload = {"prompt": prompt, "num_images": 1}
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as r:
-            data = await r.json()
-            request_id = data.get("request_id")
-
-        status_url = f"{url}/requests/{request_id}/status"
-        result_url = f"{url}/requests/{request_id}"
-
-        for _ in range(120):
-            async with session.get(status_url, headers=headers) as s:
-                status = await s.json()
-                if status.get("status") == "COMPLETED":
-                    async with session.get(result_url, headers=headers) as r2:
-                        result = await r2.json()
-                        return result["images"][0]["url"]
-            await asyncio.sleep(1)
-
-    return "error"
-
-# ================= VIDEO =================
-async def generate_video(prompt: str):
-    prompt = clean_prompt(prompt)
-    return f"VIDEO GENERATED: {prompt}"
-
-# ================= MUSIC =================
-async def generate_music(prompt: str):
-    prompt = clean_prompt(prompt)
-    return f"MUSIC GENERATED: {prompt}"
-
-# ================== ROUTES ==================
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    return open("index.html", "r", encoding="utf-8").read()
-
-@app.post("/generate")
-async def generate(data: Prompt):
-    if data.mode == "image":
-        url = await generate_image(data.prompt)
-        return {"type": "image", "url": url}
-    elif data.mode == "video":
-        result = await generate_video(data.prompt)
-        return {"type": "text", "result": result}
-    elif data.mode == "music":
-        result = await generate_music(data.prompt)
-        return {"type": "text", "result": result}
-    return {"result": "error"}
-
-# ================== FRONTEND ==================
-html_code = """
+# ===== Главная страница =====
+html_content = """
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -90,13 +22,12 @@ html_code = """
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sosai AI</title>
 <style>
-body {margin:0;font-family:Arial;background:#0f0f0f;color:white;}
-.header{padding:20px;text-align:center;font-size:24px;background:#1a1a1a;}
-.container{padding:20px;}
-button{width:100%;padding:15px;margin:5px 0;border:none;border-radius:10px;background:#00ffcc;font-size:16px;}
-input{width:100%;padding:15px;border-radius:10px;border:none;margin-bottom:10px;}
-.card{background:#1a1a1a;padding:15px;border-radius:15px;margin-top:10px;}
-img{max-width:90%;margin-top:10px;border-radius:10px;}
+body { margin:0; font-family:Arial; background:#0f0f0f; color:white; }
+.header { padding:20px; text-align:center; font-size:24px; background:#1a1a1a; }
+.container { padding:20px; }
+button { width:100%; padding:15px; margin:5px 0; border:none; border-radius:10px; background:#00ffcc; font-size:16px; cursor:pointer; }
+input { width:100%; padding:15px; border-radius:10px; border:none; margin-bottom:10px; }
+.card { background:#1a1a1a; padding:15px; border-radius:15px; margin-top:10px; }
 </style>
 </head>
 <body>
@@ -122,31 +53,52 @@ img{max-width:90%;margin-top:10px;border-radius:10px;}
 <div class="card">
 <h3>📊 Статус</h3>
 <p id="status">Ожидание...</p>
+</div>
+<div class="card">
+<h3>💡 Результат</h3>
 <div id="result"></div>
 </div>
 </div>
 <script>
 let mode='image';
-function setMode(m){mode=m;document.getElementById('status').innerText='Выбран режим: '+m;}
+function setMode(m){ mode=m; document.getElementById('status').innerText='Выбран режим: '+m; }
 async function generate(){
     let prompt=document.getElementById('prompt').value;
     document.getElementById('status').innerText='⏳ Генерация...';
-    document.getElementById('result').innerHTML='';
-    let res=await fetch('/generate',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({prompt,prompt:prompt,mode})
-    });
+    let res=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:prompt,mode:mode})});
     let data=await res.json();
-    if(data.type==='image'){document.getElementById('result').innerHTML=`<img src="${data.url}"/>`;}
-    else if(data.type==='text'){document.getElementById('result').innerText=data.result;}
-    else{document.getElementById('result').innerText='❌ Ошибка генерации';}
     document.getElementById('status').innerText='✅ Готово';
+    if(data.type==='image'){
+        document.getElementById('result').innerHTML='<img src="'+data.url+'" style="max-width:100%; border-radius:10px;">';
+    } else {
+        document.getElementById('result').innerText=data.result;
+    }
 }
-function buy(){alert('💎 Premium: 500 руб / 30 дней');}
+function buy(){ alert('💎 Premium: 500 руб / 30 дней'); }
 </script>
 </body>
 </html>
 """
-with open("index.html", "w", encoding="utf-8") as f:
-    f.write(html_code)
+
+@app.get("/", response_class=HTMLResponse)
+async def home():
+    return html_content
+
+# ===== Генерация =====
+async def fal_generate(prompt: str, mode: str):
+    # Твой placeholder код для генерации
+    await asyncio.sleep(2)  # имитация работы
+    if mode=="image":
+        return {"type":"image","url":"https://via.placeholder.com/512x512.png?text="+prompt.replace(' ','+')}
+    return {"type":"text","result":f"{mode.upper()} GENERATED: {prompt}"}
+
+@app.post("/generate")
+async def generate(data: Prompt):
+    result = await fal_generate(data.prompt, data.mode)
+    return JSONResponse(result)
+
+# ===== Запуск =====
+if __name__=="__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))  # Render использует $PORT
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
