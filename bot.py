@@ -819,8 +819,8 @@ async def handle_generation_job(job):
                 if status is None:
                     status = await msg.reply_text("🎵 Музыка генерируется… 1%")
 
-                # ===== БЕСКОНЕЧНЫЙ ПРОГРЕСС =====
-                async def music_progress(msg, interval=10):
+                # ===== БЕСКОНЕЧНЫЙ ПРОГРЕСС С ЗАЩИТОЙ ОТ FLOOD =====
+                async def music_progress(msg, interval=30):
                     pct = 1
                     last_text = ""
                     try:
@@ -832,6 +832,8 @@ async def handle_generation_job(job):
                                 try:
                                     await msg.edit_text(new_text)
                                     last_text = new_text
+                                except telegram.error.RetryAfter as e:
+                                    await asyncio.sleep(e.retry_after + 1)
                                 except Exception:
                                     pass
                     except asyncio.CancelledError:
@@ -857,7 +859,12 @@ async def handle_generation_job(job):
                     except asyncio.CancelledError:
                         pass
 
-                    await msg.reply_text("⚠️ FAL завис (timeout)")
+                    try:
+                        await msg.reply_text("⚠️ FAL завис (timeout)")
+                    except telegram.error.RetryAfter as e:
+                        await asyncio.sleep(e.retry_after + 1)
+                        await msg.reply_text("⚠️ FAL завис (timeout)")
+
                     active_generations.discard(user_id)
                     return
 
@@ -869,7 +876,12 @@ async def handle_generation_job(job):
                         pass
 
                     logging.error(f"❌ FAL ERROR: {e}")
-                    await msg.reply_text("⚠️ Ошибка генерации музыки")
+                    try:
+                        await msg.reply_text("⚠️ Ошибка генерации музыки")
+                    except telegram.error.RetryAfter as e:
+                        await asyncio.sleep(e.retry_after + 1)
+                        await msg.reply_text("⚠️ Ошибка генерации музыки")
+
                     active_generations.discard(user_id)
                     return
 
@@ -885,7 +897,11 @@ async def handle_generation_job(job):
 
                 if not audio_url:
                     progress_task.cancel()
-                    await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
+                    try:
+                        await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
+                    except telegram.error.RetryAfter as e:
+                        await asyncio.sleep(e.retry_after + 1)
+                        await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
                     active_generations.discard(user_id)
                     return
 
@@ -914,7 +930,11 @@ async def handle_generation_job(job):
                 async with aiohttp.ClientSession() as session:
                     async with session.get(audio_url) as resp:
                         if resp.status != 200:
-                            await msg.reply_text("⚠️ Ошибка скачивания аудио")
+                            try:
+                                await msg.reply_text("⚠️ Ошибка скачивания аудио")
+                            except telegram.error.RetryAfter as e:
+                                await asyncio.sleep(e.retry_after + 1)
+                                await msg.reply_text("⚠️ Ошибка скачивания аудио")
                             active_generations.discard(user_id)
                             return
                         audio_bytes = await resp.read()
