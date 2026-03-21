@@ -4,3 +4,5 @@ flask==3.0.0
 aiohttp
 requests
 asyncpg
+fastapi
+uvicorn
