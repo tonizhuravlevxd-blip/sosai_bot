@@ -1,26 +1,19 @@
-# app.py
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel
 import asyncio
 import os
 import logging
 
-# ================= LOGGING =================
+# ===== Настройка логов =====
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("sosai_web")
 
-# ================= FASTAPI APP =================
 app = FastAPI()
 queue = asyncio.Queue()
+
 logger.info("FastAPI app created")
 
-# ================= MODEL =================
-class Prompt(BaseModel):
-    prompt: str
-    mode: str
-
-# ================= HTML PAGE =================
+# ===== Главная страница =====
 html_content = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -41,41 +34,40 @@ img { max-width:100%; border-radius:10px; margin-top:10px; }
 <body>
 <div class="header">🚀 Sosai AI</div>
 <div class="container">
-
 <div class="card">
 <h3>🎨 Генерация</h3>
 <button onclick="setMode('image')">Изображение</button>
 <button onclick="setMode('video')">Видео</button>
 <button onclick="setMode('music')">Музыка</button>
 </div>
-
 <div class="card">
 <h3>✏ Ввод</h3>
 <input id="prompt" placeholder="Введите запрос...">
 <button onclick="generate()">Создать</button>
 </div>
-
 <div class="card">
 <h3>👤 Аккаунт</h3>
 <p>Free: 5 генераций</p>
 <p>Premium: 200 генераций</p>
 <button onclick="buy()">Купить Premium</button>
 </div>
-
 <div class="card">
 <h3>📊 Статус</h3>
 <p id="status">Ожидание...</p>
 </div>
-
 <div class="card">
 <h3>💡 Результат</h3>
 <div id="result"></div>
 </div>
-
 </div>
+
 <script>
 let mode='image';
-function setMode(m){ mode=m; document.getElementById('status').innerText='Выбран режим: '+m; }
+
+function setMode(m){ 
+    mode=m; 
+    document.getElementById('status').innerText='Выбран режим: '+m; 
+}
 
 async function generate(){
     let prompt=document.getElementById('prompt').value;
@@ -83,7 +75,7 @@ async function generate(){
     let res=await fetch('/generate',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({prompt:prompt,mode:mode})
+        body:JSON.stringify({prompt:prompt, mode:mode})
     });
     let data=await res.json();
     document.getElementById('status').innerText='✅ Готово';
@@ -100,42 +92,34 @@ function buy(){ alert('💎 Premium: 500 руб / 30 дней'); }
 </html>
 """
 
-# ================= ROUTES =================
 @app.get("/", response_class=HTMLResponse)
 async def home():
     logger.info("GET / -> index page")
     return html_content
 
-# ================= FAKE GENERATION =================
+# ===== Фейковая генерация для теста =====
 async def fal_generate(prompt: str, mode: str):
     logger.info(f"Generating: prompt='{prompt}' mode='{mode}'")
     await asyncio.sleep(1)  # имитация работы
     if mode=="image":
         url = f"https://via.placeholder.com/512x512.png?text={prompt.replace(' ','+')}"
-        logger.info(f"Image URL generated: {url}")
         return {"type":"image","url":url}
-    result_text = f"{mode.upper()} GENERATED: {prompt}"
-    logger.info(f"Result generated: {result_text}")
-    return {"type":"text","result":result_text}
+    return {"type":"text","result":f"{mode.upper()} GENERATED: {prompt}"}
 
 @app.post("/generate")
-async def generate(data: Prompt):
-    logger.info(f"POST /generate with data: {data}")
+async def generate_endpoint(data: dict):
+    prompt = data.get("prompt", "")
+    mode = data.get("mode", "image")
     try:
-        result = await fal_generate(data.prompt, data.mode)
+        result = await fal_generate(prompt, mode)
         return JSONResponse(result)
     except Exception as e:
         logger.exception("Error in generate")
         return JSONResponse({"type":"text","result":"❌ Ошибка генерации"}, status_code=500)
 
-# ================= RUN APP =================
+# ===== Запуск =====
 if __name__=="__main__":
     import uvicorn
-    import sys
     port = int(os.environ.get("PORT", 8000))
-    try:
-        logger.info(f"Starting Uvicorn on port {port}")
-        uvicorn.run("app:app", host="0.0.0.0", port=port, reload=True)
-    except Exception as e:
-        logger.exception("Error starting Uvicorn")
-        sys.exit(1)
+    logger.info(f"Starting Uvicorn on port {port}")
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
