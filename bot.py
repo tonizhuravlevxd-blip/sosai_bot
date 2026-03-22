@@ -903,6 +903,40 @@ async def handle_generation_job(job):
                         audio_file.seek(0)
                         await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
+                # ================= VIDEO / CARTOON MODE =================
+                elif mode in ["video", "cartoon"]:
+                    if status is None:
+                        cancel_button = InlineKeyboardMarkup.from_button(
+                            InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+                        )
+                        status = await msg.reply_text("🎬 Видео/Мультфильм генерируется… 1%", reply_markup=cancel_button)
+
+                    try:
+                        result_bytes = await asyncio.wait_for(fal_video_generate(prompt, images_local), timeout=600)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:
+                        logging.error(f"❌ FAL VIDEO ERROR: {e}")
+                        await msg.reply_text("⚠️ Ошибка генерации видео/мультфильма")
+                        return
+
+                    try:
+                        if status:
+                            await status.delete()
+                    except:
+                        pass
+
+                    result_file = io.BytesIO(result_bytes)
+                    result_file.name = "video.mp4"
+                    result_file.seek(0)
+
+                    try:
+                        await context.bot.send_video(chat_id=update.effective_chat.id, video=result_file)
+                    except Exception as e:
+                        logging.error(f"❌ send_video failed: {e}")
+                        result_file.seek(0)
+                        await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+
         except asyncio.CancelledError:
             logging.info(f"⚠ Generation cancelled for user {user_id}")
             raise
