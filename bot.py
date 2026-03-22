@@ -743,12 +743,12 @@ async def handle_generation_job(job):
     async def actual_generation():
         nonlocal status, prompt, images, msg
 
-        if mode in ["cartoon", "video"] and not prompt and not images:
-            await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
-            return
+        try:
+            if mode in ["cartoon", "video"] and not prompt and not images:
+                await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
+                return
 
-        async with generation_semaphore:
-            try:
+            async with generation_semaphore:
                 user = await get_user(user_id)
                 if not user:
                     return
@@ -861,8 +861,6 @@ async def handle_generation_job(job):
                                     try:
                                         await msg.edit_text(new_text)
                                         last_text = new_text
-                                    except telegram.error.RetryAfter as e:
-                                        await asyncio.sleep(e.retry_after + 1)
                                     except Exception:
                                         pass
                         except asyncio.CancelledError:
@@ -871,50 +869,23 @@ async def handle_generation_job(job):
                     progress_task = asyncio.create_task(music_progress(status))
 
                     try:
-                        logging.info("🚀 CALLING FAL MUSIC GENERATE")
                         result = await asyncio.wait_for(fal_music_generate(prompt), timeout=360)
-                        logging.info("✅ FAL MUSIC FINISHED")
                     except asyncio.CancelledError:
-                        logging.info(f"⚠ Generation cancelled for user {user_id}")
                         progress_task.cancel()
-                        try:
-                            await progress_task
-                        except asyncio.CancelledError:
-                            pass
-                        try:
-                            if status:
-                                await status.edit_text("❌ Генерация отменена")
-                        except Exception:
-                            pass
                         raise
                     except Exception as e:
                         progress_task.cancel()
-                        try:
-                            await progress_task
-                        except asyncio.CancelledError:
-                            pass
                         logging.error(f"❌ FAL ERROR: {e}")
                         await msg.reply_text("⚠️ Ошибка генерации музыки")
                         return
 
                     audio_url = result
                     progress_task.cancel()
-                    try:
-                        await progress_task
-                    except asyncio.CancelledError:
-                        pass
 
-                    try:
-                        if status:
-                            await status.edit_text("🎵 Музыка генерируется… 100%")
-                    except Exception:
-                        pass
-
-                    await asyncio.sleep(1)
                     try:
                         if status:
                             await status.delete()
-                    except Exception:
+                    except:
                         pass
 
                     async with aiohttp.ClientSession() as session:
@@ -923,47 +894,38 @@ async def handle_generation_job(job):
 
                     await save_music_cache(prompt, audio_url)
 
+                    audio_file = io.BytesIO(audio_bytes)
+                    ext = audio_url.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
+                    audio_file.seek(0)
+
                     try:
-                        audio_file = io.BytesIO(audio_bytes)
-                        ext = audio_url.split(".")[-1]
-                        audio_file.name = f"song.{ext}"
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+                    except:
                         audio_file.seek(0)
-                        try:
-                            await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
-                        except Exception:
-                            audio_file.seek(0)
-                            await context.bot.send_document(chat_id=chat_id, document=audio_file)
-                    except Exception as e:
-                        logging.error(f"Failed to send generated audio: {e}")
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
-                    async with db_pool.acquire() as conn:
-                        await conn.execute(
-                            "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
-                            user_id
-                        )
+        except asyncio.CancelledError:
+            logging.info(f"⚠ Generation cancelled for user {user_id}")
+            raise
 
-                    context.user_data["mode"] = None
+        finally:
+            active_generations.discard(user_id)
+            active_tasks.pop(user_id, None)
+            unlock_user_generation(user_id)
 
-            except asyncio.CancelledError:
-                logging.info(f"⚠ Generation cancelled for user {user_id}")
-                raise
-            finally:
-                active_generations.discard(user_id)
-                active_tasks.pop(user_id, None)
-                unlock_user_generation(user_id)
+    # ====== ЗАПУСК ТАСКА (ВНУТРИ ФУНКЦИИ!) ======
+    task = asyncio.create_task(actual_generation())
 
-   # ====== Запускаем таск и сохраняем его ======
-task = asyncio.create_task(actual_generation())
+    def task_done_callback(task):
+        try:
+            task.result()
+        except Exception as e:
+            logging.error(f"Task crashed: {e}")
 
-def task_done_callback(task):
-    try:
-        task.result()
-    except Exception as e:
-        logging.error(f"Task crashed: {e}")
+    task.add_done_callback(task_done_callback)
 
-task.add_done_callback(task_done_callback)
-
-active_tasks[user_id] = task
+    active_tasks[user_id] = task
 # ================== WORKERS ==================
 async def image_worker():
     while True:
