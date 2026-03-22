@@ -744,9 +744,6 @@ async def handle_generation_job(job):
     async def actual_generation():
         nonlocal status, prompt, images, msg
 
-        fake_task = None
-        progress_task = None
-
         try:
             if mode in ["cartoon", "video"] and not prompt and not images:
                 await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
@@ -906,62 +903,6 @@ async def handle_generation_job(job):
                         audio_file.seek(0)
                         await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
-                # ================= IMAGE / CARTOON MODE =================
-                elif mode in ["image", "cartoon"]:
-                    if status is not None:
-                        # запустить фейковую загрузку
-                        fake_task = asyncio.create_task(fake_photo_upload(context.bot, update.effective_chat.id))
-
-                        async def image_progress(msg, interval=2):
-                            pct = 1
-                            last_text = ""
-                            try:
-                                while True:
-                                    await asyncio.sleep(interval)
-                                    pct = min(pct + 10, 99)
-                                    new_text = f"🖼 Генерация изображения… {pct}%"
-                                    if new_text != last_text:
-                                        try:
-                                            await msg.edit_text(new_text)
-                                            last_text = new_text
-                                        except Exception:
-                                            pass
-                            except asyncio.CancelledError:
-                                pass
-
-                        progress_task = asyncio.create_task(image_progress(status))
-
-                    # ===== Здесь должна быть реальная генерация изображения =====
-                    # Например: result_image = await generate_image(prompt, images_local, model, size)
-                    # Для демонстрации можно поставить заглушку:
-                    await asyncio.sleep(5)  # имитация работы генерации
-                    result_image = b"FAKE_IMAGE_BYTES"
-
-                    # ===== Отправка результата =====
-                    try:
-                        await msg.reply_photo(photo=result_image)
-                    except Exception:
-                        await msg.reply_text("⚠️ Ошибка отправки изображения")
-
-                    if progress_task:
-                        progress_task.cancel()
-                        try:
-                            await progress_task
-                        except asyncio.CancelledError:
-                            pass
-                    if fake_task:
-                        fake_task.cancel()
-                        try:
-                            await fake_task
-                        except asyncio.CancelledError:
-                            pass
-
-                    try:
-                        if status:
-                            await status.delete()
-                    except:
-                        pass
-
         except asyncio.CancelledError:
             logging.info(f"⚠ Generation cancelled for user {user_id}")
             raise
@@ -972,7 +913,6 @@ async def handle_generation_job(job):
             active_generations.discard(user_id)
             active_tasks.pop(user_id, None)
             unlock_user_generation(user_id)
-            logging.info(f"✅ User {user_id} removed from active tasks")
 
     # ====== ЗАПУСК ТАСКА (ВНУТРИ ФУНКЦИИ!) ======
     task = asyncio.create_task(actual_generation())
