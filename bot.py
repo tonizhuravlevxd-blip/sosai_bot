@@ -1155,16 +1155,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= Обработка кнопок =================
     if data == "buy_stars":
-        # Здесь вставьте ваш provider_token от ЮKassa (YooMoney)
         YOOKASSA_PROVIDER_TOKEN = os.environ.get("YOOKASSA_PROVIDER_TOKEN")
-
         await query.message.reply_invoice(
             title="🍩 Пончик Premium",
             description="30 дней Premium доступа",
             payload="premium_donut",
             provider_token=YOOKASSA_PROVIDER_TOKEN,
-            currency="RUB",  # Обычно RUB для ЮKassa
-            prices=[{"label": "Premium", "amount": 50000}],  # 50000 = 500.00 RUB
+            currency="RUB",
+            prices=[{"label": "Premium", "amount": 50000}],
             need_name=True,
             need_phone_number=True,
             need_email=True,
@@ -1212,27 +1210,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("✅ Условия приняты.")
 
     # ================= MODE / MODEL =================
-    elif data == "model_banana1":
-        context.user_data["model"] = "banana1"
+    elif data in ["model_banana1", "model_banana2"]:
+        context.user_data["model"] = "banana1" if data=="model_banana1" else "banana2"
         context.user_data["mode"] = "image"
         context.user_data["cartoon_style"] = None
         context.user_data["last_prompt"] = None
         context.user_data["last_images"] = []
-        await query.message.reply_text(
-            "✅ Выбрана модель:\n🍌 Nano Banana 1\n\n"
-            "✏ Напишите текст или отправьте 1-4 фото"
-        )
 
-    elif data == "model_banana2":
-        context.user_data["model"] = "banana2"
-        context.user_data["mode"] = "image"
-        context.user_data["cartoon_style"] = None
-        context.user_data["last_prompt"] = None
-        context.user_data["last_images"] = []
         await query.message.reply_text(
-            "✅ Выбрана модель:\n🍌 Nano Banana 2\n\n"
-            "✏ Напишите текст или отправьте 1-4 фото"
+            f"✅ Выбрана модель: {'🍌 Nano Banana 1' if data=='model_banana1' else '🍌 Nano Banana 2'}\n\n"
+            "✏ Сначала напишите текст или отправьте 1-4 фото"
         )
+        return  # ✅ ВАЖНО: генерация не ставится в очередь сразу
 
     # ================= SIZE =================
     elif data == "size_square":
@@ -1306,7 +1295,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        # ✅ Применяем clean_prompt для видео и мультфильмов
         if mode in ["video", "cartoon"] and prompt:
             prompt = clean_prompt(prompt)
 
@@ -1324,7 +1312,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= CLEAR OLD STYLES FOR NON-CARTOON =================
     else:
-        # Если любая другая кнопка/действие и не мультфильм — сброс стиля
         if context.user_data.get("mode") not in ["cartoon"]:
             context.user_data["cartoon_style"] = None
 
@@ -1354,12 +1341,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text(msg)
             return
 
-        # ✅ ВАЖНЫЙ ФИКС
         if not last_prompt and not last_images:
             await query.message.reply_text("⚠️ Сначала отправь текст или фото")
             return
 
-        # ✅ Применяем clean_prompt перед отправкой в очередь
         safe_prompt = last_prompt
         if mode in ["video", "cartoon"] and last_prompt:
             safe_prompt = clean_prompt(last_prompt)
