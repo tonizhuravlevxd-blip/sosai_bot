@@ -710,6 +710,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 active_tasks = {}  # user_id -> asyncio.Task
 active_generations = set()  # user_id для контроля активных генераций
 
+# Раздельные семафоры для параллельной генерации по типу
+semaphore_image = asyncio.Semaphore(5)
+semaphore_video = asyncio.Semaphore(2)
+semaphore_music = asyncio.Semaphore(3)
+
 async def handle_generation_job(job):
     update = job["update"]
     context = job["context"]
@@ -749,7 +754,14 @@ async def handle_generation_job(job):
                 await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
                 return
 
-            async with generation_semaphore:
+            # ===== Выбор семафора по типу контента =====
+            sem = semaphore_image
+            if mode in ["video", "cartoon"]:
+                sem = semaphore_video
+            elif mode == "music":
+                sem = semaphore_music
+
+            async with sem:
                 user = await get_user(user_id)
                 if not user:
                     return
@@ -948,17 +960,14 @@ async def handle_generation_job(job):
             active_tasks.pop(user_id, None)
             unlock_user_generation(user_id)
 
-    # ====== ЗАПУСК ТАСКА (ВНУТРИ ФУНКЦИИ!) ======
+    # ====== ЗАПУСК ТАСКА В ФОНЕ ======
     task = asyncio.create_task(actual_generation())
-
     def task_done_callback(task):
         try:
             task.result()
         except Exception as e:
             logging.error(f"Task crashed: {e}")
-
     task.add_done_callback(task_done_callback)
-
     active_tasks[user_id] = task
 # ================== WORKERS ==================
 async def image_worker():
