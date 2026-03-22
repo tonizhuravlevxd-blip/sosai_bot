@@ -1187,6 +1187,18 @@ from telegram.ext import ContextTypes, MessageHandler, filters
 import logging
 
 # ================= CALLBACK =================
+async def cancel_generation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    if data and data.startswith("cancel_gen:"):
+        user_id = int(data.split(":")[1])
+        if user_id in active_generations:
+            active_generations.discard(user_id)
+            await query.edit_message_text("❌ Генерация отменена пользователем")
+
+
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
