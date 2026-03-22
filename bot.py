@@ -727,12 +727,11 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 generation_semaphore = asyncio.Semaphore(5)  # Ограничение параллельных генераций
 
-# ================== UNIVERSAL HANDLER (FIXED) ==================
+# ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-active_generations = set()  # user_id для контроля активных генераций
+active_generations = set()
 
-# Раздельные семафоры для параллельной генерации по типу
 semaphore_image = asyncio.Semaphore(5)
 semaphore_video = asyncio.Semaphore(2)
 semaphore_music = asyncio.Semaphore(3)
@@ -752,27 +751,26 @@ async def handle_generation_job(job):
     if not msg and getattr(update, "callback_query", None):
         msg = update.callback_query.message
 
-    # ===== Проверка: если генерация уже выполняется =====
+    # ===== ❗ ЖЕСТКАЯ ПРОВЕРКА (ФИКС БАГА) =====
+    if not prompt and not images:
+        logging.warning(f"⚠ ПУСТАЯ ЗАДАЧА user={user_id} mode={mode} — пропуск")
+        return
+
     if user_id in active_generations:
         cancel_button = InlineKeyboardMarkup.from_button(
             InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
         )
         if msg:
             await msg.reply_text(
-                "⏳ Генерация уже выполняется. Можете отменить её кнопкой ниже.",
+                "⏳ Генерация уже выполняется.",
                 reply_markup=cancel_button
             )
         return
 
-    # Помечаем генерацию как активную
     active_generations.add(user_id)
 
     try:
-        if mode in ["cartoon", "video"] and not prompt and not images:
-            await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
-            return
-
-        # ===== Выбор семафора по типу контента =====
+        # ===== СЕМАФОР =====
         sem = semaphore_image
         if mode in ["video", "cartoon"]:
             sem = semaphore_video
@@ -780,6 +778,7 @@ async def handle_generation_job(job):
             sem = semaphore_music
 
         async with sem:
+
             user = await get_user(user_id)
             if not user:
                 return
@@ -797,6 +796,26 @@ async def handle_generation_job(job):
                         pass
                     await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
                     return
+
+            # ===== СТАТУС =====
+            if status is None:
+                cancel_button = InlineKeyboardMarkup.from_button(
+                    InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+                )
+
+                text_map = {
+                    "image": "🎨 Генерация изображения...",
+                    "video": "🎬 Генерация видео...",
+                    "cartoon": "🎬 Генерация мультфильма...",
+                    "music": "🎵 Генерация музыки..."
+                }
+
+                status = await msg.reply_text(
+                    text_map.get(mode, "⏳ Генерация..."),
+                    reply_markup=cancel_button
+                )
+
+            images_local = images[:MAX_INPUT_IMAGES]
 
             # ===== стили =====
             style = ""
@@ -830,12 +849,63 @@ async def handle_generation_job(job):
                 await msg.reply_photo(photo=cached["image"])
                 return
 
-            images_local = images[:MAX_INPUT_IMAGES]
+            # ================= IMAGE =================
+            if mode == "image":
 
-            # ================= MUSIC MODE =================
-            if mode == "music" and prompt:
-                chat_id = update.effective_chat.id
+                upload_task = asyncio.create_task(
+                    fake_photo_upload(context.bot, update.effective_chat.id)
+                )
+
+                try:
+                    result = await asyncio.wait_for(
+                        fal_generate(model, prompt, images_local),
+                        timeout=300
+                    )
+                finally:
+                    upload_task.cancel()
+
+                try:
+                    await status.delete()
+                except:
+                    pass
+
+                await msg.reply_photo(photo=result)
+
+            # ================= VIDEO / CARTOON =================
+            elif mode in ["video", "cartoon"]:
+
+                upload_task = asyncio.create_task(
+                    fake_photo_upload(context.bot, update.effective_chat.id)
+                )
+
+                try:
+                    result_bytes = await asyncio.wait_for(
+                        fal_video_generate(prompt, images_local),
+                        timeout=600
+                    )
+                finally:
+                    upload_task.cancel()
+
+                try:
+                    await status.delete()
+                except:
+                    pass
+
+                result_file = io.BytesIO(result_bytes)
+                result_file.name = "video.mp4"
+                result_file.seek(0)
+
+                try:
+                    await context.bot.send_video(chat_id=update.effective_chat.id, video=result_file)
+                except:
+                    result_file.seek(0)
+                    await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+
+            # ================= MUSIC =================
+            elif mode == "music":
+
                 cached_audio_url = await get_cached_music(prompt)
+                chat_id = update.effective_chat.id
 
                 if cached_audio_url:
                     try:
@@ -859,110 +929,39 @@ async def handle_generation_job(job):
                         audio_file.seek(0)
                         await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
-                    return
+                else:
+                    result = await asyncio.wait_for(fal_music_generate(prompt), timeout=360)
 
-                if status is None:
-                    cancel_button = InlineKeyboardMarkup.from_button(
-                        InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
-                    )
-                    status = await msg.reply_text("🎵 Музыка генерируется…", reply_markup=cancel_button)
+                    try:
+                        if status:
+                            await status.delete()
+                    except:
+                        pass
 
-                result = await asyncio.wait_for(fal_music_generate(prompt), timeout=360)
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(result) as resp:
+                            audio_bytes = await resp.read()
 
-                try:
-                    if status:
-                        await status.delete()
-                except:
-                    pass
+                    await save_music_cache(prompt, result)
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(result) as resp:
-                        audio_bytes = await resp.read()
-
-                await save_music_cache(prompt, result)
-
-                audio_file = io.BytesIO(audio_bytes)
-                ext = result.split(".")[-1]
-                audio_file.name = f"song.{ext}"
-                audio_file.seek(0)
-
-                try:
-                    await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
-                except:
+                    audio_file = io.BytesIO(audio_bytes)
+                    ext = result.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
                     audio_file.seek(0)
-                    await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
-            # ================= IMAGE =================
-            elif mode == "image":
-                if status is None:
-                    cancel_button = InlineKeyboardMarkup.from_button(
-                        InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
-                    )
-                    status = await msg.reply_text("🎨 Генерация изображения...", reply_markup=cancel_button)
-
-                upload_task = asyncio.create_task(
-                    fake_photo_upload(context.bot, update.effective_chat.id)
-                )
-
-                try:
-                    result = await asyncio.wait_for(
-                        fal_generate(model, prompt, images_local),
-                        timeout=300
-                    )
-                finally:
-                    upload_task.cancel()
-
-                try:
-                    if status:
-                        await status.delete()
-                except:
-                    pass
-
-                await msg.reply_photo(photo=result)
-
-            # ================= VIDEO / CARTOON =================
-            elif mode in ["video", "cartoon"]:
-                if status is None:
-                    cancel_button = InlineKeyboardMarkup.from_button(
-                        InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
-                    )
-                    status = await msg.reply_text("🎬 Генерация...", reply_markup=cancel_button)
-
-                upload_task = asyncio.create_task(
-                    fake_photo_upload(context.bot, update.effective_chat.id)
-                )
-
-                try:
-                    result_bytes = await asyncio.wait_for(
-                        fal_video_generate(prompt, images_local),
-                        timeout=600
-                    )
-                finally:
-                    upload_task.cancel()
-
-                try:
-                    if status:
-                        await status.delete()
-                except:
-                    pass
-
-                result_file = io.BytesIO(result_bytes)
-                result_file.name = "video.mp4"
-                result_file.seek(0)
-
-                try:
-                    await context.bot.send_video(chat_id=update.effective_chat.id, video=result_file)
-                except:
-                    result_file.seek(0)
-                    await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+                    except:
+                        audio_file.seek(0)
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
     except Exception as e:
         logging.error(f"❌ HANDLE ERROR: {e}")
 
     finally:
-        logging.info(f"🧹 CLEANUP user {user_id}")
         active_generations.discard(user_id)
         unlock_user_generation(user_id)
+        logging.info(f"🧹 CLEANUP user {user_id}")
 # ================== WORKERS ==================
 async def image_worker():
     while True:
@@ -1353,6 +1352,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         allowed, msg = check_user_generation_limit(user_id)
         if not allowed:
             await query.message.reply_text(msg)
+            return
+
+        # ✅ ВАЖНЫЙ ФИКС
+        if not last_prompt and not last_images:
+            await query.message.reply_text("⚠️ Сначала отправь текст или фото")
             return
 
         # ✅ Применяем clean_prompt перед отправкой в очередь
