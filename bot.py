@@ -515,8 +515,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=180):
         request_id = data["request_id"]
         logging.info(f"🎵 FAL REQUEST_ID: {request_id}")
 
-        status_url = f"{base_url}/requests/{request_id}/status"
-        result_url = f"{base_url}/requests/{request_id}"
+        status_url = data["status_url"]
+        result_url = data["response_url"]
 
         start_time = time.time()
         last_status = None
