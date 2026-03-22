@@ -277,63 +277,86 @@ async def reset_user_limits(user_id):
         )
 
 
-# ================= PROMPT SAFETY FILTER =================
+# ================= ULTRA PROMPT ENGINE =================
 
-def clean_prompt(prompt: str):
+def clean_prompt(prompt: str, mode: str = "image"):
 
+    if not prompt:
+        return prompt
+
+    # ===== SAFE REPLACEMENTS (БЕЗ ЛОМАНИЯ СМЫСЛА) =====
     replacements = {
 
-        # оружие
+        # оружие → нейтрально
         "стреляет": "испускает свет",
         "стрельба": "энергетический эффект",
         "оружие": "устройство",
         "пистолет": "устройство",
         "бластер": "фантастическое устройство",
-        "gun": "device",
-        "shoot": "light effect",
-        "weapon": "device",
-        "blaster": "sci-fi device",
 
-        # насилие
+        "gun": "futuristic device",
+        "weapon": "tool",
+        "shoot": "emit light",
+        "shooting": "light effect",
+
+        # насилие → cinematic
         "убивает": "побеждает",
+        "кровь": "красная энергия",
+
         "kill": "defeat",
         "killing": "defeating",
         "blood": "red energy",
-        "кровь": "красная энергия",
+        "murder": "dramatic action",
 
-        # бренды
-        "simpsons": "yellow cartoon family style",
-        "pixar": "3d animated movie style",
+        # бренды → стили
+        "simpsons": "yellow cartoon sitcom style",
+        "pixar": "3d animated cinematic style",
         "disney": "fantasy animation style",
-        "rick and morty": "crazy sci fi cartoon style",
+        "rick and morty": "crazy sci-fi cartoon style",
 
-        # опасные слова для sora
+        # sora sensitive
         "laser": "light beam",
-        "attack": "action",
-        "battle": "scene",
-        "fight": "dynamic action",
-        "explosion": "bright flash",
+        "attack": "fast action movement",
+        "battle": "epic cinematic scene",
+        "fight": "dynamic action sequence",
+        "explosion": "bright cinematic flash",
     }
 
-    prompt = prompt.lower()
+    cleaned = prompt
 
+    # НЕ делаем lower() ❗
     for bad, good in replacements.items():
-        prompt = prompt.replace(bad, good)
+        cleaned = cleaned.replace(bad, good)
+        cleaned = cleaned.replace(bad.capitalize(), good)
 
-    # дополнительная защита
-    blocked = [
-        "kill",
-        "murder",
-        "blood",
-        "weapon",
-        "gun",
-        "shoot"
-    ]
+    # ===== ULTRA BOOSTERS =====
 
-    for word in blocked:
-        prompt = prompt.replace(word, "")
+    base_boost = "high detail, sharp focus, 4k, professional composition"
 
-    return prompt
+    video_boost = (
+        "cinematic camera movement, smooth motion, dynamic lighting, "
+        "film scene, realistic motion blur, depth of field"
+    )
+
+    image_boost = (
+        "cinematic lighting, ultra realistic, global illumination, "
+        "highly detailed textures, artstation quality"
+    )
+
+    cartoon_boost = (
+        "animated style, expressive characters, vibrant colors, "
+        "smooth shading, cinematic composition"
+    )
+
+    # ===== MODE SWITCH =====
+    if mode == "video":
+        booster = f"{base_boost}, {video_boost}"
+    elif mode == "cartoon":
+        booster = f"{base_boost}, {cartoon_boost}"
+    else:
+        booster = f"{base_boost}, {image_boost}"
+
+    return f"{cleaned}, {booster}"
 # ================= FAL MODELS CONFIG =================
 
 FAL_MODELS = {
