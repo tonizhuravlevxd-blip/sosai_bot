@@ -86,12 +86,17 @@ def check_user_generation_limit(user_id):
 
 
 def lock_user_generation(user_id):
-
+    count = user_generation_count.get(user_id, 0)
+    user_generation_count[user_id] = count + 1
+    
+def unlock_user_generation(user_id):
     count = user_generation_count.get(user_id, 0)
 
-    user_generation_count[user_id] = count + 1
-
-    active_generations.add(user_id)
+    if count <= 1:
+        user_generation_count.pop(user_id, None)
+    else:
+        user_generation_count[user_id] = count - 1    
+    
 
 
 # ================= CACHE CLEANER =================
@@ -732,7 +737,7 @@ async def handle_generation_job(job):
         return
 
     # Помечаем генерацию как активную
-    active_generations.add(user_id)
+    
 
     # ==== Вынесем основную генерацию в отдельный async task ====
     async def actual_generation():
@@ -1361,7 +1366,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lock_user_generation(user_id)
         await queue_map.get(mode, generation_queue_image).put(job)
         logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
-        active_generations.add(user_id)
+        
 
 # ================= PHOTO / TEXT HANDLERS =================
 def get_queue_position():
@@ -1440,7 +1445,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": mode,
             "status": status
         })
-        active_generations.add(user_id)
+        
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1538,7 +1543,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "mode": mode,
         "status": status
     })
-    active_generations.add(user_id)
+    
 
 # ================= COMMANDS =================
 
