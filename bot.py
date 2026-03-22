@@ -700,6 +700,8 @@ generation_queue_music = asyncio.Queue(maxsize=2000)
 generation_semaphore = asyncio.Semaphore(5)  # Ограничение параллельных генераций
 
 # ================== UNIVERSAL HANDLER (FIXED) ==================
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
 async def handle_generation_job(job):
     update = job["update"]
     context = job["context"]
@@ -715,14 +717,31 @@ async def handle_generation_job(job):
     if not msg and getattr(update, "callback_query", None):
         msg = update.callback_query.message
 
+    # ===== Проверка: если генерация уже выполняется =====
+    if user_id in active_generations:
+        cancel_button = InlineKeyboardMarkup.from_button(
+            InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+        )
+        if msg:
+            await msg.reply_text(
+                "⏳ Генерация уже выполняется. Можете отменить её кнопкой ниже.",
+                reply_markup=cancel_button
+            )
+        return
+
+    # Помечаем генерацию как активную
+    active_generations.add(user_id)
+
     if mode in ["cartoon", "video"] and not prompt and not images:
         await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
+        active_generations.discard(user_id)
         return
 
     async with generation_semaphore:
         try:
             user = await get_user(user_id)
             if not user:
+                active_generations.discard(user_id)
                 return
 
             await reset_week_if_needed(user)
@@ -738,6 +757,7 @@ async def handle_generation_job(job):
                         pass
 
                     await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
+                    active_generations.discard(user_id)
                     return
 
             # ===== стили =====
@@ -771,6 +791,7 @@ async def handle_generation_job(job):
                     pass
 
                 await msg.reply_photo(photo=cached["image"])
+                active_generations.discard(user_id)
                 return
 
             images = images[:MAX_INPUT_IMAGES]
@@ -833,7 +854,10 @@ async def handle_generation_job(job):
                     return
 
                 if status is None:
-                    status = await msg.reply_text("🎵 Музыка генерируется… 1%")
+                    cancel_button = InlineKeyboardMarkup.from_button(
+                        InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+                    )
+                    status = await msg.reply_text("🎵 Музыка генерируется… 1%", reply_markup=cancel_button)
 
                 async def music_progress(msg, interval=30):
                     pct = 1
@@ -995,6 +1019,8 @@ async def handle_generation_job(job):
 
         except Exception as e:
             logging.error(f"❌ HANDLE ERROR: {e}")
+        finally:
+            # Снимаем пометку о генерации в любом случае
             active_generations.discard(user_id)
 # ================== WORKERS ==================
 async def image_worker():
