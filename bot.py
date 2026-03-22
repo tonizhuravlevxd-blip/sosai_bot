@@ -702,6 +702,8 @@ generation_semaphore = asyncio.Semaphore(5)  # Ограничение парал
 # ================== UNIVERSAL HANDLER (FIXED) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+active_tasks = {}  # user_id -> asyncio.Task
+
 async def handle_generation_job(job):
     update = job["update"]
     context = job["context"]
@@ -732,296 +734,221 @@ async def handle_generation_job(job):
     # Помечаем генерацию как активную
     active_generations.add(user_id)
 
-    if mode in ["cartoon", "video"] and not prompt and not images:
-        await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
-        active_generations.discard(user_id)
-        return
+    # ==== Вынесем основную генерацию в отдельный async task ====
+    async def actual_generation():
+        nonlocal status, prompt, images, msg
 
-    async with generation_semaphore:
-        try:
-            user = await get_user(user_id)
-            if not user:
-                active_generations.discard(user_id)
-                return
+        if mode in ["cartoon", "video"] and not prompt and not images:
+            await msg.reply_text("📸 Пожалуйста, отправьте текст или фото для генерации мультфильма/видео.")
+            return
 
-            await reset_week_if_needed(user)
+        async with generation_semaphore:
+            try:
+                user = await get_user(user_id)
+                if not user:
+                    return
 
-            # ===== лимиты видео/мультфильма =====
-            if mode in ["video", "cartoon"]:
-                video_used = user.get("video_count", 0)
-                if video_used >= FREE_VIDEO_LIMIT:
+                await reset_week_if_needed(user)
+
+                # ===== лимиты видео/мультфильма =====
+                if mode in ["video", "cartoon"]:
+                    video_used = user.get("video_count", 0)
+                    if video_used >= FREE_VIDEO_LIMIT:
+                        try:
+                            if status:
+                                await status.delete()
+                        except:
+                            pass
+
+                        await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
+                        return
+
+                # ===== стили =====
+                style = ""
+                if model == "banana1":
+                    style = "cinematic lighting ultra realistic 8k"
+                elif model == "banana2":
+                    style = "hyper detailed masterpiece artstation quality"
+
+                cartoon_style = context.user_data.get("cartoon_style")
+
+                # ==== Формирование prompt ====
+                if prompt:
+                    if mode == "image" and style:
+                        prompt = f"{style} {prompt}"
+                    elif mode in ["cartoon", "video"] and cartoon_style:
+                        prompt = f"{cartoon_style}, {prompt}"
+
+                if mode != "music" and prompt:
+                    prompt = clean_prompt(prompt)
+
+                # ===== кеширование изображений =====
+                cache_key = f"{prompt}_{model}_{size}" if prompt else None
+                cached = generation_cache.get(cache_key) if cache_key else None
+
+                if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
                     try:
                         if status:
                             await status.delete()
                     except:
                         pass
 
-                    await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
-                    active_generations.discard(user_id)
+                    await msg.reply_photo(photo=cached["image"])
                     return
 
-            # ===== стили =====
-            style = ""
-            if model == "banana1":
-                style = "cinematic lighting ultra realistic 8k"
-            elif model == "banana2":
-                style = "hyper detailed masterpiece artstation quality"
+                images_local = images[:MAX_INPUT_IMAGES]
 
-            cartoon_style = context.user_data.get("cartoon_style")
+                # ================= MUSIC MODE =================
+                if mode == "music" and prompt:
+                    chat_id = update.effective_chat.id
+                    cached_audio_url = await get_cached_music(prompt)
+                    audio_bytes = None
 
-            # ==== Формирование prompt ====
-            if prompt:
-                if mode == "image" and style:
-                    prompt = f"{style} {prompt}"
-                elif mode in ["cartoon", "video"] and cartoon_style:
-                    prompt = f"{cartoon_style}, {prompt}"
+                    if cached_audio_url:
+                        try:
+                            if status:
+                                await status.delete()
+                        except Exception:
+                            pass
 
-            if mode != "music" and prompt:
-                prompt = clean_prompt(prompt)
+                        try:
+                            async with aiohttp.ClientSession() as session:
+                                async with session.get(cached_audio_url) as resp:
+                                    if resp.status != 200:
+                                        raise Exception(f"Failed to download cached audio: {cached_audio_url}")
+                                    audio_bytes = await resp.read()
 
-            # ===== кеширование изображений =====
-            cache_key = f"{prompt}_{model}_{size}" if prompt else None
-            cached = generation_cache.get(cache_key) if cache_key else None
+                            audio_file = io.BytesIO(audio_bytes)
+                            ext = cached_audio_url.split(".")[-1]
+                            audio_file.name = f"song.{ext}"
+                            audio_file.seek(0)
 
-            if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
-                try:
-                    if status:
-                        await status.delete()
-                except:
-                    pass
+                            try:
+                                await context.bot.send_audio(
+                                    chat_id=chat_id,
+                                    audio=audio_file,
+                                    title="Generated Song"
+                                )
+                            except Exception as e:
+                                logging.error(f"❌ send_audio failed: {e}")
+                                audio_file.seek(0)
+                                await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
-                await msg.reply_photo(photo=cached["image"])
-                active_generations.discard(user_id)
-                return
+                        except Exception as e:
+                            logging.error(f"Failed to send cached audio: {e}")
+                        return
 
-            images = images[:MAX_INPUT_IMAGES]
+                    if status is None:
+                        cancel_button = InlineKeyboardMarkup.from_button(
+                            InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+                        )
+                        status = await msg.reply_text("🎵 Музыка генерируется… 1%", reply_markup=cancel_button)
 
-            # ================= MUSIC MODE =================
-            if mode == "music" and prompt:
-                msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
+                    async def music_progress(msg, interval=30):
+                        pct = 1
+                        last_text = ""
+                        try:
+                            while True:
+                                await asyncio.sleep(interval)
+                                pct = min(pct + 5, 99)
+                                new_text = f"🎵 Музыка генерируется… {pct}%"
+                                if new_text != last_text:
+                                    try:
+                                        await msg.edit_text(new_text)
+                                        last_text = new_text
+                                    except telegram.error.RetryAfter as e:
+                                        await asyncio.sleep(e.retry_after + 1)
+                                    except Exception:
+                                        pass
+                        except asyncio.CancelledError:
+                            pass
 
-                if not msg:
-                    active_generations.discard(user_id)
-                    user_generation_count[user_id] = max(
-                        0, user_generation_count.get(user_id, 1) - 1
-                    )
-                    return
+                    progress_task = asyncio.create_task(music_progress(status))
 
-                chat_id = update.effective_chat.id
+                    try:
+                        logging.info("🚀 CALLING FAL MUSIC GENERATE")
+                        result = await asyncio.wait_for(fal_music_generate(prompt), timeout=360)
+                        logging.info("✅ FAL MUSIC FINISHED")
+                    except asyncio.CancelledError:
+                        logging.info(f"⚠ Generation cancelled for user {user_id}")
+                        progress_task.cancel()
+                        try:
+                            await progress_task
+                        except asyncio.CancelledError:
+                            pass
+                        try:
+                            if status:
+                                await status.edit_text("❌ Генерация отменена")
+                        except Exception:
+                            pass
+                        raise
+                    except Exception as e:
+                        progress_task.cancel()
+                        try:
+                            await progress_task
+                        except asyncio.CancelledError:
+                            pass
+                        logging.error(f"❌ FAL ERROR: {e}")
+                        await msg.reply_text("⚠️ Ошибка генерации музыки")
+                        return
 
-                cached_audio_url = await get_cached_music(prompt)
-                audio_bytes = None
+                    audio_url = result
+                    progress_task.cancel()
+                    try:
+                        await progress_task
+                    except asyncio.CancelledError:
+                        pass
 
-                if cached_audio_url:
+                    try:
+                        if status:
+                            await status.edit_text("🎵 Музыка генерируется… 100%")
+                    except Exception:
+                        pass
+
+                    await asyncio.sleep(1)
                     try:
                         if status:
                             await status.delete()
                     except Exception:
                         pass
 
-                    try:
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(cached_audio_url) as resp:
-                                if resp.status != 200:
-                                    raise Exception(f"Failed to download cached audio: {cached_audio_url}")
-                                audio_bytes = await resp.read()
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(audio_url) as resp:
+                            audio_bytes = await resp.read()
 
+                    await save_music_cache(prompt, audio_url)
+
+                    try:
                         audio_file = io.BytesIO(audio_bytes)
-                        ext = cached_audio_url.split(".")[-1]
+                        ext = audio_url.split(".")[-1]
                         audio_file.name = f"song.{ext}"
                         audio_file.seek(0)
-
                         try:
-                            await context.bot.send_audio(
-                                chat_id=chat_id,
-                                audio=audio_file,
-                                title="Generated Song"
-                            )
-                        except Exception as e:
-                            logging.error(f"❌ send_audio failed: {e}")
-
+                            await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
+                        except Exception:
                             audio_file.seek(0)
-
-                            await context.bot.send_document(
-                                chat_id=chat_id,
-                                document=audio_file
-                            )
-
+                            await context.bot.send_document(chat_id=chat_id, document=audio_file)
                     except Exception as e:
-                        logging.error(f"Failed to send cached audio: {e}")
+                        logging.error(f"Failed to send generated audio: {e}")
 
-                    active_generations.discard(user_id)
-                    return
-
-                if status is None:
-                    cancel_button = InlineKeyboardMarkup.from_button(
-                        InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
-                    )
-                    status = await msg.reply_text("🎵 Музыка генерируется… 1%", reply_markup=cancel_button)
-
-                async def music_progress(msg, interval=30):
-                    pct = 1
-                    last_text = ""
-
-                    try:
-                        while True:
-                            await asyncio.sleep(interval)
-                            pct = min(pct + 5, 99)
-                            new_text = f"🎵 Музыка генерируется… {pct}%"
-
-                            if new_text != last_text:
-                                try:
-                                    await msg.edit_text(new_text)
-                                    last_text = new_text
-                                except telegram.error.RetryAfter as e:
-                                    await asyncio.sleep(e.retry_after + 1)
-                                except Exception:
-                                    pass
-
-                    except asyncio.CancelledError:
-                        pass
-
-                progress_task = asyncio.create_task(music_progress(status))
-
-                try:
-                    logging.info("🚀 CALLING FAL MUSIC GENERATE")
-
-                    result = await asyncio.wait_for(
-                        fal_music_generate(prompt),
-                        timeout=360
-                    )
-
-                    logging.info("✅ FAL MUSIC FINISHED")
-
-                except asyncio.TimeoutError:
-                    progress_task.cancel()
-
-                    try:
-                        await progress_task
-                    except asyncio.CancelledError:
-                        pass
-
-                    try:
-                        await msg.reply_text("⚠️ FAL завис (timeout)")
-                    except telegram.error.RetryAfter as e:
-                        await asyncio.sleep(e.retry_after + 1)
-                        await msg.reply_text("⚠️ FAL завис (timeout)")
-
-                    active_generations.discard(user_id)
-                    return
-
-                except Exception as e:
-                    progress_task.cancel()
-
-                    try:
-                        await progress_task
-                    except asyncio.CancelledError:
-                        pass
-
-                    logging.error(f"❌ FAL ERROR: {e}")
-
-                    try:
-                        await msg.reply_text("⚠️ Ошибка генерации музыки")
-                    except telegram.error.RetryAfter as e:
-                        await asyncio.sleep(e.retry_after + 1)
-                        await msg.reply_text("⚠️ Ошибка генерации музыки")
-
-                    active_generations.discard(user_id)
-                    return
-
-                audio_url = result
-                logging.info(f"🎧 AUDIO URL: {audio_url}")
-
-                if not audio_url:
-                    progress_task.cancel()
-
-                    try:
-                        await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
-                    except telegram.error.RetryAfter as e:
-                        await asyncio.sleep(e.retry_after + 1)
-                        await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
-
-                    active_generations.discard(user_id)
-                    return
-
-                progress_task.cancel()
-
-                try:
-                    await progress_task
-                except asyncio.CancelledError:
-                    pass
-
-                try:
-                    if status:
-                        await status.edit_text("🎵 Музыка генерируется… 100%")
-                except Exception:
-                    pass
-
-                await asyncio.sleep(1)
-
-                try:
-                    if status:
-                        await status.delete()
-                except Exception:
-                    pass
-
-                logging.info(f"📥 DOWNLOAD FROM: {audio_url}")
-
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(audio_url) as resp:
-                        if resp.status != 200:
-                            text = await resp.text()
-                            logging.error(f"❌ Download error: {resp.status} | {text}")
-
-                            try:
-                                await msg.reply_text("⚠️ Ошибка скачивания аудио")
-                            except telegram.error.RetryAfter as e:
-                                await asyncio.sleep(e.retry_after + 1)
-                                await msg.reply_text("⚠️ Ошибка скачивания аудио")
-
-                            active_generations.discard(user_id)
-                            return
-
-                        audio_bytes = await resp.read()
-                        logging.info(f"📦 Audio size: {len(audio_bytes) / 1024 / 1024:.2f} MB")
-
-                await save_music_cache(prompt, audio_url)
-
-                try:
-                    audio_file = io.BytesIO(audio_bytes)
-                    ext = audio_url.split(".")[-1]
-                    audio_file.name = f"song.{ext}"
-                    audio_file.seek(0)
-
-                    try:
-                        await context.bot.send_audio(
-                            chat_id=chat_id,
-                            audio=audio_file,
-                            title="Generated Song"
-                        )
-                    except Exception:
-                        audio_file.seek(0)
-                        await context.bot.send_document(
-                            chat_id=chat_id,
-                            document=audio_file
+                    async with db_pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
+                            user_id
                         )
 
-                except Exception as e:
-                    logging.error(f"Failed to send generated audio: {e}")
+                    context.user_data["mode"] = None
 
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
-                        user_id
-                    )
+            except asyncio.CancelledError:
+                logging.info(f"⚠ Generation cancelled for user {user_id}")
+                raise
+            finally:
+                active_generations.discard(user_id)
+                active_tasks.pop(user_id, None)
 
-                context.user_data["mode"] = None
-
-        except Exception as e:
-            logging.error(f"❌ HANDLE ERROR: {e}")
-        finally:
-            # Снимаем пометку о генерации в любом случае
-            active_generations.discard(user_id)
+    # ====== Запускаем таск и сохраняем его ======
+    task = asyncio.create_task(actual_generation())
+    active_tasks[user_id] = task
 # ================== WORKERS ==================
 async def image_worker():
     while True:
@@ -1187,16 +1114,16 @@ from telegram.ext import ContextTypes, MessageHandler, filters
 import logging
 
 # ================= CALLBACK =================
-async def cancel_generation_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cancel_generation_callback(update, context):
     query = update.callback_query
-    await query.answer()
-    
-    data = query.data
-    if data and data.startswith("cancel_gen:"):
-        user_id = int(data.split(":")[1])
-        if user_id in active_generations:
-            active_generations.discard(user_id)
-            await query.edit_message_text("❌ Генерация отменена пользователем")
+    user_id = int(query.data.split(":")[1])
+
+    if user_id in active_tasks:
+        task = active_tasks.pop(user_id)
+        task.cancel()
+        active_generations.discard(user_id)
+
+    await query.edit_message_text("❌ Генерация отменена пользователем")
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
