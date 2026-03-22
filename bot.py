@@ -708,6 +708,7 @@ generation_semaphore = asyncio.Semaphore(5)  # Ограничение парал
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 active_tasks = {}  # user_id -> asyncio.Task
+active_generations = set()  # user_id для контроля активных генераций
 
 async def handle_generation_job(job):
     update = job["update"]
@@ -764,7 +765,6 @@ async def handle_generation_job(job):
                                 await status.delete()
                         except:
                             pass
-
                         await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
                         return
 
@@ -797,7 +797,6 @@ async def handle_generation_job(job):
                             await status.delete()
                     except:
                         pass
-
                     await msg.reply_photo(photo=cached["image"])
                     return
 
@@ -815,7 +814,6 @@ async def handle_generation_job(job):
                                 await status.delete()
                         except Exception:
                             pass
-
                         try:
                             async with aiohttp.ClientSession() as session:
                                 async with session.get(cached_audio_url) as resp:
@@ -910,6 +908,8 @@ async def handle_generation_job(job):
             raise
 
         finally:
+            # ===== Обязательно снимаем блокировку =====
+            logging.info(f"🧹 CLEANUP user {user_id}")
             active_generations.discard(user_id)
             active_tasks.pop(user_id, None)
             unlock_user_generation(user_id)
