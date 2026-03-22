@@ -724,6 +724,7 @@ async def handle_generation_job(job):
             user = await get_user(user_id)
             if not user:
                 return
+
             await reset_week_if_needed(user)
 
             # ===== лимиты видео/мультфильма =====
@@ -735,6 +736,7 @@ async def handle_generation_job(job):
                             await status.delete()
                     except:
                         pass
+
                     await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
                     return
 
@@ -760,12 +762,14 @@ async def handle_generation_job(job):
             # ===== кеширование изображений =====
             cache_key = f"{prompt}_{model}_{size}" if prompt else None
             cached = generation_cache.get(cache_key) if cache_key else None
+
             if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
                 try:
                     if status:
                         await status.delete()
                 except:
                     pass
+
                 await msg.reply_photo(photo=cached["image"])
                 return
 
@@ -774,9 +778,12 @@ async def handle_generation_job(job):
             # ================= MUSIC MODE =================
             if mode == "music" and prompt:
                 msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
+
                 if not msg:
                     active_generations.discard(user_id)
-                    user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
+                    user_generation_count[user_id] = max(
+                        0, user_generation_count.get(user_id, 1) - 1
+                    )
                     return
 
                 chat_id = update.effective_chat.id
@@ -831,11 +838,13 @@ async def handle_generation_job(job):
                 async def music_progress(msg, interval=30):
                     pct = 1
                     last_text = ""
+
                     try:
                         while True:
                             await asyncio.sleep(interval)
                             pct = min(pct + 5, 99)
                             new_text = f"🎵 Музыка генерируется… {pct}%"
+
                             if new_text != last_text:
                                 try:
                                     await msg.edit_text(new_text)
@@ -844,6 +853,7 @@ async def handle_generation_job(job):
                                     await asyncio.sleep(e.retry_after + 1)
                                 except Exception:
                                     pass
+
                     except asyncio.CancelledError:
                         pass
 
@@ -861,6 +871,7 @@ async def handle_generation_job(job):
 
                 except asyncio.TimeoutError:
                     progress_task.cancel()
+
                     try:
                         await progress_task
                     except asyncio.CancelledError:
@@ -877,12 +888,14 @@ async def handle_generation_job(job):
 
                 except Exception as e:
                     progress_task.cancel()
+
                     try:
                         await progress_task
                     except asyncio.CancelledError:
                         pass
 
                     logging.error(f"❌ FAL ERROR: {e}")
+
                     try:
                         await msg.reply_text("⚠️ Ошибка генерации музыки")
                     except telegram.error.RetryAfter as e:
@@ -897,15 +910,18 @@ async def handle_generation_job(job):
 
                 if not audio_url:
                     progress_task.cancel()
+
                     try:
                         await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
                     except telegram.error.RetryAfter as e:
                         await asyncio.sleep(e.retry_after + 1)
                         await msg.reply_text("⚠️ Не удалось получить аудио от FAL")
+
                     active_generations.discard(user_id)
                     return
 
                 progress_task.cancel()
+
                 try:
                     await progress_task
                 except asyncio.CancelledError:
@@ -932,11 +948,13 @@ async def handle_generation_job(job):
                         if resp.status != 200:
                             text = await resp.text()
                             logging.error(f"❌ Download error: {resp.status} | {text}")
+
                             try:
                                 await msg.reply_text("⚠️ Ошибка скачивания аудио")
                             except telegram.error.RetryAfter as e:
                                 await asyncio.sleep(e.retry_after + 1)
                                 await msg.reply_text("⚠️ Ошибка скачивания аудио")
+
                             active_generations.discard(user_id)
                             return
 
@@ -952,10 +970,17 @@ async def handle_generation_job(job):
                     audio_file.seek(0)
 
                     try:
-                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
+                        await context.bot.send_audio(
+                            chat_id=chat_id,
+                            audio=audio_file,
+                            title="Generated Song"
+                        )
                     except Exception:
                         audio_file.seek(0)
-                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
+                        await context.bot.send_document(
+                            chat_id=chat_id,
+                            document=audio_file
+                        )
 
                 except Exception as e:
                     logging.error(f"Failed to send generated audio: {e}")
