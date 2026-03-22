@@ -913,6 +913,7 @@ async def handle_generation_job(job):
             active_generations.discard(user_id)
             active_tasks.pop(user_id, None)
             unlock_user_generation(user_id)
+            logging.info(f"✅ User {user_id} removed from active tasks")
 
     # ====== ЗАПУСК ТАСКА (ВНУТРИ ФУНКЦИИ!) ======
     task = asyncio.create_task(actual_generation())
