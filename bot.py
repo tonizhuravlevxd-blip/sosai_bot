@@ -791,8 +791,11 @@ async def handle_generation_job(job):
                 elif mode in ["cartoon", "video"] and cartoon_style:
                     prompt = f"{cartoon_style}, {prompt}"
 
-            if mode != "music" and prompt:
-                prompt = clean_prompt(prompt)
+            if prompt:
+                if mode in ["video", "cartoon"]:
+                    prompt = clean_video_prompt(prompt)
+                else:
+                    prompt = clean_prompt(prompt)
 
             # ===== кеширование изображений =====
             cache_key = f"{prompt}_{model}_{size}" if prompt else None
