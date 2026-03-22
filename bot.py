@@ -793,7 +793,7 @@ async def handle_generation_job(job):
 
             if prompt:
                 if mode in ["video", "cartoon"]:
-                    prompt = clean_video_prompt(prompt)
+                    prompt = clean_prompt(prompt)
                 else:
                     prompt = clean_prompt(prompt)
 
