@@ -992,7 +992,10 @@ async def handle_generation_job(job):
                     )
 
                 context.user_data["mode"] = None
-                active_generations.discard(user_id)
+
+        except Exception as e:
+            logging.error(f"❌ HANDLE ERROR: {e}")
+            active_generations.discard(user_id)
 # ================== WORKERS ==================
 async def image_worker():
     while True:
