@@ -815,10 +815,7 @@ async def handle_generation_job(job):
                     prompt = f"{cartoon_style}, {prompt}"
 
             if prompt:
-                if mode in ["video", "cartoon"]:
-                    prompt = clean_prompt(prompt)
-                else:
-                    prompt = clean_prompt(prompt)
+                prompt = clean_prompt(prompt)
 
             # ===== кеширование изображений =====
             cache_key = f"{prompt}_{model}_{size}" if prompt else None
@@ -895,6 +892,34 @@ async def handle_generation_job(job):
                     audio_file.seek(0)
                     await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
+            # ================= IMAGE =================
+            elif mode == "image":
+                if status is None:
+                    cancel_button = InlineKeyboardMarkup.from_button(
+                        InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+                    )
+                    status = await msg.reply_text("🎨 Генерация изображения...", reply_markup=cancel_button)
+
+                upload_task = asyncio.create_task(
+                    fake_photo_upload(context.bot, update.effective_chat.id)
+                )
+
+                try:
+                    result = await asyncio.wait_for(
+                        fal_generate(model, prompt, images_local),
+                        timeout=300
+                    )
+                finally:
+                    upload_task.cancel()
+
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
+
+                await msg.reply_photo(photo=result)
+
             # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
                 if status is None:
@@ -903,10 +928,17 @@ async def handle_generation_job(job):
                     )
                     status = await msg.reply_text("🎬 Генерация...", reply_markup=cancel_button)
 
-                result_bytes = await asyncio.wait_for(
-                    fal_video_generate(prompt, images_local),
-                    timeout=600
+                upload_task = asyncio.create_task(
+                    fake_photo_upload(context.bot, update.effective_chat.id)
                 )
+
+                try:
+                    result_bytes = await asyncio.wait_for(
+                        fal_video_generate(prompt, images_local),
+                        timeout=600
+                    )
+                finally:
+                    upload_task.cancel()
 
                 try:
                     if status:
