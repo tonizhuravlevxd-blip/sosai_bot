@@ -773,13 +773,13 @@ async def handle_generation_job(job):
 
             # ================= MUSIC MODE =================
             if mode == "music" and prompt:
-                # Получаем chat_id через сообщение пользователя
                 msg = getattr(update, "message", None) or getattr(update, "callback_query", None).message
                 if not msg:
                     active_generations.discard(user_id)
                     user_generation_count[user_id] = max(0, user_generation_count.get(user_id, 1) - 1)
                     return
-                chat_id = msg.chat.id
+
+                chat_id = update.effective_chat.id
 
                 cached_audio_url = await get_cached_music(prompt)
                 audio_bytes = None
@@ -792,7 +792,6 @@ async def handle_generation_job(job):
                         pass
 
                     try:
-                        # Скачиваем кешированное аудио
                         async with aiohttp.ClientSession() as session:
                             async with session.get(cached_audio_url) as resp:
                                 if resp.status != 200:
@@ -805,10 +804,20 @@ async def handle_generation_job(job):
                         audio_file.seek(0)
 
                         try:
-                            await context.bot.send_audio(chat_id=chat_id, audio=audio_file, title="Generated Song")
-                        except Exception:
+                            await context.bot.send_audio(
+                                chat_id=chat_id,
+                                audio=audio_file,
+                                title="Generated Song"
+                            )
+                        except Exception as e:
+                            logging.error(f"❌ send_audio failed: {e}")
+
                             audio_file.seek(0)
-                            await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
+                            await context.bot.send_document(
+                                chat_id=chat_id,
+                                document=audio_file
+                            )
 
                     except Exception as e:
                         logging.error(f"Failed to send cached audio: {e}")
@@ -819,7 +828,6 @@ async def handle_generation_job(job):
                 if status is None:
                     status = await msg.reply_text("🎵 Музыка генерируется… 1%")
 
-                # ===== БЕСКОНЕЧНЫЙ ПРОГРЕСС С ЗАЩИТОЙ ОТ FLOOD =====
                 async def music_progress(msg, interval=30):
                     pct = 1
                     last_text = ""
@@ -841,13 +849,12 @@ async def handle_generation_job(job):
 
                 progress_task = asyncio.create_task(music_progress(status))
 
-                # ===== ГЕНЕРАЦИЯ ЧЕРЕЗ FAL С ТАЙМАУТОМ 6 МИНУТ =====
                 try:
                     logging.info("🚀 CALLING FAL MUSIC GENERATE")
 
                     result = await asyncio.wait_for(
                         fal_music_generate(prompt),
-                        timeout=360  # 6 минут
+                        timeout=360
                     )
 
                     logging.info("✅ FAL MUSIC FINISHED")
@@ -885,15 +892,8 @@ async def handle_generation_job(job):
                     active_generations.discard(user_id)
                     return
 
-                # ===== СКАЧИВАЕМ АУДИО И ОТПРАВЛЯЕМ =====
-                audio_url = None
-                if isinstance(result, dict):
-                    if isinstance(result.get("audio"), dict):
-                        audio_url = result["audio"].get("url")
-                    elif isinstance(result.get("audio"), list):
-                        audio_url = result["audio"][0].get("url")
-                elif isinstance(result, str):
-                    audio_url = result
+                audio_url = result
+                logging.info(f"🎧 AUDIO URL: {audio_url}")
 
                 if not audio_url:
                     progress_task.cancel()
@@ -905,7 +905,6 @@ async def handle_generation_job(job):
                     active_generations.discard(user_id)
                     return
 
-                # ===== ОСТАНОВКА ПРОГРЕССА =====
                 progress_task.cancel()
                 try:
                     await progress_task
@@ -926,10 +925,13 @@ async def handle_generation_job(job):
                 except Exception:
                     pass
 
-                # ===== СКАЧИВАЕМ АУДИО =====
+                logging.info(f"📥 DOWNLOAD FROM: {audio_url}")
+
                 async with aiohttp.ClientSession() as session:
                     async with session.get(audio_url) as resp:
                         if resp.status != 200:
+                            text = await resp.text()
+                            logging.error(f"❌ Download error: {resp.status} | {text}")
                             try:
                                 await msg.reply_text("⚠️ Ошибка скачивания аудио")
                             except telegram.error.RetryAfter as e:
@@ -937,13 +939,12 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Ошибка скачивания аудио")
                             active_generations.discard(user_id)
                             return
-                        audio_bytes = await resp.read()
-                        logging.info(f"Downloaded generated audio, size: {len(audio_bytes)} bytes")
 
-                # ===== СОХРАНЯЕМ В КЕШ =====
+                        audio_bytes = await resp.read()
+                        logging.info(f"📦 Audio size: {len(audio_bytes) / 1024 / 1024:.2f} MB")
+
                 await save_music_cache(prompt, audio_url)
 
-                # ===== ОТПРАВКА ПОЛЬЗОВАТЕЛЮ =====
                 try:
                     audio_file = io.BytesIO(audio_bytes)
                     ext = audio_url.split(".")[-1]
@@ -959,7 +960,6 @@ async def handle_generation_job(job):
                 except Exception as e:
                     logging.error(f"Failed to send generated audio: {e}")
 
-                # ===== ОБНОВЛЯЕМ СЧЕТЧИК =====
                 async with db_pool.acquire() as conn:
                     await conn.execute(
                         "UPDATE users SET music_count = COALESCE(music_count,0) + 1 WHERE user_id=$1",
