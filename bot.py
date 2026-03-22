@@ -443,8 +443,8 @@ async def fal_generate(model, prompt, images=None):
 
             request_id = data["request_id"]
 
-        status_url = f"{base_url}/requests/{request_id}/status"
-        result_url = f"{base_url}/requests/{request_id}"
+            status_url = data["status_url"]
+            result_url = data["response_url"]
 
         for _ in range(120):
 
