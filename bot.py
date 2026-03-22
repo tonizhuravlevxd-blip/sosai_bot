@@ -737,7 +737,7 @@ async def handle_generation_job(job):
         return
 
     # Помечаем генерацию как активную
-    
+    active_generations.add(user_id)
 
     # ==== Вынесем основную генерацию в отдельный async task ====
     async def actual_generation():
@@ -950,10 +950,20 @@ async def handle_generation_job(job):
             finally:
                 active_generations.discard(user_id)
                 active_tasks.pop(user_id, None)
+                unlock_user_generation(user_id)
 
-    # ====== Запускаем таск и сохраняем его ======
-    task = asyncio.create_task(actual_generation())
-    active_tasks[user_id] = task
+   # ====== Запускаем таск и сохраняем его ======
+task = asyncio.create_task(actual_generation())
+
+def task_done_callback(task):
+    try:
+        task.result()
+    except Exception as e:
+        logging.error(f"Task crashed: {e}")
+
+task.add_done_callback(task_done_callback)
+
+active_tasks[user_id] = task
 # ================== WORKERS ==================
 async def image_worker():
     while True:
