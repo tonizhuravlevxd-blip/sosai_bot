@@ -1637,7 +1637,8 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎁 Бонусы: {bonus}\n"
         f"📦 Доступно: {remaining}\n"
         f"👥 Рефералов: {user['referrals']}",
-        reply_markup=keyboard  # ✅ ВОТ ЭТО ТЫ ЗАБЫЛ
+        f"🍩 Статус: {premium_status}",
+        reply_markup=keyboard  # ✅ 
     )
 
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
