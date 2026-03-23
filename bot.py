@@ -9,7 +9,6 @@ import aiohttp
 import json
 import io
 
-telegram_app = None
 from yookassa import Configuration, Payment
 
 Configuration.account_id = os.getenv("YOOKASSA_SHOP_ID")
@@ -36,67 +35,6 @@ async def create_payment(user_id):
     return payment.confirmation.confirmation_url
 
 
-from fastapi import FastAPI, Request
-import uvicorn
-
-web_app = FastAPI()
-
-
-@web_app.post("/yookassa-webhook")
-async def yookassa_webhook(request: Request):
-    data = await request.json()
-
-    # ❗ защита от мусора / подделки
-    if "object" not in data:
-        return {"status": "ignored"}
-
-    try:
-        event = data.get("event")
-        payment = data.get("object", {})
-
-        # интересует только успешная оплата
-        if event != "payment.succeeded":
-            return {"status": "ignored"}
-
-        user_id = int(payment["metadata"]["user_id"])
-        payment_id = payment["id"]
-
-        premium_until = int(time.time()) + (30 * 24 * 60 * 60)
-
-        async with db_pool.acquire() as conn:
-
-            # ❗ защита от двойного webhook
-            existing = await conn.fetchval(
-                "SELECT last_payment_id FROM users WHERE user_id=$1",
-                user_id
-            )
-
-            if existing == payment_id:
-                return {"status": "duplicate"}
-
-            await conn.execute(
-                """
-                UPDATE users 
-                SET premium = 1,
-                    premium_until = $1,
-                    last_payment_id = $2
-                WHERE user_id = $3
-                """,
-                premium_until,
-                payment_id,
-                user_id
-            )
-
-        # уведомление пользователя
-        await app.bot.send_message(
-            chat_id=user_id,
-            text="🍩 Оплата прошла успешно! Premium активирован."
-        )
-
-    except Exception as e:
-        logging.error(f"Webhook error: {e}")
-
-    return {"status": "ok"}
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool = None
@@ -1790,20 +1728,16 @@ app.post_init = post_init
 
 
 async def main():
-    config = uvicorn.Config(web_app, host="0.0.0.0", port=8000)
-    server = uvicorn.Server(config)
-    global telegram_app
-    telegram_app = app
-    asyncio.create_task(server.serve())
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
 
-    await asyncio.Event().wait()
+    print("🚀 Бот запущен")
+
+    await app.run_polling()
 
 
 if __name__ == "__main__":
-    print("🚀 Бот запущен")
+    import asyncio
     asyncio.run(main())
     
     
