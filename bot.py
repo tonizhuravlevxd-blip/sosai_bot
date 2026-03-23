@@ -10,6 +10,32 @@ import json
 import io
 
 
+from yookassa import Configuration, Payment
+
+Configuration.account_id = os.getenv("YOOKASSA_SHOP_ID")
+Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
+
+
+async def create_payment(user_id):
+    payment = Payment.create({
+        "amount": {
+            "value": "500.00",
+            "currency": "RUB"
+        },
+        "confirmation": {
+            "type": "redirect",
+            "return_url": "https://t.me/YOUR_BOT"
+        },
+        "capture": True,
+        "description": "Premium доступ",
+        "metadata": {
+            "user_id": str(user_id)
+        }
+    })
+
+    return payment.confirmation.confirmation_url
+
+
 from fastapi import FastAPI, Request
 import uvicorn
 
@@ -1215,22 +1241,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return  # ✅ ФИКС
 
     elif data == "buy_spb":
-        spb_link = (
-            "https://yoomoney.ru/quickpay/shop-widget?"
-            "writer=SELLER_ID&"
-            "targets=Premium+Donut&"
-            "default-sum=500&"
-            "button-text=11&"
-            "payment-type-choice=on&"
-            "quickpay-form=shop&"
-            f"metadata[user_id]={user_id}&"
-            f"successURL=https://t.me/{context.bot.username}"
-        )
+        pay_url = await create_payment(user_id)
+
         await query.message.reply_text(
-            f"💳 Оплата через СПБ (ЮKassa)\n\n"
-            f"Нажмите на ссылку и оплатите:\n{spb_link}\n\n"
-            f"После успешной оплат ваш статус Premium активируется автоматически."
-        )
+        f"💳 Оплата через ЮKassa\n\n"
+        f"Перейдите и оплатите:\n{pay_url}"
+    )
         return  # ✅ ФИКС
 
     elif data == "finish":
