@@ -1172,6 +1172,10 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "🍩 Оплата прошла успешно!\n\nPremium активирован на 30 дней 🚀"
     )
 
+async def pre_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.pre_checkout_query
+    await query.answer(ok=True)
+
 # ================= IMPORTS =================
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, MessageHandler, filters
@@ -1689,6 +1693,7 @@ app.add_handler(CallbackQueryHandler(cancel_generation_callback, pattern=r"^canc
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
+app.add_handler(PreCheckoutQueryHandler(pre_checkout))
 
 
 async def set_commands(app):
