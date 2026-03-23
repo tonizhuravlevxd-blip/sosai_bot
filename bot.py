@@ -18,26 +18,50 @@ Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
 
 
 import uuid
+from yookassa import Payment
 
-async def create_payment(user_id):
+async def create_payment(user_id: int, amount: float = 500.00):
+    """
+    Создает платеж в ЮKassa с receipt и отправкой чека на email.
+    
+    :param user_id: ID пользователя
+    :param amount: сумма платежа в рублях
+    :return: URL для редиректа на оплату
+    """
     payment = Payment.create({
         "amount": {
-            "value": "500.00",
+            "value": f"{amount:.2f}",
             "currency": "RUB"
         },
         "confirmation": {
             "type": "redirect",
-            "return_url": "https://t.me/YOUR_BOT"
+            "return_url": "https://t.me/YOUR_BOT_USERNAME"  # ссылка, куда вернется после оплаты
         },
         "capture": True,
         "description": "Premium доступ",
         "metadata": {
             "user_id": str(user_id)
+        },
+        "receipt": {
+            "customer": {
+                "email": f"user{user_id}@example.com"  # чек будет отправлен на этот email
+            },
+            "items": [
+                {
+                    "description": "Premium доступ",
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{amount:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1  # ставка НДС
+                }
+            ]
         }
-    }, uuid.uuid4())
+    }, str(uuid.uuid4()))
 
+    # Возвращаем URL для редиректа на оплату
     return payment.confirmation.confirmation_url
-
 
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -1689,11 +1713,11 @@ app.add_handler(CommandHandler("restart", restart))
 
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(CallbackQueryHandler(cancel_generation_callback, pattern=r"^cancel_gen:\d+$"))
-
+app.add_handler(PreCheckoutQueryHandler(pre_checkout))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
-app.add_handler(PreCheckoutQueryHandler(pre_checkout))
+
 
 
 async def set_commands(app):
