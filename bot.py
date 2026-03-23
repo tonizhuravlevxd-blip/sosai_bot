@@ -1609,7 +1609,6 @@ async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     tg_user = update.effective_user
 
     user = await get_user(tg_user.id)
@@ -1618,8 +1617,9 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bonus = user["bonus_images"]
 
     remaining = FREE_LIMIT + bonus - used
+
     # ✅ Статус премиума
-    premium_active = user["premium"] == 1 and user["premium_until"] > int(time.time())
+    premium_active = user.get("premium", 0) == 1 and user.get("premium_until", 0) > int(time.time())
     premium_status = "🍩 Пончик-Премиум ЕСТЬ" if premium_active else "❌ Премиум нет"
 
     keyboard = None
@@ -1630,15 +1630,22 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
         ])
 
-    await update.message.reply_text(
+    # ✅ Формируем текст профиля
+    profile_text = (
         f"👤 Профиль\n\n"
         f"🆔 ID: {tg_user.id}\n"
         f"👤 Username: @{tg_user.username}\n\n"
         f"🎁 Бонусы: {bonus}\n"
         f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user['referrals']}",
-        f"🍩 Статус: {premium_status}",
-        reply_markup=keyboard  # ✅ 
+        f"👥 Рефералов: {user['referrals']}\n"
+        f"🍩 Статус: {premium_status}"
+    )
+
+    # ✅ Отправка без parse_mode, чтобы не было ошибок
+    await update.message.reply_text(
+        profile_text,
+        reply_markup=keyboard,
+        parse_mode=None
     )
 
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
