@@ -18,49 +18,38 @@ Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
 
 
 import uuid
-from yookassa import Payment
 
-async def create_payment(user_id: int, amount: float = 500.00):
-    """
-    Создает платеж в ЮKassa с receipt и отправкой чека на email.
-    
-    :param user_id: ID пользователя
-    :param amount: сумма платежа в рублях
-    :return: URL для редиректа на оплату
-    """
+async def create_payment(user_id):
     payment = Payment.create({
         "amount": {
-            "value": f"{amount:.2f}",
+            "value": "100.00",
             "currency": "RUB"
         },
         "confirmation": {
             "type": "redirect",
-            "return_url": "https://t.me/Sosai_uu_bot"  # ссылка, куда вернется после оплаты
+            "return_url": "https://t.me/Sosai_uu_bot"
         },
         "capture": True,
-        "description": "Premium доступ",
-        "metadata": {
-            "user_id": str(user_id)
-        },
+        "description": f"Покупка премиума для user {user_id}",
         "receipt": {
             "customer": {
-                "email": f"user{user_id}@example.com"  # чек будет отправлен на этот email
+                "email": f"user{user_id}@example.com"
             },
             "items": [
                 {
-                    "description": "Premium доступ",
+                    "description": "Премиум на месяц",
                     "quantity": "1.00",
                     "amount": {
-                        "value": f"{amount:.2f}",
+                        "value": "100.00",
                         "currency": "RUB"
                     },
-                    "vat_code": 1  # ставка НДС
+                    "vat_code": 1,
+                    "payment_mode": "full_payment",  # способ расчета
+                    "payment_subject": "service"     # тип товара/услуги
                 }
             ]
         }
-    }, str(uuid.uuid4()))
-
-    # Возвращаем URL для редиректа на оплату
+    })
     return payment.confirmation.confirmation_url
 
 
