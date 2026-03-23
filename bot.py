@@ -1618,6 +1618,9 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bonus = user["bonus_images"]
 
     remaining = FREE_LIMIT + bonus - used
+    # ✅ Статус премиума
+    premium_active = user["premium"] == 1 and user["premium_until"] > int(time.time())
+    premium_status = "🍩 Пончик-Премиум ЕСТЬ" if premium_active else "❌ Премиум нет"
 
     keyboard = None
 
