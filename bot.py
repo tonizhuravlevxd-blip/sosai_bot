@@ -1727,17 +1727,11 @@ async def post_init(app):
 app.post_init = post_init
 
 
-async def main():
-    await app.initialize()
-    await app.start()
 
-    print("🚀 Бот запущен")
-
-    await app.run_polling()
 
 
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    print("🚀 Бот запущен")
+    app.run_polling()
     
     
