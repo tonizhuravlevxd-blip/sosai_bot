@@ -1169,6 +1169,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             need_shipping_address=False,
             is_flexible=False
         )
+        return  # ✅ ФИКС
 
     elif data == "buy_spb":
         spb_link = (
@@ -1187,15 +1188,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Нажмите на ссылку и оплатите:\n{spb_link}\n\n"
             f"После успешной оплат ваш статус Premium активируется автоматически."
         )
+        return  # ✅ ФИКС
 
     elif data == "finish":
         context.user_data.clear()
         await query.message.reply_text("✅ Генерация завершена.")
+        return
 
     elif data == "restart":
         context.user_data["input_images"] = []
         context.user_data["last_images"] = []
         await query.message.reply_text("🔄 Начните заново. Используйте /photo")
+        return
 
     elif data == "accept_terms":
         async with db_pool.acquire() as conn:
@@ -1208,6 +1212,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_id
             )
         await query.edit_message_text("✅ Условия приняты.")
+        return
 
     # ================= MODE / MODEL =================
     elif data in ["model_banana1", "model_banana2"]:
@@ -1221,20 +1226,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ Выбрана модель: {'🍌 Nano Banana 1' if data=='model_banana1' else '🍌 Nano Banana 2'}\n\n"
             "✏ Сначала напишите текст или отправьте 1-4 фото"
         )
-        return  # ✅ ВАЖНО: генерация не ставится в очередь сразу
+        return
 
     # ================= SIZE =================
     elif data == "size_square":
         context.user_data["size"] = SIZE_CONFIG["square"]
         await query.message.reply_text("⬜ Разрешение 1:1 выбрано")
+        return
 
     elif data == "size_wide":
         context.user_data["size"] = SIZE_CONFIG["wide"]
         await query.message.reply_text("🖥 Разрешение 16:9 выбрано")
+        return
 
     elif data == "size_phone":
         context.user_data["size"] = SIZE_CONFIG["phone"]
         await query.message.reply_text("📱 Вертикальное разрешение выбрано")
+        return
 
     # ================= MUSIC =================
     elif data == "suno_hit":
@@ -1247,6 +1255,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Пример:\n"
             "emotional pop song about lost love"
         )
+        return
 
     # ================= CARTOON STYLES =================
     elif data.startswith("cartoon_"):
@@ -1256,6 +1265,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["cartoon_style"] = CARTOON_STYLES[style_key]
         context.user_data["mode"] = "cartoon"
+
         if "model" not in context.user_data:
             context.user_data["model"] = "banana2"
 
@@ -1273,7 +1283,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ================= REPEAT =================
+    # ================= REPEAT (ОСТАВЛЯЕМ) =================
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
@@ -1295,9 +1305,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        if mode in ["video", "cartoon"] and prompt:
-            prompt = clean_prompt(prompt)
-
         await queue_map.get(mode, generation_queue_image).put({
             "update": update,
             "context": context,
@@ -1309,60 +1316,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": mode,
             "status": status
         })
+        return
 
-    # ================= CLEAR OLD STYLES FOR NON-CARTOON =================
-    else:
-        if context.user_data.get("mode") not in ["cartoon"]:
-            context.user_data["cartoon_style"] = None
-
-    # ================= Проверка очереди и лимитов =================
-    mode = context.user_data.get("mode", "image")
-    queue_map = {
-        "image": generation_queue_image,
-        "video": generation_queue_video,
-        "cartoon": generation_queue_video,
-        "music": generation_queue_music
-    }
-
-    logging.info(f"📥 Enqueue job for user {user_id}, mode {mode}, queue size before: {queue_map.get(mode).qsize()}")
-
-    if user_id in active_generations:
-        logging.info(f"⚠ User {user_id} already has an active job, skipping enqueue")
-    else:
-        last_prompt = context.user_data.get("last_prompt")
-        last_images = context.user_data.get("last_images", [])
-
-        if mode in ["video", "cartoon"] and not last_prompt and not last_images:
-            await query.message.reply_text("⚠️ Пустой запрос для видео/мультфильма")
-            return
-
-        allowed, msg = check_user_generation_limit(user_id)
-        if not allowed:
-            await query.message.reply_text(msg)
-            return
-
-        if not last_prompt and not last_images:
-            await query.message.reply_text("⚠️ Сначала отправь текст или фото")
-            return
-
-        safe_prompt = last_prompt
-        if mode in ["video", "cartoon"] and last_prompt:
-            safe_prompt = clean_prompt(last_prompt)
-
-        job = {
-            "update": update,
-            "context": context,
-            "prompt": safe_prompt,
-            "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),
-            "images": last_images,
-            "user_id": user_id,
-            "mode": mode
-        }
-
-        lock_user_generation(user_id)
-        await queue_map.get(mode, generation_queue_image).put(job)
-        logging.info(f"✅ Job enqueued for user {user_id}, mode {mode}, queue size now: {queue_map.get(mode).qsize()}")
+    # ================= CLEAR OLD STYLES =================
+    if context.user_data.get("mode") not in ["cartoon"]:
+        context.user_data["cartoon_style"] = None
         
 
 # ================= PHOTO / TEXT HANDLERS =================
@@ -1545,6 +1503,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= COMMANDS =================
 
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
     context.user_data["mode"] = "video"
     context.user_data["cartoon_style"] = None  # ✅ сброс старого стиля мультфильма
     await update.message.reply_text(
@@ -1571,7 +1530,8 @@ async def cartoon(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🧪 RickMorty", callback_data="cartoon_rickmorty")
         ]
     ])
-
+    
+    context.user_data.clear()
     context.user_data["mode"] = "cartoon"
     await update.message.reply_text(
         "🎨 Выберите стиль мультфильма:",
