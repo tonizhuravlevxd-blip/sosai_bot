@@ -9,6 +9,49 @@ import aiohttp
 import json
 import io
 
+
+from fastapi import FastAPI, Request
+import uvicorn
+
+web_app = FastAPI()
+
+
+@web_app.post("/yookassa-webhook")
+async def yookassa_webhook(request: Request):
+    data = await request.json()
+
+    try:
+        event = data.get("event")
+        payment = data.get("object", {})
+
+        if event == "payment.succeeded":
+            user_id = int(payment["metadata"]["user_id"])
+
+            premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    UPDATE users 
+                    SET premium = 1,
+                        premium_until = $1
+                    WHERE user_id = $2
+                    """,
+                    premium_until,
+                    user_id
+                )
+
+            # уведомление
+            await app.bot.send_message(
+                chat_id=user_id,
+                text="🍩 Оплата прошла успешно! Premium активирован."
+            )
+
+    except Exception as e:
+        print("Webhook error:", e)
+
+    return {"status": "ok"}
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool = None
 
@@ -1704,6 +1747,20 @@ async def post_init(app):
 app.post_init = post_init
 
 
+async def main():
+    config = uvicorn.Config(web_app, host="0.0.0.0", port=8000)
+    server = uvicorn.Server(config)
+
+    asyncio.create_task(server.serve())
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    await asyncio.Event().wait()
+
+
 if __name__ == "__main__":
     print("🚀 Бот запущен")
-    app.run_polling(drop_pending_updates=True)
+    asyncio.run(main())
+    
+    
