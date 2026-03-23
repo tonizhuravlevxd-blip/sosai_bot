@@ -9,11 +9,15 @@ import aiohttp
 import json
 import io
 
+from telegram.ext import PreCheckoutQueryHandler
+
 from yookassa import Configuration, Payment
 
 Configuration.account_id = os.getenv("YOOKASSA_SHOP_ID")
 Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
 
+
+import uuid
 
 async def create_payment(user_id):
     payment = Payment.create({
@@ -30,7 +34,7 @@ async def create_payment(user_id):
         "metadata": {
             "user_id": str(user_id)
         }
-    })
+    }, uuid.uuid4())
 
     return payment.confirmation.confirmation_url
 
@@ -1131,6 +1135,21 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def ensure_premium_sync(user_id):
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT premium, premium_until FROM users WHERE user_id=$1",
+            user_id
+        )
+
+        if not user:
+            return False
+
+        if user["premium"] == 1 and user["premium_until"] > int(time.time()):
+            return True
+
+        return False
+
 # ================= PAYMENT SUCCESS =================
 async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1150,8 +1169,7 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
         )
 
     await update.message.reply_text(
-        "🍩 Поздравляем!\n\n"
-        "Вы получили Пончик-статус Premium на 30 дней!"
+        "🍩 Оплата прошла успешно!\n\nPremium активирован на 30 дней 🚀"
     )
 
 # ================= IMPORTS =================
@@ -1472,6 +1490,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = await get_user(user_id)
+    premium_active = await ensure_premium_sync(user_id)
     if not user:
         await message.reply_text("⚠ Ошибка пользователя. Напишите /start")
         return
@@ -1482,7 +1501,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     used_videos = user["video_count"]
     bonus = user["bonus_images"]
 
-    if is_premium(user):
+    if premium_active:
         remaining_images = PREMIUM_IMAGE_LIMIT - used_images
         video_limit = PREMIUM_VIDEO_LIMIT
     else:
