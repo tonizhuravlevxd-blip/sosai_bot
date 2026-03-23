@@ -35,7 +35,7 @@ async def create_payment(user_id: int, amount: float = 500.00):
         },
         "confirmation": {
             "type": "redirect",
-            "return_url": "https://t.me/YOUR_BOT_USERNAME"  # ссылка, куда вернется после оплаты
+            "return_url": "https://t.me/Sosai_uu_bot"  # ссылка, куда вернется после оплаты
         },
         "capture": True,
         "description": "Premium доступ",
