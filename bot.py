@@ -9,7 +9,7 @@ import aiohttp
 import json
 import io
 
-
+telegram_app = None
 from yookassa import Configuration, Payment
 
 Configuration.account_id = os.getenv("YOOKASSA_SHOP_ID")
@@ -46,35 +46,55 @@ web_app = FastAPI()
 async def yookassa_webhook(request: Request):
     data = await request.json()
 
+    # ❗ защита от мусора / подделки
+    if "object" not in data:
+        return {"status": "ignored"}
+
     try:
         event = data.get("event")
         payment = data.get("object", {})
 
-        if event == "payment.succeeded":
-            user_id = int(payment["metadata"]["user_id"])
+        # интересует только успешная оплата
+        if event != "payment.succeeded":
+            return {"status": "ignored"}
 
-            premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+        user_id = int(payment["metadata"]["user_id"])
+        payment_id = payment["id"]
 
-            async with db_pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    UPDATE users 
-                    SET premium = 1,
-                        premium_until = $1
-                    WHERE user_id = $2
-                    """,
-                    premium_until,
-                    user_id
-                )
+        premium_until = int(time.time()) + (30 * 24 * 60 * 60)
 
-            # уведомление
-            await app.bot.send_message(
-                chat_id=user_id,
-                text="🍩 Оплата прошла успешно! Premium активирован."
+        async with db_pool.acquire() as conn:
+
+            # ❗ защита от двойного webhook
+            existing = await conn.fetchval(
+                "SELECT last_payment_id FROM users WHERE user_id=$1",
+                user_id
             )
 
+            if existing == payment_id:
+                return {"status": "duplicate"}
+
+            await conn.execute(
+                """
+                UPDATE users 
+                SET premium = 1,
+                    premium_until = $1,
+                    last_payment_id = $2
+                WHERE user_id = $3
+                """,
+                premium_until,
+                payment_id,
+                user_id
+            )
+
+        # уведомление пользователя
+        await app.bot.send_message(
+            chat_id=user_id,
+            text="🍩 Оплата прошла успешно! Premium активирован."
+        )
+
     except Exception as e:
-        print("Webhook error:", e)
+        logging.error(f"Webhook error: {e}")
 
     return {"status": "ok"}
 
@@ -222,7 +242,6 @@ def get_queue_position():
 
 # ================= DATABASE =================
 
-db_pool = None
 
 async def init_db():
     global db_pool
@@ -232,6 +251,11 @@ async def init_db():
 
     # Создаем таблицы, если их нет
     async with db_pool.acquire() as conn:
+
+        await conn.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS last_payment_id TEXT
+        """)
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -1028,7 +1052,9 @@ async def handle_generation_job(job):
         logging.error(f"❌ HANDLE ERROR: {e}")
 
     finally:
-        active_generations.discard(user_id)
+        if user_id in active_generations:
+            active_generations.discard(user_id)
+
         unlock_user_generation(user_id)
         logging.info(f"🧹 CLEANUP user {user_id}")
 # ================== WORKERS ==================
@@ -1766,7 +1792,8 @@ app.post_init = post_init
 async def main():
     config = uvicorn.Config(web_app, host="0.0.0.0", port=8000)
     server = uvicorn.Server(config)
-
+    global telegram_app
+    telegram_app = app
     asyncio.create_task(server.serve())
     await app.initialize()
     await app.start()
