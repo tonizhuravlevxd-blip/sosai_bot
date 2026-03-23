@@ -19,7 +19,7 @@ Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
 
 import uuid
 
-async def create_payment(user_id):
+async def create_payment(user_id: int):
     payment = Payment.create({
         "amount": {
             "value": "100.00",
@@ -31,6 +31,9 @@ async def create_payment(user_id):
         },
         "capture": True,
         "description": f"Покупка премиума для user {user_id}",
+        "metadata": {  # <--- вот здесь добавляем user_id
+            "user_id": str(user_id)
+        },
         "receipt": {
             "customer": {
                 "email": f"user{user_id}@example.com"
@@ -44,8 +47,8 @@ async def create_payment(user_id):
                         "currency": "RUB"
                     },
                     "vat_code": 1,
-                    "payment_mode": "full_payment",  # способ расчета
-                    "payment_subject": "service"     # тип товара/услуги
+                    "payment_mode": "full_payment",
+                    "payment_subject": "service"
                 }
             ]
         }
