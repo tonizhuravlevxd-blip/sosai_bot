@@ -875,9 +875,7 @@ async def handle_generation_job(job):
             premium = is_premium(user)
 
             if mode in ["video", "cartoon"]:
-
                 if not premium:
-
                     video_used = user.get("video_count", 0)
                     paid_video = user.get("paid_video", 0)
 
@@ -905,16 +903,19 @@ async def handle_generation_job(job):
                     InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
                 )
 
+                model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
+
                 text_map = {
-                    "image": "🎨 Генерация изображения...",
-                    "video": "🎬 Генерация видео...",
-                    "cartoon": "🎬 Генерация мультфильма...",
-                    "music": "🎵 Генерация музыки..."
+                    "image": f"🎨 Шедевр создает <b>{model_name}</b>...",
+                    "video": "🎬 Генерация видео... 0%",
+                    "cartoon": "🎬 Генерация мультфильма... 0%",
+                    "music": "🎵 Генерация музыки... 0%"
                 }
 
                 status = await msg.reply_text(
                     text_map.get(mode, "⏳ Генерация..."),
-                    reply_markup=cancel_button
+                    reply_markup=cancel_button,
+                    parse_mode="HTML"
                 )
 
             images_local = images[:MAX_INPUT_IMAGES]
@@ -976,9 +977,19 @@ async def handle_generation_job(job):
             # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
 
-                upload_task = asyncio.create_task(
-                    fake_photo_upload(context.bot, update.effective_chat.id)
-                )
+                progress = 0
+
+                async def progress_updater():
+                    nonlocal progress
+                    while progress < 90:
+                        progress += 10
+                        try:
+                            await status.edit_text(f"🎬 Генерация видео... {progress}%")
+                        except:
+                            pass
+                        await asyncio.sleep(3)
+
+                progress_task = asyncio.create_task(progress_updater())
 
                 try:
                     result_bytes = await asyncio.wait_for(
@@ -986,7 +997,8 @@ async def handle_generation_job(job):
                         timeout=600
                     )
                 finally:
-                    upload_task.cancel()
+                    progress = 100
+                    progress_task.cancel()
 
                 try:
                     await status.delete()
@@ -1053,10 +1065,32 @@ async def handle_generation_job(job):
                         await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
                 else:
-                    result = await asyncio.wait_for(fal_music_generate(prompt), timeout=360)
+                    progress = 0
+
+                    async def progress_updater():
+                        nonlocal progress
+                        while progress < 90:
+                            progress += 15
+                            try:
+                                await status.edit_text(f"🎵 Генерация музыки... {progress}%")
+                            except:
+                                pass
+                            await asyncio.sleep(2)
+
+                    progress_task = asyncio.create_task(progress_updater())
+
+                    try:
+                        result = await asyncio.wait_for(
+                            fal_music_generate(prompt),
+                            timeout=360
+                        )
+                    finally:
+                        progress = 100
+                        progress_task.cancel()
 
                     try:
                         if status:
+                            await status.edit_text("✅ Готово 100%")
                             await status.delete()
                     except:
                         pass
