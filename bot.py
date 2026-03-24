@@ -19,10 +19,19 @@ Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
 
 import uuid
 
-async def create_payment(user_id: int, payment_type: str, amount: str):
+async def create_payment(user_id: int, payment_type="premium", price=100):
+
+    description_map = {
+        "premium": "Премиум на месяц",
+        "video": "Покупка 1 видео",
+        "music": "Покупка 1 трека"
+    }
+
+    description = description_map.get(payment_type, "Покупка")
+
     payment = Payment.create({
         "amount": {
-            "value": amount,
+            "value": f"{price:.2f}",
             "currency": "RUB"
         },
         "confirmation": {
@@ -30,10 +39,28 @@ async def create_payment(user_id: int, payment_type: str, amount: str):
             "return_url": "https://t.me/Sosai_uu_bot"
         },
         "capture": True,
-        "description": f"{payment_type} для user {user_id}",
+        "description": f"{description} для user {user_id}",
         "metadata": {
             "user_id": str(user_id),
-            "type": payment_type   # 🔥 КЛЮЧЕВОЕ
+            "type": payment_type
+        },
+        "receipt": {
+            "customer": {
+                "email": f"user{user_id}@example.com"
+            },
+            "items": [
+                {
+                    "description": description,
+                    "quantity": "1.00",
+                    "amount": {
+                        "value": f"{price:.2f}",
+                        "currency": "RUB"
+                    },
+                    "vat_code": 1,
+                    "payment_mode": "full_payment",
+                    "payment_subject": "service"
+                }
+            ]
         }
     })
 
