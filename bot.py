@@ -1521,7 +1521,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "images": images,
             "user_id": user_id,
             "mode": mode,
-            "status": status
+            "status": None
         })
         return
 
