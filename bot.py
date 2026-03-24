@@ -19,10 +19,10 @@ Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
 
 import uuid
 
-async def create_payment(user_id: int):
+async def create_payment(user_id: int, payment_type: str, amount: str):
     payment = Payment.create({
         "amount": {
-            "value": "100.00",
+            "value": amount,
             "currency": "RUB"
         },
         "confirmation": {
@@ -30,29 +30,13 @@ async def create_payment(user_id: int):
             "return_url": "https://t.me/Sosai_uu_bot"
         },
         "capture": True,
-        "description": f"Покупка премиума для user {user_id}",
-        "metadata": {  # <--- вот здесь добавляем user_id
-            "user_id": str(user_id)
-        },
-        "receipt": {
-            "customer": {
-                "email": f"user{user_id}@example.com"
-            },
-            "items": [
-                {
-                    "description": "Премиум на месяц",
-                    "quantity": "1.00",
-                    "amount": {
-                        "value": "100.00",
-                        "currency": "RUB"
-                    },
-                    "vat_code": 1,
-                    "payment_mode": "full_payment",
-                    "payment_subject": "service"
-                }
-            ]
+        "description": f"{payment_type} для user {user_id}",
+        "metadata": {
+            "user_id": str(user_id),
+            "type": payment_type   # 🔥 КЛЮЧЕВОЕ
         }
     })
+
     return payment.confirmation.confirmation_url
 
 
@@ -94,6 +78,10 @@ FREE_VIDEO_LIMIT = 3
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
+# ================= PRICES =================
+PRICE_VIDEO = "50.00"
+PRICE_MUSIC = "30.00"
+PRICE_CARTOON = "50.00"
 
 PREMIUM_IMAGE_LIMIT = 200
 PREMIUM_VIDEO_LIMIT = 20
@@ -200,7 +188,6 @@ def get_queue_position():
 
 # ================= DATABASE =================
 
-
 async def init_db():
     global db_pool
 
@@ -210,10 +197,6 @@ async def init_db():
     # Создаем таблицы, если их нет
     async with db_pool.acquire() as conn:
 
-        await conn.execute("""
-        ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS last_payment_id TEXT
-        """)
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -226,13 +209,36 @@ async def init_db():
             ref_by BIGINT,
             is_active INTEGER DEFAULT 0,
             premium INTEGER DEFAULT 0,
-            premium_until BIGINT DEFAULT 0
+            premium_until BIGINT DEFAULT 0,
+            last_payment_id TEXT,
+            music_count INTEGER DEFAULT 0,
+
+            -- ✅ ПОКУПКИ
+            paid_video INTEGER DEFAULT 0,
+            paid_music INTEGER DEFAULT 0
         )
         """)
-                # ✅ ДОБАВЬ ВОТ ЭТО
+
+        # ===== Старые ALTER (оставил как у тебя) =====
+        await conn.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS last_payment_id TEXT
+        """)
+
         await conn.execute("""
         ALTER TABLE users 
         ADD COLUMN IF NOT EXISTS music_count INTEGER DEFAULT 0
+        """)
+
+        # ===== ✅ НОВОЕ: покупки =====
+        await conn.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS paid_video INTEGER DEFAULT 0
+        """)
+
+        await conn.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS paid_music INTEGER DEFAULT 0
         """)
 
         await conn.execute("""
@@ -837,16 +843,32 @@ async def handle_generation_job(job):
             await reset_week_if_needed(user)
 
             # ===== лимиты видео/мультфильма =====
+            premium = is_premium(user)
+
             if mode in ["video", "cartoon"]:
-                video_used = user.get("video_count", 0)
-                if video_used >= FREE_VIDEO_LIMIT:
-                    try:
-                        if status:
-                            await status.delete()
-                    except:
-                        pass
-                    await msg.reply_text("🎬 Лимит видео/мультфильма на неделю исчерпан.")
-                    return
+
+                if not premium:
+
+                    video_used = user.get("video_count", 0)
+                    paid_video = user.get("paid_video", 0)
+
+                    if video_used >= 1 and paid_video <= 0:
+                        keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("💳 Купить 1 видео (50₽)", callback_data="buy_video")],
+                            [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
+                        ])
+                        await msg.reply_text(
+                            "🎬 Бесплатный лимит закончился",
+                            reply_markup=keyboard
+                        )
+                        return
+
+                    # если купил разово → списываем
+                    if paid_video > 0:
+                        async with db_pool.acquire() as conn:
+                            await conn.execute("""
+                                UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1
+                            """, user_id)
 
             # ===== СТАТУС =====
             if status is None:
@@ -954,6 +976,27 @@ async def handle_generation_job(job):
 
             # ================= MUSIC =================
             elif mode == "music":
+                premium = is_premium(user)
+
+                if not premium:
+                    paid_music = user.get("paid_music", 0)
+
+                    if paid_music <= 0:
+                        keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("💳 Купить трек (30₽)", callback_data="buy_music")],
+                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                        ])
+                        await msg.reply_text(
+                            "🎵 Нужна оплата для генерации музыки",
+                            reply_markup=keyboard
+                        )
+                        return
+
+                    # списываем
+                    async with db_pool.acquire() as conn:
+                        await conn.execute("""
+                            UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1
+                        """, user_id)
 
                 cached_audio_url = await get_cached_music(prompt)
                 chat_id = update.effective_chat.id
@@ -1240,16 +1283,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             need_shipping_address=False,
             is_flexible=False
         )
-        return  # ✅ ФИКС
+        return
 
     elif data == "buy_spb":
         pay_url = await create_payment(user_id)
 
         await query.message.reply_text(
-        f"💳 Оплата через ЮKassa\n\n"
-        f"Перейдите и оплатите:\n{pay_url}"
-    )
-        return  # ✅ ФИКС
+            f"💳 Оплата через ЮKassa\n\n"
+            f"Перейдите и оплатите:\n{pay_url}"
+        )
+        return
 
     elif data == "finish":
         context.user_data.clear()
@@ -1277,7 +1320,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= MODE / MODEL =================
     elif data in ["model_banana1", "model_banana2"]:
-        context.user_data["model"] = "banana1" if data=="model_banana1" else "banana2"
+        context.user_data["model"] = "banana1" if data == "model_banana1" else "banana2"
         context.user_data["mode"] = "image"
         context.user_data["cartoon_style"] = None
         context.user_data["last_prompt"] = None
@@ -1311,11 +1354,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["cartoon_style"] = None
         context.user_data["last_prompt"] = None
         context.user_data["last_images"] = []
+
         await query.message.reply_text(
             "🎵 Напишите тему песни\n\n"
             "Пример:\n"
             "emotional pop song about lost love"
         )
+        return
+
+    elif data == "buy_video":
+        url = await create_payment(user_id, "video", PRICE_VIDEO)
+        await query.message.reply_text(f"💳 Оплата видео:\n{url}")
+        return
+
+    elif data == "buy_music":
+        url = await create_payment(user_id, "music", PRICE_MUSIC)
+        await query.message.reply_text(f"💳 Оплата музыки:\n{url}")
         return
 
     # ================= CARTOON STYLES =================
