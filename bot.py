@@ -972,22 +972,42 @@ async def handle_generation_job(job):
                 except:
                     pass
 
-                await msg.reply_photo(photo=result)
+                keyboard = InlineKeyboardMarkup([
+    [
+        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
+    ],
+    [
+        InlineKeyboardButton("❌ Закончить", callback_data="finish")
+    ]
+])
+
+await msg.reply_photo(
+    photo=result,
+    reply_markup=keyboard
+)
 
             # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
 
-                progress = 0
-
                 async def progress_updater():
-                    nonlocal progress
-                    while progress < 90:
-                        progress += 10
-                        try:
-                            await status.edit_text(f"🎬 Генерация видео... {progress}%")
-                        except:
-                            pass
-                        await asyncio.sleep(3)
+    pct = 0
+    last_text = ""
+    try:
+        while True:
+            await asyncio.sleep(1)  # ✅ как во втором коде
+            pct = min(pct + 10, 100)
+
+            new_text = f"🎬 Генерация видео... {pct}%"
+
+            if new_text != last_text:
+                try:
+                    await status.edit_text(new_text)
+                    last_text = new_text
+                except:
+                    pass
+    except asyncio.CancelledError:
+        pass
 
                 progress_task = asyncio.create_task(progress_updater())
 
@@ -1065,17 +1085,24 @@ async def handle_generation_job(job):
                         await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
                 else:
-                    progress = 0
-
                     async def progress_updater():
-                        nonlocal progress
-                        while progress < 90:
-                            progress += 15
-                            try:
-                                await status.edit_text(f"🎵 Генерация музыки... {progress}%")
-                            except:
-                                pass
-                            await asyncio.sleep(2)
+    pct = 0
+    last_text = ""
+    try:
+        while True:
+            await asyncio.sleep(1)  # ✅ одинаковый интервал
+            pct = min(pct + 10, 100)
+
+            new_text = f"🎵 Генерация музыки... {pct}%"
+
+            if new_text != last_text:
+                try:
+                    await status.edit_text(new_text)
+                    last_text = new_text
+                except:
+                    pass
+    except asyncio.CancelledError:
+        pass
 
                     progress_task = asyncio.create_task(progress_updater())
 
