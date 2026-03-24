@@ -21,6 +21,8 @@ import uuid
 
 async def create_payment(user_id: int, payment_type="premium", price=100):
 
+    price = float(price)  # ✅ фикс
+
     description_map = {
         "premium": "Премиум на месяц",
         "video": "Покупка 1 видео",
