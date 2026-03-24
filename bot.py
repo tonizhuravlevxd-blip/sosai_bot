@@ -905,10 +905,10 @@ async def handle_generation_job(job):
                 model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
 
                 text_map = {
-                    "image": f"🎨 Шедевр создает <b>{model_name}</b>...",
-                    "video": "🎬 Генерация видео... 0%",
-                    "cartoon": "🎬 Генерация мультфильма... 0%",
-                    "music": "🎵 Генерация музыки... 0%"
+                    "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
+                    "video": "<pre>🎬 Генерация видео... 0%</pre>",
+                    "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
+                    "music": "<pre>🎵 Генерация музыки... 0%</pre>"
                 }
 
                 status = await msg.reply_text(
@@ -954,6 +954,26 @@ async def handle_generation_job(job):
             # ================= IMAGE =================
             if mode == "image":
 
+                async def dots_animation():
+                    dots_list = ["", ".", "..", "..."]
+                    i = 0
+
+                    try:
+                        while True:
+                            dots = dots_list[i % len(dots_list)]
+                            text = f"<pre>🎨 Шедевр создает {model_name}{dots}</pre>"
+                            try:
+                                await status.edit_text(text, parse_mode="HTML")
+                            except:
+                                pass
+                            i += 1
+                            await asyncio.sleep(0.6)
+
+                    except asyncio.CancelledError:
+                        pass
+
+                animation_task = asyncio.create_task(dots_animation())
+
                 upload_task = asyncio.create_task(
                     fake_photo_upload(context.bot, update.effective_chat.id)
                 )
@@ -965,6 +985,7 @@ async def handle_generation_job(job):
                     )
                 finally:
                     upload_task.cancel()
+                    animation_task.cancel()
 
                 try:
                     await status.delete()
@@ -986,13 +1007,12 @@ async def handle_generation_job(job):
                     reply_markup=keyboard
                 )
 
-                # ✅ ДОБАВЬ ВОТ ЭТО
+                # ✅ СОХРАНЕНИЕ ДАННЫХ
                 context.user_data["last_prompt"] = prompt
                 context.user_data["last_images"] = images_local
 
             # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
-
                 async def progress_updater():
                     pct = 0
                     last_text = ""
@@ -1000,9 +1020,7 @@ async def handle_generation_job(job):
                         while True:
                             await asyncio.sleep(1)
                             pct = min(pct + 10, 100)
-
                             new_text = f"🎬 Генерация видео... {pct}%"
-
                             if new_text != last_text:
                                 try:
                                     await status.edit_text(new_text)
@@ -1020,7 +1038,6 @@ async def handle_generation_job(job):
                         timeout=600
                     )
                 finally:
-                    progress = 100
                     progress_task.cancel()
 
                 try:
@@ -1044,7 +1061,6 @@ async def handle_generation_job(job):
 
                 if not premium:
                     paid_music = user.get("paid_music", 0)
-
                     if paid_music <= 0:
                         keyboard = InlineKeyboardMarkup([
                             [InlineKeyboardButton("💳 Купить трек (30₽)", callback_data="buy_music")],
@@ -1094,9 +1110,7 @@ async def handle_generation_job(job):
                             while True:
                                 await asyncio.sleep(1)
                                 pct = min(pct + 10, 100)
-
                                 new_text = f"🎵 Генерация музыки... {pct}%"
-
                                 if new_text != last_text:
                                     try:
                                         await status.edit_text(new_text)
@@ -1114,7 +1128,6 @@ async def handle_generation_job(job):
                             timeout=360
                         )
                     finally:
-                        progress = 100
                         progress_task.cancel()
 
                     try:
@@ -1521,7 +1534,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "images": images,
             "user_id": user_id,
             "mode": mode,
-            "status": None
+            "status": status
         })
         return
 
