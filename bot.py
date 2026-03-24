@@ -890,7 +890,6 @@ async def handle_generation_job(job):
                         )
                         return
 
-                    # если купил разово → списываем
                     if paid_video > 0:
                         async with db_pool.acquire() as conn:
                             await conn.execute("""
@@ -973,41 +972,45 @@ async def handle_generation_job(job):
                     pass
 
                 keyboard = InlineKeyboardMarkup([
-    [
-        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
-    ],
-    [
-        InlineKeyboardButton("❌ Закончить", callback_data="finish")
-    ]
-])
+                    [
+                        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
+                    ],
+                    [
+                        InlineKeyboardButton("❌ Закончить", callback_data="finish")
+                    ]
+                ])
 
-await msg.reply_photo(
-    photo=result,
-    reply_markup=keyboard
-)
+                await msg.reply_photo(
+                    photo=result,
+                    reply_markup=keyboard
+                )
+
+                # ✅ ДОБАВЬ ВОТ ЭТО
+                context.user_data["last_prompt"] = prompt
+                context.user_data["last_images"] = images_local
 
             # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
 
                 async def progress_updater():
-    pct = 0
-    last_text = ""
-    try:
-        while True:
-            await asyncio.sleep(1)  # ✅ как во втором коде
-            pct = min(pct + 10, 100)
+                    pct = 0
+                    last_text = ""
+                    try:
+                        while True:
+                            await asyncio.sleep(1)
+                            pct = min(pct + 10, 100)
 
-            new_text = f"🎬 Генерация видео... {pct}%"
+                            new_text = f"🎬 Генерация видео... {pct}%"
 
-            if new_text != last_text:
-                try:
-                    await status.edit_text(new_text)
-                    last_text = new_text
-                except:
-                    pass
-    except asyncio.CancelledError:
-        pass
+                            if new_text != last_text:
+                                try:
+                                    await status.edit_text(new_text)
+                                    last_text = new_text
+                                except:
+                                    pass
+                    except asyncio.CancelledError:
+                        pass
 
                 progress_task = asyncio.create_task(progress_updater())
 
@@ -1053,7 +1056,6 @@ await msg.reply_photo(
                         )
                         return
 
-                    # списываем
                     async with db_pool.acquire() as conn:
                         await conn.execute("""
                             UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1
@@ -1086,23 +1088,23 @@ await msg.reply_photo(
 
                 else:
                     async def progress_updater():
-    pct = 0
-    last_text = ""
-    try:
-        while True:
-            await asyncio.sleep(1)  # ✅ одинаковый интервал
-            pct = min(pct + 10, 100)
+                        pct = 0
+                        last_text = ""
+                        try:
+                            while True:
+                                await asyncio.sleep(1)
+                                pct = min(pct + 10, 100)
 
-            new_text = f"🎵 Генерация музыки... {pct}%"
+                                new_text = f"🎵 Генерация музыки... {pct}%"
 
-            if new_text != last_text:
-                try:
-                    await status.edit_text(new_text)
-                    last_text = new_text
-                except:
-                    pass
-    except asyncio.CancelledError:
-        pass
+                                if new_text != last_text:
+                                    try:
+                                        await status.edit_text(new_text)
+                                        last_text = new_text
+                                    except:
+                                        pass
+                        except asyncio.CancelledError:
+                            pass
 
                     progress_task = asyncio.create_task(progress_updater())
 
