@@ -896,21 +896,30 @@ async def handle_generation_job(job):
                                 UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1
                             """, user_id)
 
-            # ===== СТАТУС =====
-            if status is None:
-                cancel_button = InlineKeyboardMarkup.from_button(
-                    InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
-                )
+                        # ===== СТАТУС =====
+            cancel_button = InlineKeyboardMarkup.from_button(
+                InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+            )
 
-                model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
+            model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
 
-                text_map = {
-                    "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
-                    "video": "<pre>🎬 Генерация видео... 0%</pre>",
-                    "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
-                    "music": "<pre>🎵 Генерация музыки... 0%</pre>"
-                }
+            text_map = {
+                "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
+                "video": "<pre>🎬 Генерация видео... 0%</pre>",
+                "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
+                "music": "<pre>🎵 Генерация музыки... 0%</pre>"
+            }
 
+            if status:
+                try:
+                    await status.edit_text(
+                        text_map.get(mode, "⏳ Генерация..."),
+                        reply_markup=cancel_button,
+                        parse_mode="HTML"
+                    )
+                except:
+                    pass
+            else:
                 status = await msg.reply_text(
                     text_map.get(mode, "⏳ Генерация..."),
                     reply_markup=cancel_button,
@@ -1707,6 +1716,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await message.reply_text(
         f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
     )
+    lock_user_generation(user_id)
 
     await queue_map.get(mode, generation_queue_image).put({
         "update": update,
