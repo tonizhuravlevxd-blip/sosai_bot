@@ -1001,6 +1001,12 @@ async def handle_generation_job(job):
                 except:
                     pass
 
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET image_count = image_count + 1 WHERE user_id=$1",
+                        user_id
+                    )
+
                 keyboard = InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
@@ -1053,6 +1059,12 @@ async def handle_generation_job(job):
                     await status.delete()
                 except:
                     pass
+
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                        user_id
+                    )
 
                 result_file = io.BytesIO(result_bytes)
                 result_file.name = "video.mp4"
@@ -1151,6 +1163,12 @@ async def handle_generation_job(job):
                             audio_bytes = await resp.read()
 
                     await save_music_cache(prompt, result)
+
+                    async with db_pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE users SET music_count = music_count + 1 WHERE user_id=$1",
+                            user_id
+                    )
 
                     audio_file = io.BytesIO(audio_bytes)
                     ext = result.split(".")[-1]
@@ -1782,35 +1800,70 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = await get_user(tg_user.id)
 
-    used = user["image_count"]
+    if not user:
+        await update.message.reply_text("⚠ Ошибка пользователя. Напишите /start")
+        return
+
+    # ===== ТЕКУЩИЕ СЧЁТЧИКИ =====
+    used_images = user["image_count"]
+    used_videos = user["video_count"]
+    used_music = user.get("music_count", 0)
+
     bonus = user["bonus_images"]
 
-    remaining = FREE_LIMIT + bonus - used
+    paid_video = user.get("paid_video", 0)
+    paid_music = user.get("paid_music", 0)
 
-    # ✅ Статус премиума
-    premium_active = user.get("premium", 0) == 1 and user.get("premium_until", 0) > int(time.time())
+    # ===== ПРЕМИУМ =====
+    premium_active = (
+        user.get("premium", 0) == 1
+        and user.get("premium_until", 0) > int(time.time())
+    )
+
     premium_status = "🍩 Пончик-Премиум ЕСТЬ" if premium_active else "❌ Премиум нет"
+
+    # ===== РАСЧЁТ ЛИМИТОВ =====
+    if premium_active:
+        remaining_images = PREMIUM_IMAGE_LIMIT - used_images
+        remaining_videos = PREMIUM_VIDEO_LIMIT - used_videos
+        remaining_music = PREMIUM_MUSIC_LIMIT - used_music
+    else:
+        remaining_images = FREE_LIMIT + bonus - used_images
+        remaining_videos = FREE_VIDEO_LIMIT - used_videos
+        remaining_music = 0  # бесплатно музыки нет
+
+    # защита от минусов
+    remaining_images = max(0, remaining_images)
+    remaining_videos = max(0, remaining_videos)
+    remaining_music = max(0, remaining_music)
 
     keyboard = None
 
-    # ✅ Кнопка только для админа
+    # ===== КНОПКА АДМИНА =====
     if tg_user.id == ADMIN_ID:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
         ])
 
-    # ✅ Формируем текст профиля
+    # ===== ТЕКСТ ПРОФИЛЯ =====
     profile_text = (
         f"👤 Профиль\n\n"
         f"🆔 ID: {tg_user.id}\n"
         f"👤 Username: @{tg_user.username}\n\n"
+
+        f"📸 Изображения осталось: {remaining_images}\n"
+        f"🎬 Видео осталось: {remaining_videos}\n"
+        f"🎵 Музыка осталось: {remaining_music}\n\n"
+
+        f"💳 Куплено видео: {paid_video}\n"
+        f"💳 Куплено музыки: {paid_music}\n\n"
+
         f"🎁 Бонусы: {bonus}\n"
-        f"📦 Доступно: {remaining}\n"
-        f"👥 Рефералов: {user['referrals']}\n"
+        f"👥 Рефералов: {user['referrals']}\n\n"
+
         f"🍩 Статус: {premium_status}"
     )
 
-    # ✅ Отправка без parse_mode, чтобы не было ошибок
     await update.message.reply_text(
         profile_text,
         reply_markup=keyboard,
