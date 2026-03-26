@@ -2030,11 +2030,11 @@ async def post_init(app):
     global generation_queue
     generation_queue = asyncio.Queue(maxsize=10000)
 
-    for _ in range(5):
+    for _ in range(10):
         asyncio.create_task(image_worker())
-    for _ in range(2):
+    for _ in range(4):
         asyncio.create_task(video_worker())
-    for _ in range(1):
+    for _ in range(2):
         asyncio.create_task(music_worker())
 
     asyncio.create_task(cache_cleaner())
