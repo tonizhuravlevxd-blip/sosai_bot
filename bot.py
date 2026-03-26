@@ -823,6 +823,7 @@ semaphore_video = asyncio.Semaphore(2)
 semaphore_music = asyncio.Semaphore(3)
 
 async def handle_generation_job(job):
+
     update = job["update"]
     context = job["context"]
     prompt = job.get("prompt")
@@ -865,13 +866,78 @@ async def handle_generation_job(job):
 
         async with sem:
 
+            # ===== 🔥 ФИКС ГОНКИ И ЛИМИТОВ =====
+            async with db_lock:
+                async with db_pool.acquire() as conn:
+
+                    user = await conn.fetchrow(
+                        "SELECT * FROM users WHERE user_id=$1 FOR UPDATE",
+                        user_id
+                    )
+
+                    if not user:
+                        return
+
+                    await reset_week_if_needed(user)
+                    premium = is_premium(user)
+
+                    used_images = user["image_count"]
+                    used_videos = user["video_count"]
+                    used_music = user.get("music_count", 0)
+                    bonus = user.get("bonus_images", 0)
+
+                    # ===== IMAGE LIMIT =====
+                    if mode == "image":
+                        if premium:
+                            if used_images >= PREMIUM_IMAGE_LIMIT:
+                                await msg.reply_text("⚠️ Лимит изображений исчерпан")
+                                return
+                        else:
+                            if used_images >= FREE_LIMIT + bonus:
+                                await msg.reply_text("⚠️ Бесплатный лимит изображений закончился")
+                                return
+
+                        await conn.execute(
+                            "UPDATE users SET image_count = image_count + 1 WHERE user_id=$1",
+                            user_id
+                        )
+
+                    # ===== VIDEO LIMIT =====
+                    if mode in ["video", "cartoon"]:
+                        if premium:
+                            if used_videos >= PREMIUM_VIDEO_LIMIT:
+                                await msg.reply_text("⚠️ Лимит видео исчерпан")
+                                return
+                        else:
+                            if used_videos >= FREE_VIDEO_LIMIT:
+                                await msg.reply_text("⚠️ Бесплатный лимит видео закончился")
+                                return
+
+                        await conn.execute(
+                            "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                            user_id
+                        )
+
+                    # ===== MUSIC LIMIT =====
+                    if mode == "music":
+                        if premium:
+                            if used_music >= PREMIUM_MUSIC_LIMIT:
+                                await msg.reply_text("⚠️ Лимит музыки исчерпан")
+                                return
+
+                        await conn.execute(
+                            "UPDATE users SET music_count = music_count + 1 WHERE user_id=$1",
+                            user_id
+                        )
+
+            # ===== ДАЛЬШЕ ТВОЙ КОД =====
+
             user = await get_user(user_id)
             if not user:
                 return
 
             await reset_week_if_needed(user)
 
-            # ===== лимиты видео/мультфильма =====
             premium = is_premium(user)
 
             if mode in ["video", "cartoon"]:
@@ -896,7 +962,6 @@ async def handle_generation_job(job):
                                 UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1
                             """, user_id)
 
-                        # ===== СТАТУС =====
             cancel_button = InlineKeyboardMarkup.from_button(
                 InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
             )
@@ -928,7 +993,6 @@ async def handle_generation_job(job):
 
             images_local = images[:MAX_INPUT_IMAGES]
 
-            # ===== стили =====
             style = ""
             if model == "banana1":
                 style = "cinematic lighting ultra realistic 8k"
@@ -937,7 +1001,6 @@ async def handle_generation_job(job):
 
             cartoon_style = context.user_data.get("cartoon_style")
 
-            # ==== Формирование prompt ====
             if prompt:
                 if mode == "image" and style:
                     prompt = f"{style} {prompt}"
@@ -947,7 +1010,6 @@ async def handle_generation_job(job):
             if prompt:
                 prompt = clean_prompt(prompt)
 
-            # ===== кеширование изображений =====
             cache_key = f"{prompt}_{model}_{size}" if prompt else None
             cached = generation_cache.get(cache_key) if cache_key else None
 
@@ -1001,12 +1063,6 @@ async def handle_generation_job(job):
                 except:
                     pass
 
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET image_count = image_count + 1 WHERE user_id=$1",
-                        user_id
-                    )
-
                 keyboard = InlineKeyboardMarkup([
                     [
                         InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
@@ -1022,7 +1078,6 @@ async def handle_generation_job(job):
                     reply_markup=keyboard
                 )
 
-                # ✅ СОХРАНЕНИЕ ДАННЫХ
                 context.user_data["last_prompt"] = prompt
                 context.user_data["last_images"] = images_local
 
@@ -1059,12 +1114,6 @@ async def handle_generation_job(job):
                     await status.delete()
                 except:
                     pass
-
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
-                        user_id
-                    )
 
                 result_file = io.BytesIO(result_bytes)
                 result_file.name = "video.mp4"
@@ -1163,12 +1212,6 @@ async def handle_generation_job(job):
                             audio_bytes = await resp.read()
 
                     await save_music_cache(prompt, result)
-
-                    async with db_pool.acquire() as conn:
-                        await conn.execute(
-                            "UPDATE users SET music_count = music_count + 1 WHERE user_id=$1",
-                            user_id
-                    )
 
                     audio_file = io.BytesIO(audio_bytes)
                     ext = result.split(".")[-1]
