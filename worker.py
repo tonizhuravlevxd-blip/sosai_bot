@@ -2,6 +2,11 @@ import asyncio
 import json
 import logging
 import os
+import sys
+
+# ================= PATH FIX =================
+# добавляем текущую директорию в sys.path для корректного импорта main.py
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import redis.asyncio as redis
 from telegram import Bot
