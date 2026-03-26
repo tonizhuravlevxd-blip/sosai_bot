@@ -5,14 +5,14 @@ import os
 import sys
 
 # ================= PATH FIX =================
-# добавляем текущую директорию в sys.path для корректного импорта main.py
+# добавляем текущую директорию в sys.path для корректного импорта bot.py
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import redis.asyncio as redis
 from telegram import Bot
 
-# ===== ИМПОРТ ТВОЕЙ ЛОГИКИ =====
-from main import handle_generation_job, init_db
+# ===== ИМПОРТ ТВОЕЙ ЛОГИКИ ИЗ BOT.PY =====
+from bot import handle_generation_job, init_db
 
 logging.basicConfig(level=logging.INFO)
 
