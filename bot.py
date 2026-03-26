@@ -865,74 +865,75 @@ async def handle_generation_job(job):
         elif mode == "music":
             sem = semaphore_music
 
-        
+        # ✅ ВАЖНО: всё внутри try
+        async with GLOBAL_SEMAPHORE:
+            async with sem:
 
-    async with GLOBAL_SEMAPHORE:
-        async with sem:
+                # ===== 🔥 ФИКС ГОНКИ И ЛИМИТОВ =====
+                async with db_lock:
+                    async with db_pool.acquire() as conn:
 
-            # ===== 🔥 ФИКС ГОНКИ И ЛИМИТОВ =====
-            async with db_lock:
-                async with db_pool.acquire() as conn:
-
-                    user = await conn.fetchrow(
-                        "SELECT * FROM users WHERE user_id=$1 FOR UPDATE",
-                        user_id
-                    )
-
-                    if not user:
-                        return
-
-                    await reset_week_if_needed(user)
-                    premium = is_premium(user)
-
-                    used_images = user["image_count"]
-                    used_videos = user["video_count"]
-                    used_music = user.get("music_count", 0)
-                    bonus = user.get("bonus_images", 0)
-
-                    # ===== IMAGE LIMIT =====
-                    if mode == "image":
-                        if premium:
-                            if used_images >= PREMIUM_IMAGE_LIMIT:
-                                await msg.reply_text("⚠️ Лимит изображений исчерпан")
-                                return
-                        else:
-                            if used_images >= FREE_LIMIT + bonus:
-                                await msg.reply_text("⚠️ Бесплатный лимит изображений закончился")
-                                return
-
-                        await conn.execute(
-                            "UPDATE users SET image_count = image_count + 1 WHERE user_id=$1",
+                        user = await conn.fetchrow(
+                            "SELECT * FROM users WHERE user_id=$1 FOR UPDATE",
                             user_id
                         )
 
-                    # ===== VIDEO LIMIT =====
-                    if mode in ["video", "cartoon"]:
-                        if premium:
-                            if used_videos >= PREMIUM_VIDEO_LIMIT:
-                                await msg.reply_text("⚠️ Лимит видео исчерпан")
-                                return
-                        else:
-                            if used_videos >= FREE_VIDEO_LIMIT:
-                                await msg.reply_text("⚠️ Бесплатный лимит видео закончился")
-                                return
+                        if not user:
+                            return
 
-                        await conn.execute(
-                            "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
-                            user_id
-                        )
+                        await reset_week_if_needed(user)
+                        premium = is_premium(user)
 
-                    # ===== MUSIC LIMIT =====
-                    if mode == "music":
-                        if premium:
-                            if used_music >= PREMIUM_MUSIC_LIMIT:
-                                await msg.reply_text("⚠️ Лимит музыки исчерпан")
-                                return
+                        used_images = user["image_count"]
+                        used_videos = user["video_count"]
+                        used_music = user.get("music_count", 0)
+                        bonus = user.get("bonus_images", 0)
 
-                        await conn.execute(
-                            "UPDATE users SET music_count = music_count + 1 WHERE user_id=$1",
-                            user_id
-                        )
+                        # ===== IMAGE LIMIT =====
+                        if mode == "image":
+                            if premium:
+                                if used_images >= PREMIUM_IMAGE_LIMIT:
+                                    await msg.reply_text("⚠️ Лимит изображений исчерпан")
+                                    return
+                            else:
+                                if used_images >= FREE_LIMIT + bonus:
+                                    await msg.reply_text("⚠️ Бесплатный лимит изображений закончился")
+                                    return
+
+                            await conn.execute(
+                                "UPDATE users SET image_count = image_count + 1 WHERE user_id=$1",
+                                user_id
+                            )
+
+                        # ===== VIDEO LIMIT =====
+                        if mode in ["video", "cartoon"]:
+                            if premium:
+                                if used_videos >= PREMIUM_VIDEO_LIMIT:
+                                    await msg.reply_text("⚠️ Лимит видео исчерпан")
+                                    return
+                            else:
+                                if used_videos >= FREE_VIDEO_LIMIT:
+                                    await msg.reply_text("⚠️ Бесплатный лимит видео закончился")
+                                    return
+
+                            await conn.execute(
+                                "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                                user_id
+                            )
+
+                        # ===== MUSIC LIMIT =====
+                        if mode == "music":
+                            if premium:
+                                if used_music >= PREMIUM_MUSIC_LIMIT:
+                                    await msg.reply_text("⚠️ Лимит музыки исчерпан")
+                                    return
+
+                            await conn.execute(
+                                "UPDATE users SET music_count = music_count + 1 WHERE user_id=$1",
+                                user_id
+                            )
+
+                # ===== ДАЛЬШЕ ТВОЙ КОД =====
 
             # ===== ДАЛЬШЕ ТВОЙ КОД =====
 
