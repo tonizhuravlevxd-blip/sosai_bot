@@ -867,8 +867,8 @@ async def handle_generation_job(job):
 
         
 
-        async with GLOBAL_SEMAPHORE:
-            async with sem:
+    async with GLOBAL_SEMAPHORE:
+        async with sem:
 
             # ===== 🔥 ФИКС ГОНКИ И ЛИМИТОВ =====
             async with db_lock:
