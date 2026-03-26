@@ -112,9 +112,9 @@ PRICE_VIDEO = "50.00"
 PRICE_MUSIC = "30.00"
 PRICE_CARTOON = "50.00"
 
-PREMIUM_IMAGE_LIMIT = 200
-PREMIUM_VIDEO_LIMIT = 20
-PREMIUM_MUSIC_LIMIT = 50
+PREMIUM_IMAGE_LIMIT = 20
+PREMIUM_VIDEO_LIMIT = 5
+PREMIUM_MUSIC_LIMIT = 3
 
 USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
@@ -188,7 +188,7 @@ async def cache_cleaner():
 
 db_lock = asyncio.Lock()
 
-RATE_LIMIT_SECONDS = 2
+RATE_LIMIT_SECONDS = 3
 user_last_message = {}
 
 GENERATION_LIMIT = 3
@@ -811,16 +811,17 @@ async def fake_photo_upload(bot, chat_id):
 generation_queue_image = asyncio.Queue(maxsize=5000)
 generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
-generation_semaphore = asyncio.Semaphore(5)  # Ограничение параллельных генераций
+
 
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 active_generations = set()
+GLOBAL_SEMAPHORE = asyncio.Semaphore(20)
 
-semaphore_image = asyncio.Semaphore(5)
-semaphore_video = asyncio.Semaphore(2)
-semaphore_music = asyncio.Semaphore(3)
+semaphore_image = asyncio.Semaphore(6)
+semaphore_video = asyncio.Semaphore(3)
+semaphore_music = asyncio.Semaphore(2)
 
 async def handle_generation_job(job):
 
@@ -864,7 +865,10 @@ async def handle_generation_job(job):
         elif mode == "music":
             sem = semaphore_music
 
-        async with sem:
+        
+
+        async with GLOBAL_SEMAPHORE:
+            async with sem:
 
             # ===== 🔥 ФИКС ГОНКИ И ЛИМИТОВ =====
             async with db_lock:
