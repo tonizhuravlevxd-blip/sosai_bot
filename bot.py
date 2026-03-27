@@ -164,6 +164,7 @@ def unlock_user_generation(user_id):
 
 
 # ================= CACHE CLEANER =================
+MAX_CACHE_SIZE = 500
 
 async def cache_cleaner():
 
@@ -174,6 +175,7 @@ async def cache_cleaner():
         now = time.time()
         remove_keys = []
 
+        # Удаляем устаревшие элементы
         for k, v in generation_cache.items():
             if now - v["time"] > CACHE_TIME:
                 remove_keys.append(k)
@@ -181,8 +183,12 @@ async def cache_cleaner():
         for k in remove_keys:
             del generation_cache[k]
 
-        gc.collect()
+        # ===== Ограничение максимального размера кэша =====
+        while len(generation_cache) > MAX_CACHE_SIZE:
+            # удаляем самый старый элемент
+            generation_cache.pop(next(iter(generation_cache)))
 
+        gc.collect()
 
 # ================= DB LOCK =================
 
