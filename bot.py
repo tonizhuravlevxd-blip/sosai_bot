@@ -1388,57 +1388,57 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # ================= REPEAT (ОСТАВЛЯЕМ) =================
-elif data == "repeat":
-    prompt = context.user_data.get("last_prompt")
-    images = context.user_data.get("last_images", [])
-    mode = context.user_data.get("mode", "image")
+    elif data == "repeat":
+        prompt = context.user_data.get("last_prompt")
+        images = context.user_data.get("last_images", [])
+        mode = context.user_data.get("mode", "image")
 
-    async with active_gen_lock:
-        if user_id in active_generations:
-            await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+        async with active_gen_lock:
+            if user_id in active_generations:
+                await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+                return
+
+        count = user_queue_count.get(user_id, 0)
+        if count >= MAX_QUEUE_PER_USER:
+            await query.message.reply_text("⚠️ Слишком много задач в очереди")
             return
 
-    count = user_queue_count.get(user_id, 0)
-    if count >= MAX_QUEUE_PER_USER:
-        await query.message.reply_text("⚠️ Слишком много задач в очереди")
+        allowed, msg = check_user_generation_limit(user_id)
+        if not allowed:
+            await query.message.reply_text(msg)
+            return
+
+        lock_user_generation(user_id)
+
+        async with active_gen_lock:
+            active_generations.add(user_id)
+
+        user_queue_count[user_id] = count + 1
+
+        position = get_queue_position() + 1
+        status = await query.message.reply_text(
+            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
+        )
+
+        queue_map = {
+            "image": generation_queue_image,
+            "video": generation_queue_video,
+            "cartoon": generation_queue_video,
+            "music": generation_queue_music
+        }
+
+        await queue_map.get(mode, generation_queue_image).put({
+            "update": update,
+            "context": context,
+            "prompt": prompt,
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
+            "images": images,
+            "user_id": user_id,
+            "mode": mode,
+            "status": status
+        })
         return
-
-    allowed, msg = check_user_generation_limit(user_id)
-    if not allowed:
-        await query.message.reply_text(msg)
-        return
-
-    lock_user_generation(user_id)
-
-    async with active_gen_lock:
-        active_generations.add(user_id)
-
-    user_queue_count[user_id] = count + 1
-
-    position = get_queue_position() + 1
-    status = await query.message.reply_text(
-        f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
-    )
-
-    queue_map = {
-        "image": generation_queue_image,
-        "video": generation_queue_video,
-        "cartoon": generation_queue_video,
-        "music": generation_queue_music
-    }
-
-    await queue_map.get(mode, generation_queue_image).put({
-        "update": update,
-        "context": context,
-        "prompt": prompt,
-        "size": context.user_data.get("size", "1024x1024"),
-        "model": context.user_data.get("model", "banana2"),
-        "images": images,
-        "user_id": user_id,
-        "mode": mode,
-        "status": status
-    })
-    return
 
     # ================= CLEAR OLD STYLES =================
     if context.user_data.get("mode") not in ["cartoon"]:
