@@ -21,7 +21,7 @@ import uuid
 
 async def create_payment(user_id: int, payment_type="premium", price=100):
 
-    price = float(price)  # ✅ фикс
+    price = float(price)  
 
     description_map = {
         "premium": "Премиум на месяц",
@@ -103,7 +103,7 @@ if not OPENAI_API_KEY:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 FREE_LIMIT = 5
-FREE_VIDEO_LIMIT = 3
+FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
@@ -824,11 +824,11 @@ user_locks = {}
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 active_generations = set()
-GLOBAL_SEMAPHORE = asyncio.Semaphore(20)
+GLOBAL_SEMAPHORE = asyncio.Semaphore(50)
 
-semaphore_image = asyncio.Semaphore(6)
-semaphore_video = asyncio.Semaphore(3)
-semaphore_music = asyncio.Semaphore(2)
+semaphore_image = asyncio.Semaphore(30)
+semaphore_video = asyncio.Semaphore(10)
+semaphore_music = asyncio.Semaphore(5)
 
 async def handle_generation_job(job):
 
@@ -952,8 +952,8 @@ async def handle_generation_job(job):
 
                 if paid_video <= 0:
                     keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💳 Купить 1 видео (50₽)", callback_data="buy_video")],
-                        [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
+                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                        [InlineKeyboardButton("🍩 Купить Premium (499₽)", callback_data="buy_spb")]
                     ])
                     await msg.reply_text("🎬 Бесплатный лимит закончился", reply_markup=keyboard)
                     return
@@ -1033,7 +1033,7 @@ async def handle_generation_job(job):
                     try:
                         while True:
                             dots = dots_list[i % len(dots_list)]
-                            text = f"<pre>🎨 Шедевр создает {model_name}{dots}</pre>"
+                            text = f"<pre>🦕 Пожалуйста ожидайте,шедевр создает {model_name}{dots}</pre>"
                             try:
                                 await status.edit_text(text, parse_mode="HTML")
                             except:
@@ -1317,7 +1317,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    await update.message.reply_text("🚀 Sosai bot готов к генерации.")
+    await update.message.reply_text("Наш бот дает вам возможность создать бесплатно свой мультфильм🦕
+    с помощью Sora2,генерации с помощью NanoBanana2🍌,свою музыку и другие крутые функции
+    ╾━╤デ╦︻(•_- )Используйте МЕНЮ слева
+    🐧 Sosai bot готов к генерации.")
 
 
 # ================= FINISH =================
@@ -1358,10 +1361,10 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🍩 Пончик-статус Premium\n\n"
         "Что входит:\n"
-        "🎨 200 генераций изображений\n"
-        "🎬 20 видео / мультфильмов\n"
-        "🎵 50 генераций музыки\n\n"
-        "500 рублей через СПБ\n\n"
+        "🐳 50 генераций изображений\n"
+        "🎬 5 видео / мультфильмов\n"
+        "🎵 3 генераций музыки\n\n"
+        "499 рублей через СПБ\n\n"
         "⏳ действует 30 дней\n\n"
         "Выберите способ оплаты:",
         reply_markup=keyboard
@@ -1793,22 +1796,22 @@ async def cartoon(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🏰 Disney", callback_data="cartoon_disney")
         ],
         [
-            InlineKeyboardButton("🇯🇵 Anime", callback_data="cartoon_anime"),
+            InlineKeyboardButton("🇯🇵 АНИМЕ", callback_data="cartoon_anime"),
             InlineKeyboardButton("🎥 DreamWorks", callback_data="cartoon_dreamworks")
         ],
         [
-            InlineKeyboardButton("🌿 Ghibli", callback_data="cartoon_ghibli"),
-            InlineKeyboardButton("🟡 Simpsons", callback_data="cartoon_simpsons")
+            InlineKeyboardButton("🌿 ГИБЛИ", callback_data="cartoon_ghibli"),
+            InlineKeyboardButton("🟡 СИМПСОНЫ", callback_data="cartoon_simpsons")
         ],
         [
-            InlineKeyboardButton("🧪 RickMorty", callback_data="cartoon_rickmorty")
+            InlineKeyboardButton("🧪 РИКиМОРТИ", callback_data="cartoon_rickmorty")
         ]
     ])
     
     context.user_data.clear()
     context.user_data["mode"] = "cartoon"
     await update.message.reply_text(
-        "🎨 Выберите стиль мультфильма:",
+        "🐉 Выберите стиль мультфильма:",
         reply_markup=keyboard
     )
 
@@ -1921,7 +1924,7 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     await update.message.reply_text(
-        "🎨 Выберите модель и размер изображения:",
+        "👾 Выберите модель и размер изображения:",
         reply_markup=keyboard
     )
 
