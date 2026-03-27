@@ -120,7 +120,6 @@ USER_AGREEMENT_URL = "https://disk.yandex.ru/i/IB_pG2pcgtEIGQ"
 OFFER_URL = "https://disk.yandex.ru/i/8IXTO8-VSMmbuw"
 
 MAX_WORKERS = 8
-MAX_CACHE_SIZE = 500
 
 generation_queue = None
 
@@ -183,9 +182,6 @@ async def cache_cleaner():
             del generation_cache[k]
 
         gc.collect()
-
-        if len(generation_cache) > MAX_CACHE_SIZE:
-            generation_cache.pop(next(iter(generation_cache)))
 
 
 # ================= DB LOCK =================
@@ -822,7 +818,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 active_generations = set()
 GLOBAL_SEMAPHORE = asyncio.Semaphore(20)
-active_gen_lock = asyncio.Lock()
 
 semaphore_image = asyncio.Semaphore(6)
 semaphore_video = asyncio.Semaphore(3)
@@ -870,6 +865,7 @@ async def handle_generation_job(job):
         elif mode == "music":
             sem = semaphore_music
 
+        # ✅ ВАЖНО: всё внутри try
         async with GLOBAL_SEMAPHORE:
             async with sem:
 
@@ -937,106 +933,301 @@ async def handle_generation_job(job):
                                 user_id
                             )
 
-        user = await get_user(user_id)
-        if not user:
-            return
+                # ===== ДАЛЬШЕ ТВОЙ КОД =====
 
-        await reset_week_if_needed(user)
+            # ===== ДАЛЬШЕ ТВОЙ КОД =====
 
-        premium = is_premium(user)
+            user = await get_user(user_id)
+            if not user:
+                return
 
-        if mode in ["video", "cartoon"]:
-            if not premium:
-                video_used = user.get("video_count", 0)
-                paid_video = user.get("paid_video", 0)
+            await reset_week_if_needed(user)
 
-                if video_used >= 1 and paid_video <= 0:
-                    keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💳 Купить 1 видео (50₽)", callback_data="buy_video")],
-                        [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
-                    ])
-                    await msg.reply_text(
-                        "🎬 Бесплатный лимит закончился",
-                        reply_markup=keyboard
+            premium = is_premium(user)
+
+            if mode in ["video", "cartoon"]:
+                if not premium:
+                    video_used = user.get("video_count", 0)
+                    paid_video = user.get("paid_video", 0)
+
+                    if video_used >= 1 and paid_video <= 0:
+                        keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("💳 Купить 1 видео (50₽)", callback_data="buy_video")],
+                            [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
+                        ])
+                        await msg.reply_text(
+                            "🎬 Бесплатный лимит закончился",
+                            reply_markup=keyboard
+                        )
+                        return
+
+                    if paid_video > 0:
+                        async with db_pool.acquire() as conn:
+                            await conn.execute("""
+                                UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1
+                            """, user_id)
+
+            cancel_button = InlineKeyboardMarkup.from_button(
+                InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
+            )
+
+            model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
+
+            text_map = {
+                "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
+                "video": "<pre>🎬 Генерация видео... 0%</pre>",
+                "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
+                "music": "<pre>🎵 Генерация музыки... 0%</pre>"
+            }
+
+            if status:
+                try:
+                    await status.edit_text(
+                        text_map.get(mode, "⏳ Генерация..."),
+                        reply_markup=cancel_button,
+                        parse_mode="HTML"
                     )
-                    return
-
-                async with db_pool.acquire() as conn:
-                    async with conn.transaction():
-                        user_locked = await conn.fetchrow(
-                            "SELECT paid_video FROM users WHERE user_id=$1 FOR UPDATE",
-                            user_id
-                        )
-
-                        if user_locked["paid_video"] <= 0:
-                            return
-
-                        await conn.execute(
-                            "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
-                            user_id
-                        )
-
-        cancel_button = InlineKeyboardMarkup.from_button(
-            InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
-        )
-
-        model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
-
-        text_map = {
-            "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
-            "video": "<pre>🎬 Генерация видео... 0%</pre>",
-            "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
-            "music": "<pre>🎵 Генерация музыки... 0%</pre>"
-        }
-
-        if status:
-            try:
-                await status.edit_text(
+                except:
+                    pass
+            else:
+                status = await msg.reply_text(
                     text_map.get(mode, "⏳ Генерация..."),
                     reply_markup=cancel_button,
                     parse_mode="HTML"
                 )
-            except:
-                pass
-        else:
-            status = await msg.reply_text(
-                text_map.get(mode, "⏳ Генерация..."),
-                reply_markup=cancel_button,
-                parse_mode="HTML"
-            )
 
-        images_local = images[:MAX_INPUT_IMAGES]
+            images_local = images[:MAX_INPUT_IMAGES]
 
-        style = ""
-        if model == "banana1":
-            style = "cinematic lighting ultra realistic 8k"
-        elif model == "banana2":
-            style = "hyper detailed masterpiece artstation quality"
+            style = ""
+            if model == "banana1":
+                style = "cinematic lighting ultra realistic 8k"
+            elif model == "banana2":
+                style = "hyper detailed masterpiece artstation quality"
 
-        cartoon_style = context.user_data.get("cartoon_style")
+            cartoon_style = context.user_data.get("cartoon_style")
 
-        if prompt:
-            if mode == "image" and style:
-                prompt = f"{style} {prompt}"
-            elif mode in ["cartoon", "video"] and cartoon_style:
-                prompt = f"{cartoon_style}, {prompt}"
+            if prompt:
+                if mode == "image" and style:
+                    prompt = f"{style} {prompt}"
+                elif mode in ["cartoon", "video"] and cartoon_style:
+                    prompt = f"{cartoon_style}, {prompt}"
 
-        if prompt:
-            prompt = clean_prompt(prompt)
+            if prompt:
+                prompt = clean_prompt(prompt)
 
-        cache_key = f"{prompt}_{model}_{size}" if prompt else None
-        cached = generation_cache.get(cache_key) if cache_key else None
+            cache_key = f"{prompt}_{model}_{size}" if prompt else None
+            cached = generation_cache.get(cache_key) if cache_key else None
 
-        if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
-            try:
-                if status:
+            if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
+                await msg.reply_photo(photo=cached["image"])
+                return
+
+            # ================= IMAGE =================
+            if mode == "image":
+
+                async def dots_animation():
+                    dots_list = ["", ".", "..", "..."]
+                    i = 0
+
+                    try:
+                        while True:
+                            dots = dots_list[i % len(dots_list)]
+                            text = f"<pre>🎨 Шедевр создает {model_name}{dots}</pre>"
+                            try:
+                                await status.edit_text(text, parse_mode="HTML")
+                            except:
+                                pass
+                            i += 1
+                            await asyncio.sleep(0.6)
+
+                    except asyncio.CancelledError:
+                        pass
+
+                animation_task = asyncio.create_task(dots_animation())
+
+                upload_task = asyncio.create_task(
+                    fake_photo_upload(context.bot, update.effective_chat.id)
+                )
+
+                try:
+                    result = await asyncio.wait_for(
+                        fal_generate(model, prompt, images_local),
+                        timeout=300
+                    )
+                finally:
+                    upload_task.cancel()
+                    animation_task.cancel()
+
+                try:
                     await status.delete()
-            except:
-                pass
-            await msg.reply_photo(photo=cached["image"])
-            return
+                except:
+                    pass
 
-        # дальше код без изменений...
+                keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
+                    ],
+                    [
+                        InlineKeyboardButton("❌ Закончить", callback_data="finish")
+                    ]
+                ])
+
+                await msg.reply_photo(
+                    photo=result,
+                    reply_markup=keyboard
+                )
+
+                context.user_data["last_prompt"] = prompt
+                context.user_data["last_images"] = images_local
+
+            # ================= VIDEO / CARTOON =================
+            elif mode in ["video", "cartoon"]:
+                async def progress_updater():
+                    pct = 0
+                    last_text = ""
+                    try:
+                        while True:
+                            await asyncio.sleep(1)
+                            pct = min(pct + 10, 100)
+                            new_text = f"🎬 Генерация видео... {pct}%"
+                            if new_text != last_text:
+                                try:
+                                    await status.edit_text(new_text)
+                                    last_text = new_text
+                                except:
+                                    pass
+                    except asyncio.CancelledError:
+                        pass
+
+                progress_task = asyncio.create_task(progress_updater())
+
+                try:
+                    result_bytes = await asyncio.wait_for(
+                        fal_video_generate(prompt, images_local),
+                        timeout=600
+                    )
+                finally:
+                    progress_task.cancel()
+
+                try:
+                    await status.delete()
+                except:
+                    pass
+
+                result_file = io.BytesIO(result_bytes)
+                result_file.name = "video.mp4"
+                result_file.seek(0)
+
+                try:
+                    await context.bot.send_video(chat_id=update.effective_chat.id, video=result_file)
+                except:
+                    result_file.seek(0)
+                    await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+
+            # ================= MUSIC =================
+            elif mode == "music":
+                premium = is_premium(user)
+
+                if not premium:
+                    paid_music = user.get("paid_music", 0)
+                    if paid_music <= 0:
+                        keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("💳 Купить трек (30₽)", callback_data="buy_music")],
+                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                        ])
+                        await msg.reply_text(
+                            "🎵 Нужна оплата для генерации музыки",
+                            reply_markup=keyboard
+                        )
+                        return
+
+                    async with db_pool.acquire() as conn:
+                        await conn.execute("""
+                            UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1
+                        """, user_id)
+
+                cached_audio_url = await get_cached_music(prompt)
+                chat_id = update.effective_chat.id
+
+                if cached_audio_url:
+                    try:
+                        if status:
+                            await status.delete()
+                    except:
+                        pass
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(cached_audio_url) as resp:
+                            audio_bytes = await resp.read()
+
+                    audio_file = io.BytesIO(audio_bytes)
+                    ext = cached_audio_url.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
+                    audio_file.seek(0)
+
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+                    except:
+                        audio_file.seek(0)
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
+                else:
+                    async def progress_updater():
+                        pct = 0
+                        last_text = ""
+                        try:
+                            while True:
+                                await asyncio.sleep(1)
+                                pct = min(pct + 10, 100)
+                                new_text = f"🎵 Генерация музыки... {pct}%"
+                                if new_text != last_text:
+                                    try:
+                                        await status.edit_text(new_text)
+                                        last_text = new_text
+                                    except:
+                                        pass
+                        except asyncio.CancelledError:
+                            pass
+
+                    progress_task = asyncio.create_task(progress_updater())
+
+                    try:
+                        result = await asyncio.wait_for(
+                            fal_music_generate(prompt),
+                            timeout=360
+                        )
+                    finally:
+                        progress_task.cancel()
+
+                    try:
+                        if status:
+                            await status.edit_text("✅ Готово 100%")
+                            await status.delete()
+                    except:
+                        pass
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(result) as resp:
+                            audio_bytes = await resp.read()
+
+                    await save_music_cache(prompt, result)
+
+                    audio_file = io.BytesIO(audio_bytes)
+                    ext = result.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
+                    audio_file.seek(0)
+
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+                    except:
+                        audio_file.seek(0)
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
     except Exception as e:
         logging.error(f"❌ HANDLE ERROR: {e}")
@@ -1393,27 +1584,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         images = context.user_data.get("last_images", [])
         mode = context.user_data.get("mode", "image")
 
-        async with active_gen_lock:
-            if user_id in active_generations:
-                await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
-                return
-
-        count = user_queue_count.get(user_id, 0)
-        if count >= MAX_QUEUE_PER_USER:
-            await query.message.reply_text("⚠️ Слишком много задач в очереди")
+        if user_id in active_generations:
+            await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
             return
-
-        allowed, msg = check_user_generation_limit(user_id)
-        if not allowed:
-            await query.message.reply_text(msg)
-            return
-
-        lock_user_generation(user_id)
-
-        async with active_gen_lock:
-            active_generations.add(user_id)
-
-        user_queue_count[user_id] = count + 1
 
         position = get_queue_position() + 1
         status = await query.message.reply_text(
@@ -1446,9 +1619,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
 
 # ================= PHOTO / TEXT HANDLERS =================
-
-user_queue_count = {}
-MAX_QUEUE_PER_USER = 3
+def get_queue_position():
+    video_cartoon_queue = generation_queue_video.qsize()
+    return generation_queue_image.qsize() + video_cartoon_queue + generation_queue_music.qsize()
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1462,7 +1635,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode in ["image", "cartoon"] and "model" not in context.user_data:
-        context.user_data["model"] = "banana2"
+        context.user_data["model"] = "banana2"  # ✅ Автоустановка модели для мультфильмов
+        # await update.message.reply_text("⚠ Сначала выберите модель\nВведите /photo")
+        # return
 
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
@@ -1486,15 +1661,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_prompt"] = caption
         context.user_data["last_images"] = context.user_data["input_images"]
 
-        async with active_gen_lock:
-            if user_id in active_generations:
-                await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
-                return
-
-        count = user_queue_count.get(user_id, 0)
-        if count >= MAX_QUEUE_PER_USER:
-            await update.message.reply_text("⚠️ Слишком много задач в очереди")
+        if user_id in active_generations:
+            await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
             return
+
+        position = get_queue_position() + 1
+        status = await update.message.reply_text(
+            f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
+        )
 
         allowed, msg = check_user_generation_limit(user_id)
         if not allowed:
@@ -1502,16 +1676,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lock_user_generation(user_id)
-
-        async with active_gen_lock:
-            active_generations.add(user_id)
-
-        user_queue_count[user_id] = count + 1
-
-        position = get_queue_position() + 1
-        status = await update.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
-        )
 
         queue_map = {
             "image": generation_queue_image,
@@ -1531,6 +1695,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "mode": mode,
             "status": status
         })
+        
 
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1544,19 +1709,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     images = context.user_data.get("input_images", [])
     mode = context.user_data.get("mode")
 
-    async with active_gen_lock:
-        if user_id in active_generations:
-            await message.reply_text("⏳ Ваша генерация уже выполняется")
-            return
+    if user_id in active_generations:
+        await message.reply_text("⏳ Ваша генерация уже выполняется")
+        return
 
     count = user_generation_count.get(user_id, 0)
     if count >= MAX_USER_GENERATIONS:
         await message.reply_text("⚠️ Подождите завершения текущих генераций")
-        return
-
-    queue_count = user_queue_count.get(user_id, 0)
-    if queue_count >= MAX_QUEUE_PER_USER:
-        await message.reply_text("⚠️ Слишком много задач в очереди")
         return
 
     if not check_rate_limit(user_id):
@@ -1592,20 +1751,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await reset_week_if_needed(user)
 
-    
-
-    allowed, msg = check_user_generation_limit(user_id)
-    if not allowed:
-        await message.reply_text(msg or "⚠️ Лимит генераций достигнут")
-        return
-
-    lock_user_generation(user_id)
-
-    async with active_gen_lock:
-        active_generations.add(user_id)
-
-    user_queue_count[user_id] = queue_count + 1
-
     queue_map = {
         "image": generation_queue_image,
         "video": generation_queue_video,
@@ -1620,6 +1765,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await message.reply_text(
         f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
     )
+    lock_user_generation(user_id)
 
     await queue_map.get(mode, generation_queue_image).put({
         "update": update,
