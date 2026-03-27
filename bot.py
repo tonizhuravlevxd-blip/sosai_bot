@@ -939,8 +939,6 @@ async def handle_generation_job(job):
                                     await msg.reply_text("⚠️ Лимит музыки исчерпан")
                                     return
 
-            # ===== ДАЛЬШЕ ТВОЙ КОД БЕЗ ИЗМЕНЕНИЙ =====
-
             user = await get_user(user_id)
             if not user:
                 return
@@ -995,40 +993,242 @@ async def handle_generation_job(job):
 
             images_local = images[:MAX_INPUT_IMAGES]
 
+            style = ""
+            if model == "banana1":
+                style = "cinematic lighting ultra realistic 8k"
+            elif model == "banana2":
+                style = "hyper detailed masterpiece artstation quality"
+
+            cartoon_style = context.user_data.get("cartoon_style")
+
+            if prompt:
+                if mode == "image" and style:
+                    prompt = f"{style} {prompt}"
+                elif mode in ["cartoon", "video"] and cartoon_style:
+                    prompt = f"{cartoon_style}, {prompt}"
+
             if prompt:
                 prompt = clean_prompt(prompt)
 
-            # ===== IMAGE =====
+            cache_key = f"{prompt}_{model}_{size}" if prompt else None
+            cached = generation_cache.get(cache_key) if cache_key else None
+
+            if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
+                try:
+                    if status:
+                        await status.delete()
+                except:
+                    pass
+                await msg.reply_photo(photo=cached["image"])
+                return
+
+            # ================= IMAGE =================
             if mode == "image":
-                result = await fal_generate(model, prompt, images_local)
-                await msg.reply_photo(photo=result)
 
-            # ===== VIDEO =====
+                async def dots_animation():
+                    dots_list = ["", ".", "..", "..."]
+                    i = 0
+
+                    try:
+                        while True:
+                            dots = dots_list[i % len(dots_list)]
+                            text = f"<pre>🎨 Шедевр создает {model_name}{dots}</pre>"
+                            try:
+                                await status.edit_text(text, parse_mode="HTML")
+                            except:
+                                pass
+                            i += 1
+                            await asyncio.sleep(0.6)
+                    except asyncio.CancelledError:
+                        pass
+
+                animation_task = asyncio.create_task(dots_animation())
+
+                upload_task = asyncio.create_task(
+                    fake_photo_upload(context.bot, update.effective_chat.id)
+                )
+
+                try:
+                    result = await asyncio.wait_for(
+                        fal_generate(model, prompt, images_local),
+                        timeout=300
+                    )
+                finally:
+                    upload_task.cancel()
+                    animation_task.cancel()
+
+                try:
+                    await status.delete()
+                except:
+                    pass
+
+                keyboard = InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
+                    ],
+                    [
+                        InlineKeyboardButton("❌ Закончить", callback_data="finish")
+                    ]
+                ])
+
+                await msg.reply_photo(photo=result, reply_markup=keyboard)
+
+                context.user_data["last_prompt"] = prompt
+                context.user_data["last_images"] = images_local
+
+            # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
-                result_bytes = await fal_video_generate(prompt, images_local)
-                file = io.BytesIO(result_bytes)
-                file.name = "video.mp4"
-                file.seek(0)
-                await context.bot.send_video(chat_id=update.effective_chat.id, video=file)
 
-            # ===== MUSIC =====
+                async def progress_updater():
+                    pct = 0
+                    last_text = ""
+                    try:
+                        while True:
+                            await asyncio.sleep(1)
+                            pct = min(pct + 10, 100)
+                            new_text = f"🎬 Генерация видео... {pct}%"
+                            if new_text != last_text:
+                                try:
+                                    await status.edit_text(new_text)
+                                    last_text = new_text
+                                except:
+                                    pass
+                    except asyncio.CancelledError:
+                        pass
+
+                progress_task = asyncio.create_task(progress_updater())
+
+                try:
+                    result_bytes = await asyncio.wait_for(
+                        fal_video_generate(prompt, images_local),
+                        timeout=600
+                    )
+                finally:
+                    progress_task.cancel()
+
+                try:
+                    await status.delete()
+                except:
+                    pass
+
+                result_file = io.BytesIO(result_bytes)
+                result_file.name = "video.mp4"
+                result_file.seek(0)
+
+                try:
+                    await context.bot.send_video(chat_id=update.effective_chat.id, video=result_file)
+                except:
+                    result_file.seek(0)
+                    await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+
+            # ================= MUSIC =================
             elif mode == "music":
-                result = await fal_music_generate(prompt)
+                premium = is_premium(user)
 
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(result) as resp:
-                        audio_bytes = await resp.read()
+                if not premium:
+                    paid_music = user.get("paid_music", 0)
+                    if paid_music <= 0:
+                        keyboard = InlineKeyboardMarkup([
+                            [InlineKeyboardButton("💳 Купить трек (30₽)", callback_data="buy_music")],
+                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                        ])
+                        await msg.reply_text(
+                            "🎵 Нужна оплата для генерации музыки",
+                            reply_markup=keyboard
+                        )
+                        return
 
-                audio_file = io.BytesIO(audio_bytes)
-                audio_file.name = "song.mp3"
-                audio_file.seek(0)
+                    async with db_pool.acquire() as conn:
+                        await conn.execute("""
+                            UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1
+                        """, user_id)
 
-                await context.bot.send_audio(chat_id=update.effective_chat.id, audio=audio_file)
+                cached_audio_url = await get_cached_music(prompt)
+                chat_id = update.effective_chat.id
+
+                if cached_audio_url:
+                    try:
+                        if status:
+                            await status.delete()
+                    except:
+                        pass
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(cached_audio_url) as resp:
+                            audio_bytes = await resp.read()
+
+                    audio_file = io.BytesIO(audio_bytes)
+                    ext = cached_audio_url.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
+                    audio_file.seek(0)
+
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+                    except:
+                        audio_file.seek(0)
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
+                else:
+
+                    async def progress_updater():
+                        pct = 0
+                        last_text = ""
+                        try:
+                            while True:
+                                await asyncio.sleep(1)
+                                pct = min(pct + 10, 100)
+                                new_text = f"🎵 Генерация музыки... {pct}%"
+                                if new_text != last_text:
+                                    try:
+                                        await status.edit_text(new_text)
+                                        last_text = new_text
+                                    except:
+                                        pass
+                        except asyncio.CancelledError:
+                            pass
+
+                    progress_task = asyncio.create_task(progress_updater())
+
+                    try:
+                        result = await asyncio.wait_for(
+                            fal_music_generate(prompt),
+                            timeout=360
+                        )
+                    finally:
+                        progress_task.cancel()
+
+                    try:
+                        if status:
+                            await status.edit_text("✅ Готово 100%")
+                            await status.delete()
+                    except:
+                        pass
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(result) as resp:
+                            audio_bytes = await resp.read()
+
+                    await save_music_cache(prompt, result)
+
+                    audio_file = io.BytesIO(audio_bytes)
+                    ext = result.split(".")[-1]
+                    audio_file.name = f"song.{ext}"
+                    audio_file.seek(0)
+
+                    try:
+                        await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+                    except:
+                        audio_file.seek(0)
+                        await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
         except Exception as e:
             logging.error(f"❌ HANDLE ERROR: {e}")
 
         finally:
+            if user_id in active_generations:
+                active_generations.discard(user_id)
+
             unlock_user_generation(user_id)
             logging.info(f"🧹 CLEANUP user {user_id}")
 # ================== WORKERS ==================
