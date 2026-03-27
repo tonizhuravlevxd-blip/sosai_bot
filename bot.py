@@ -817,6 +817,7 @@ async def fake_photo_upload(bot, chat_id):
 generation_queue_image = asyncio.Queue(maxsize=5000)
 generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
+user_locks = {}
 
 
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
