@@ -108,9 +108,9 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
 # ================= PRICES =================
-PRICE_VIDEO = "50.00"
-PRICE_MUSIC = "30.00"
-PRICE_CARTOON = "50.00"
+PRICE_VIDEO = "100.00"
+PRICE_MUSIC = "100.00"
+PRICE_CARTOON = "100.00"
 
 PREMIUM_IMAGE_LIMIT = 20
 PREMIUM_VIDEO_LIMIT = 5
@@ -423,7 +423,7 @@ def clean_prompt(prompt: str, mode: str = "image"):
 
     # ===== ULTRA BOOSTERS =====
 
-    base_boost = "high detail, sharp focus, 4k, professional composition"
+    base_boost = "professional composition"
 
     video_boost = (
         "cinematic camera movement, smooth motion, dynamic lighting, "
@@ -436,17 +436,18 @@ def clean_prompt(prompt: str, mode: str = "image"):
     )
 
     cartoon_boost = (
-        "animated style, expressive characters, vibrant colors, "
-        "smooth shading, cinematic composition"
+        "2D animated cartoon style, flat shading, simple lighting, expressive characters, clean outlines, vibrant colors"
     )
 
     # ===== MODE SWITCH =====
-    if mode == "video":
-        booster = f"{base_boost}, {video_boost}"
-    elif mode == "cartoon":
-        booster = f"{base_boost}, {cartoon_boost}"
+    mode = (mode or "").lower()
+
+    if mode == "cartoon":
+        booster = f"{cartoon_boost}"
+    elif mode == "video":
+        booster = f"{video_boost}"
     else:
-        booster = f"{base_boost}, {image_boost}"
+        booster = f"{image_boost}"
 
     return f"{cleaned}, {booster}"
 # ================= FAL MODELS CONFIG =================
@@ -1225,6 +1226,26 @@ async def handle_generation_job(job):
 
         except Exception as e:
             logging.error(f"❌ HANDLE ERROR: {e}")
+
+        # ===== 🔥 УНИВЕРСАЛЬНЫЙ ОТВЕТ ПОЛЬЗОВАТЕЛЮ =====
+            if msg:
+                try:
+                    await msg.reply_text(
+                        "⚠️ Не удалось сгенерировать результат.\n\n"
+                        "💡 Возможные причины:\n"
+                        "• промпт заблокирован системой безопасности\n"
+                        "• слишком сложное или чувствительное описание\n"
+                        "• модель не смогла обработать запрос\n\n"
+                        "✨ Попробуйте изменить промпт:\n"
+                        "• упростите описание\n"
+                        "• уберите чувствительные слова\n"
+                        "• используйте более общий стиль\n\n"
+                        "📌 Пример:\n"
+                        "`cartoon family sitting in a living room watching TV`",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
 
         finally:
             if user_id in active_generations:
