@@ -897,6 +897,10 @@ async def handle_generation_job(job):
                             if not premium:
                                 paid_music = user.get("paid_music", 0)
                                 if paid_music <= 0:
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить трек (30₽)", callback_data="buy_music")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
                                     await msg.reply_text("🎵 Нужна оплата")
                                     return
 
