@@ -877,71 +877,51 @@ async def handle_generation_job(job):
 
                         # ===== VIDEO =====
                         if mode in ["video", "cartoon"]:
-                            limit = PREMIUM_VIDEO_LIMIT if premium else FREE_VIDEO_LIMIT
 
-                            result = await conn.fetchrow("""
-                                UPDATE users
-                                SET video_count = video_count + 1
-                                WHERE user_id=$1 AND video_count < $2
-                                RETURNING video_count
-                            """, user_id, limit)
+                            if premium:
+                                limit = PREMIUM_VIDEO_LIMIT
 
-                            if not result:
-                                await msg.reply_text("⚠️ Лимит видео исчерпан")
-                                return
-
-                        # ===== MUSIC =====
-                        if mode == "music":
-                            limit = PREMIUM_MUSIC_LIMIT if premium else 0
-
-                            if not premium:
-                                paid_music = user.get("paid_music", 0)
-                                if paid_music <= 0:
-                                    keyboard = InlineKeyboardMarkup([
-                                        [InlineKeyboardButton("💳 Купить трек (30₽)", callback_data="buy_music")],
-                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                    ])
-                                    await msg.reply_text("🎵 Нужна оплата")
-                                    return
-
-                                await conn.execute("""
-                                    UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1
-                                """, user_id)
-
-                            else:
                                 result = await conn.fetchrow("""
                                     UPDATE users
-                                    SET music_count = music_count + 1
-                                    WHERE user_id=$1 AND music_count < $2
-                                    RETURNING music_count
+                                    SET video_count = video_count + 1
+                                    WHERE user_id=$1 AND video_count < $2
+                                    RETURNING video_count
                                 """, user_id, limit)
 
                                 if not result:
-                                    await msg.reply_text("⚠️ Лимит музыки исчерпан")
+                                    await msg.reply_text("⚠️ Лимит видео исчерпан")
                                     return
 
-            user = await get_user(user_id)
-            if not user:
-                return
+                            else:
+                                # сначала бесплатный лимит
+                                if user["video_count"] < FREE_VIDEO_LIMIT:
+                                    await conn.execute("""
+                                        UPDATE users SET video_count = video_count + 1
+                                        WHERE user_id=$1
+                                    """, user_id)
 
-            premium = is_premium(user)
+                                else:
+                                    # 🔥 ВАЖНО: проверяем покупку
+                                    paid_video = user.get("paid_video", 0)
 
-            # ===== ПРОВЕРКА ПЛАТНОГО ВИДЕО =====
-            if mode in ["video", "cartoon"] and not premium:
-                paid_video = user.get("paid_video", 0)
+                                    if paid_video <= 0:
+                                        keyboard = InlineKeyboardMarkup([
+                                            [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                        ])
+                                        await msg.reply_text("🎬 Бесплатный лимит закончился", reply_markup=keyboard)
+                                        return
 
-                if paid_video <= 0:
-                    keyboard = InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
-                        [InlineKeyboardButton("🍩 Купить Premium (499₽)", callback_data="buy_spb")]
-                    ])
-                    await msg.reply_text("🎬 Бесплатный лимит закончился", reply_markup=keyboard)
-                    return
+                                    # 🔥 списываем покупку
+                                    await conn.execute("""
+                                        UPDATE users SET paid_video = paid_video - 1
+                                        WHERE user_id=$1
+                                    """, user_id)
+                                 
 
-                async with db_pool.acquire() as conn:
-                    await conn.execute("""
-                        UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1
-                    """, user_id)
+    
+
+                        
 
             cancel_button = InlineKeyboardMarkup.from_button(
                 InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
