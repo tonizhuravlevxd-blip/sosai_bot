@@ -861,7 +861,7 @@ async def handle_generation_job(job):
                         await reset_week_if_needed(user)
                         premium = is_premium(user)
 
-                        # ===== IMAGE =====
+                                               # ===== IMAGE =====
                         if mode == "image":
                             limit = PREMIUM_IMAGE_LIMIT if premium else FREE_LIMIT + user.get("bonus_images", 0)
 
@@ -876,13 +876,17 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                                                                                             # ===== VIDEO =====
-                        if mode in ["video", "cartoon"]:
+                        # ================= VIDEO / CARTOON =================
+                        elif mode in ["video", "cartoon"]:
+
                             user = await conn.fetchrow(
                                 "SELECT * FROM users WHERE user_id=$1",
                                 user_id
                             )
 
+                            premium = is_premium(user)
+
+                            # ================= PREMIUM =================
                             if premium:
                                 limit = PREMIUM_VIDEO_LIMIT
 
@@ -905,23 +909,13 @@ async def handle_generation_job(job):
                                     )
                                     return
 
+                            # ================= FREE + PAID =================
                             else:
-                                # ===== бесплатный лимит =====
                                 limit = FREE_VIDEO_LIMIT
 
-                                result = await conn.fetchrow("""
-                                    UPDATE users
-                                    SET video_count = video_count + 1
-                                    WHERE user_id=$1 AND video_count < $2
-                                    RETURNING video_count
-                                """, user_id, limit)
+                                # ❗ сначала проверяем лимит без UPDATE
+                                if user["video_count"] >= limit:
 
-                                if not result:
-
-                                    user = await conn.fetchrow(
-                                        "SELECT * FROM users WHERE user_id=$1",
-                                        user_id
-                                    )
                                     paid_video = user.get("paid_video") or 0
 
                                     if paid_video <= 0:
@@ -936,13 +930,26 @@ async def handle_generation_job(job):
                                         )
                                         return
 
-                                    # ===== списываем покупку =====
+                                    # ================= списываем покупку =================
                                     await conn.execute("""
                                         UPDATE users 
                                         SET paid_video = paid_video - 1,
                                             video_count = video_count + 1
                                         WHERE user_id=$1
                                     """, user_id)
+
+                                else:
+                                    # ================= бесплатное использование =================
+                                    result = await conn.fetchrow("""
+                                        UPDATE users
+                                        SET video_count = video_count + 1
+                                        WHERE user_id=$1 AND video_count < $2
+                                        RETURNING video_count
+                                    """, user_id, limit)
+
+                                    if not result:
+                                        await msg.reply_text("🎬 Лимит видео исчерпан")
+                                        return
                                  
 
     
