@@ -876,7 +876,7 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                        # ===== VIDEO =====
+                                                # ===== VIDEO =====
                         if mode in ["video", "cartoon"]:
 
                             if premium:
@@ -894,32 +894,24 @@ async def handle_generation_job(job):
                                     return
 
                             else:
-                                # сначала бесплатный лимит
-                                if user["video_count"] < FREE_VIDEO_LIMIT:
-                                    await conn.execute("""
-                                        UPDATE users SET video_count = video_count + 1
-                                        WHERE user_id=$1
-                                    """, user_id)
+                                # 🔥 ВАЖНО: проверяем покупку
+                                paid_video = user.get("paid_video", 0)
 
-                                else:
-                                    # 🔥 ВАЖНО: проверяем покупку
-                                    paid_video = user.get("paid_video", 0)
+                                if paid_video <= 0:
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
+                                    await msg.reply_text("🎬 Бесплатный лимит закончился", reply_markup=keyboard)
+                                    return
 
-                                    if paid_video <= 0:
-                                        keyboard = InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
-                                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                        ])
-                                        await msg.reply_text("🎬 Бесплатный лимит закончился", reply_markup=keyboard)
-                                        return
-
-                                                                        # 🔥 списываем покупку
-                                    await conn.execute("""
-                                        UPDATE users 
-                                        SET paid_video = paid_video - 1,
-                                            video_count = video_count + 1
-                                        WHERE user_id=$1
-                                    """, user_id)
+                                # 🔥 списываем покупку
+                                await conn.execute("""
+                                    UPDATE users 
+                                    SET paid_video = paid_video - 1,
+                                        video_count = video_count + 1
+                                    WHERE user_id=$1
+                                """, user_id)
                                  
 
     
