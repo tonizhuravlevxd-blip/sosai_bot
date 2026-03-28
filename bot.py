@@ -798,11 +798,6 @@ generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
 async def consume_video(conn, user_id, premium, free_limit):
-    """
-    Enterprise atomic limiter:
-    - возвращает True если видео разрешено
-    - False если лимит исчерпан
-    """
 
     if premium:
         result = await conn.fetchrow("""
@@ -814,7 +809,7 @@ async def consume_video(conn, user_id, premium, free_limit):
 
         return bool(result)
 
-    # ================= FREE + PAID ATOMIC =================
+    # ================= FREE =================
     result = await conn.fetchrow("""
         UPDATE users
         SET video_count = video_count + 1
@@ -825,16 +820,16 @@ async def consume_video(conn, user_id, premium, free_limit):
     if result:
         return True
 
-    # ================= TRY PAID VIDEO ATOMIC =================
-    paid = await conn.fetchrow("""
+    # ================= PAID (FIXED) =================
+    result = await conn.fetchrow("""
         UPDATE users
-        SET paid_video = paid_video - 1,
+        SET paid_video = COALESCE(paid_video, 0) - 1,
             video_count = video_count + 1
-        WHERE user_id=$1 AND paid_video > 0
+        WHERE user_id=$1 AND COALESCE(paid_video, 0) > 0
         RETURNING paid_video
     """, user_id)
 
-    return bool(paid)
+    return bool(result)
 
 
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
