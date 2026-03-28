@@ -1767,7 +1767,21 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "status": status
         })
         
+async def use_paid_video(user_id):
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT paid_video FROM users WHERE user_id=$1",
+            user_id
+        )
 
+        if user and user["paid_video"] > 0:
+            await conn.execute(
+                "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
+                user_id
+            )
+            return True
+
+        return False
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
