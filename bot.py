@@ -788,6 +788,44 @@ async def fake_photo_upload(bot, chat_id):
             await asyncio.sleep(4)
     except asyncio.CancelledError:
         pass
+async def consume_video(conn, user_id, premium, free_limit):
+    """
+    Enterprise atomic limiter:
+    - возвращает True если видео разрешено
+    - False если лимит исчерпан
+    """
+
+    if premium:
+        result = await conn.fetchrow("""
+            UPDATE users
+            SET video_count = video_count + 1
+            WHERE user_id=$1 AND video_count < $2
+            RETURNING video_count
+        """, user_id, PREMIUM_VIDEO_LIMIT)
+
+        return bool(result)
+
+    # ================= FREE + PAID ATOMIC =================
+    result = await conn.fetchrow("""
+        UPDATE users
+        SET video_count = video_count + 1
+        WHERE user_id=$1 AND video_count < $2
+        RETURNING video_count
+    """, user_id, free_limit)
+
+    if result:
+        return True
+
+    # ================= TRY PAID VIDEO ATOMIC =================
+    paid = await conn.fetchrow("""
+        UPDATE users
+        SET paid_video = paid_video - 1,
+            video_count = video_count + 1
+        WHERE user_id=$1 AND paid_video > 0
+        RETURNING paid_video
+    """, user_id)
+
+    return bool(paid)        
 
 # ================= QUEUES AND SEMAPHORES =================
 generation_queue_image = asyncio.Queue(maxsize=5000)
@@ -861,7 +899,7 @@ async def handle_generation_job(job):
                         await reset_week_if_needed(user)
                         premium = is_premium(user)
 
-                                               # ===== IMAGE =====
+                        # ===== IMAGE =====
                         if mode == "image":
                             limit = PREMIUM_IMAGE_LIMIT if premium else FREE_LIMIT + user.get("bonus_images", 0)
 
@@ -876,7 +914,7 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                        # ================= VIDEO / CARTOON =================
+                        # ===== VIDEO / CARTOON =====
                         elif mode in ["video", "cartoon"]:
 
                             user = await conn.fetchrow(
@@ -886,70 +924,25 @@ async def handle_generation_job(job):
 
                             premium = is_premium(user)
 
-                            # ================= PREMIUM =================
-                            if premium:
-                                limit = PREMIUM_VIDEO_LIMIT
+                            allowed = await consume_video(
+                                conn,
+                                user_id,
+                                premium,
+                                FREE_VIDEO_LIMIT
+                            )
 
-                                result = await conn.fetchrow("""
-                                    UPDATE users
-                                    SET video_count = video_count + 1
-                                    WHERE user_id=$1 AND video_count < $2
-                                    RETURNING video_count
-                                """, user_id, limit)
+                            if not allowed:
 
-                                if not result:
-                                    keyboard = InlineKeyboardMarkup([
-                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
-                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                    ])
+                                keyboard = InlineKeyboardMarkup([
+                                    [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                    [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                ])
 
-                                    await msg.reply_text(
-                                        "🎬 Лимит видео исчерпан",
-                                        reply_markup=keyboard
-                                    )
-                                    return
-
-                            # ================= FREE + PAID =================
-                            else:
-                                limit = FREE_VIDEO_LIMIT
-
-                                # ❗ сначала проверяем лимит без UPDATE
-                                if user["video_count"] >= limit:
-
-                                    paid_video = user.get("paid_video") or 0
-
-                                    if paid_video <= 0:
-                                        keyboard = InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
-                                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                        ])
-
-                                        await msg.reply_text(
-                                            "🎬 Бесплатный лимит закончился",
-                                            reply_markup=keyboard
-                                        )
-                                        return
-
-                                    # ================= списываем покупку =================
-                                    await conn.execute("""
-                                        UPDATE users 
-                                        SET paid_video = paid_video - 1,
-                                            video_count = video_count + 1
-                                        WHERE user_id=$1
-                                    """, user_id)
-
-                                else:
-                                    # ================= бесплатное использование =================
-                                    result = await conn.fetchrow("""
-                                        UPDATE users
-                                        SET video_count = video_count + 1
-                                        WHERE user_id=$1 AND video_count < $2
-                                        RETURNING video_count
-                                    """, user_id, limit)
-
-                                    if not result:
-                                        await msg.reply_text("🎬 Лимит видео исчерпан")
-                                        return
+                                await msg.reply_text(
+                                    "🎬 Лимит видео исчерпан",
+                                    reply_markup=keyboard
+                                )
+                                return
                                  
 
     
