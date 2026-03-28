@@ -927,21 +927,29 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-# ===== VIDEO / CARTOON =====
+# ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
+                            # 🔄 ВСЕГДА берём свежего пользователя
+                            user = await conn.fetchrow(
+                                "SELECT video_count, paid_video, bonus_videos FROM users WHERE user_id=$1",
+                                user_id
+                            )
                             premium = await ensure_premium_sync(user_id)
 
-                            # Проверяем, можно ли генерировать видео
-                            allowed = await can_generate_video(conn, user_id, premium, FREE_VIDEO_LIMIT)
+                            # Вычисляем лимит с учётом премиума и бонусов
+                            limit = PREMIUM_VIDEO_LIMIT if premium else FREE_VIDEO_LIMIT + user.get("bonus_videos", 0)
 
-                            if not allowed:
-                                # Если лимит исчерпан — получаем данные пользователя для показа
-                                user = await conn.fetchrow(
-                                    "SELECT video_count, paid_video FROM users WHERE user_id=$1",
-                                    user_id
-                                )
-                                free_left = max(0, FREE_VIDEO_LIMIT - user["video_count"])
-                                paid = user["paid_video"]
+                            # Пытаемся списать видео
+                            result = await conn.fetchrow("""
+                                UPDATE users
+                                SET video_count = COALESCE(video_count, 0) + 1
+                                WHERE user_id=$1 AND COALESCE(video_count, 0) < $2
+                                RETURNING video_count
+                            """, user_id, limit)
+
+                            if not result:
+                                free_left = max(0, limit - (user.get("video_count") or 0))
+                                paid = user.get("paid_video", 0)
 
                                 keyboard = InlineKeyboardMarkup([
                                     [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
@@ -954,12 +962,6 @@ async def handle_generation_job(job):
                                     f"💰 Куплено: {paid}",
                                     reply_markup=keyboard
                                 )
-                                return
-
-                            # Списание лимита (free или paid) перед генерацией
-                            success = await consume_video(conn, user_id, premium, FREE_VIDEO_LIMIT)
-                            if not success:
-                                await msg.reply_text("⚠️ Не удалось списать лимит видео. Попробуйте позже.")
                                 return
                                  
 
