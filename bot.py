@@ -912,7 +912,7 @@ async def handle_generation_job(job):
                         await reset_week_if_needed(user)
                         premium = is_premium(user)
 
-                                                # ===== IMAGE =====
+# ===== IMAGE =====
                         if mode == "image":
                             limit = PREMIUM_IMAGE_LIMIT if premium else FREE_LIMIT + user.get("bonus_images", 0)
 
@@ -927,37 +927,19 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                        # ===== VIDEO / CARTOON =====
+# ===== VIDEO / CARTOON =====
                         elif mode in ["video", "cartoon"]:
+                            premium = await ensure_premium_sync(user_id)
 
-                            # 🔄 ВСЕГДА берём свежего пользователя (после webhook)
-                            user = await conn.fetchrow(
-                                "SELECT * FROM users WHERE user_id=$1",
-                                user_id
-                            )
-
-                            if not user:
-                                await msg.reply_text("❌ Ошибка пользователя")
-                                return
-
-                            premium = is_premium(user)
-
-                            # 🎬 ПРОБУЕМ СПИСАТЬ (paid -> free внутри функции)
-                            allowed = await can_generate_video(
-                                conn,
-                                user_id,
-                                premium,
-                                FREE_VIDEO_LIMIT
-                            )
+                            # Проверяем, можно ли генерировать видео
+                            allowed = await can_generate_video(conn, user_id, premium, FREE_VIDEO_LIMIT)
 
                             if not allowed:
-
-                                # 🔄 ещё раз обновим (на случай гонки)
+                                # Если лимит исчерпан — получаем данные пользователя для показа
                                 user = await conn.fetchrow(
                                     "SELECT video_count, paid_video FROM users WHERE user_id=$1",
                                     user_id
                                 )
-
                                 free_left = max(0, FREE_VIDEO_LIMIT - user["video_count"])
                                 paid = user["paid_video"]
 
@@ -972,6 +954,12 @@ async def handle_generation_job(job):
                                     f"💰 Куплено: {paid}",
                                     reply_markup=keyboard
                                 )
+                                return
+
+                            # Списание лимита (free или paid) перед генерацией
+                            success = await consume_video(conn, user_id, premium, FREE_VIDEO_LIMIT)
+                            if not success:
+                                await msg.reply_text("⚠️ Не удалось списать лимит видео. Попробуйте позже.")
                                 return
                                  
 
