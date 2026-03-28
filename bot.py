@@ -817,6 +817,7 @@ async def handle_generation_job(job):
     user_id = job["user_id"]
     status = job.get("status")
     mode = job.get("mode", "image")
+    video_allowed = False
 
     msg = getattr(update, "message", None)
     if not msg and getattr(update, "callback_query", None):
@@ -912,9 +913,11 @@ async def handle_generation_job(job):
                                         await msg.reply_text("🎬 Бесплатный лимит закончился", reply_markup=keyboard)
                                         return
 
-                                    # 🔥 списываем покупку
+                                                                        # 🔥 списываем покупку
                                     await conn.execute("""
-                                        UPDATE users SET paid_video = paid_video - 1
+                                        UPDATE users 
+                                        SET paid_video = paid_video - 1,
+                                            video_count = video_count + 1
                                         WHERE user_id=$1
                                     """, user_id)
                                  
@@ -1091,7 +1094,7 @@ async def handle_generation_job(job):
                     paid_music = user.get("paid_music", 0)
                     if paid_music <= 0:
                         keyboard = InlineKeyboardMarkup([
-                            [InlineKeyboardButton("💳 Купить трек (30₽)", callback_data="buy_music")],
+                            [InlineKeyboardButton("💳 Купить трек (100₽)", callback_data="buy_music")],
                             [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
                         ])
                         await msg.reply_text(
