@@ -799,6 +799,7 @@ user_locks = {}
 
 async def consume_video(conn, user_id, premium, free_limit):
 
+    # ===== PREMIUM =====
     if premium:
         result = await conn.fetchrow("""
             UPDATE users
@@ -809,25 +810,24 @@ async def consume_video(conn, user_id, premium, free_limit):
 
         return bool(result)
 
-    # ================= FREE =================
+    # ===== ✅ СНАЧАЛА ПЛАТНЫЕ (БЕЗ УВЕЛИЧЕНИЯ video_count) =====
+    result = await conn.fetchrow("""
+        UPDATE users
+        SET paid_video = paid_video - 1
+        WHERE user_id=$1 AND paid_video > 0
+        RETURNING paid_video
+    """, user_id)
+
+    if result:
+        return True
+
+    # ===== FREE =====
     result = await conn.fetchrow("""
         UPDATE users
         SET video_count = video_count + 1
         WHERE user_id=$1 AND video_count < $2
         RETURNING video_count
     """, user_id, free_limit)
-
-    if result:
-        return True
-
-    # ================= PAID (FIXED) =================
-    result = await conn.fetchrow("""
-        UPDATE users
-        SET paid_video = COALESCE(paid_video, 0) - 1,
-            video_count = video_count + 1
-        WHERE user_id=$1 AND COALESCE(paid_video, 0) > 0
-        RETURNING paid_video
-    """, user_id)
 
     return bool(result)
 
@@ -915,13 +915,19 @@ async def handle_generation_job(job):
                         # ===== VIDEO / CARTOON =====
                         elif mode in ["video", "cartoon"]:
 
+                            # 🔄 ВСЕГДА берём свежего пользователя (после webhook)
                             user = await conn.fetchrow(
                                 "SELECT * FROM users WHERE user_id=$1",
                                 user_id
                             )
 
+                            if not user:
+                                await msg.reply_text("❌ Ошибка пользователя")
+                                return
+
                             premium = is_premium(user)
 
+                            # 🎬 ПРОБУЕМ СПИСАТЬ (paid -> free внутри функции)
                             allowed = await consume_video(
                                 conn,
                                 user_id,
@@ -931,13 +937,24 @@ async def handle_generation_job(job):
 
                             if not allowed:
 
+                                # 🔄 ещё раз обновим (на случай гонки)
+                                user = await conn.fetchrow(
+                                    "SELECT video_count, paid_video FROM users WHERE user_id=$1",
+                                    user_id
+                                )
+
+                                free_left = max(0, FREE_VIDEO_LIMIT - user["video_count"])
+                                paid = user["paid_video"]
+
                                 keyboard = InlineKeyboardMarkup([
                                     [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
                                     [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
                                 ])
 
                                 await msg.reply_text(
-                                    "🎬 Лимит видео исчерпан",
+                                    f"🎬 Лимит видео исчерпан\n\n"
+                                    f"🆓 Бесплатно осталось: {free_left}\n"
+                                    f"💰 Куплено: {paid}",
                                     reply_markup=keyboard
                                 )
                                 return
