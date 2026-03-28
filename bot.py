@@ -788,6 +788,8 @@ async def fake_photo_upload(bot, chat_id):
             await asyncio.sleep(4)
     except asyncio.CancelledError:
         pass
+
+
 async def consume_video(conn, user_id, premium, free_limit):
     """
     Enterprise atomic limiter:
@@ -943,6 +945,12 @@ async def handle_generation_job(job):
                                     reply_markup=keyboard
                                 )
                                 return
+
+                            # 🔥 ENTERPRISE FIX: обновляем user после списания (важно для webhook и профиля)
+                            user = await conn.fetchrow(
+                                "SELECT * FROM users WHERE user_id=$1",
+                                user_id
+                            )
                                  
 
     
