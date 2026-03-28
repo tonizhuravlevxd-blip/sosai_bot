@@ -876,7 +876,7 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                                                                        # ===== VIDEO =====
+                                                                                             # ===== VIDEO =====
                         if mode in ["video", "cartoon"]:
 
                             if premium:
@@ -890,7 +890,15 @@ async def handle_generation_job(job):
                                 """, user_id, limit)
 
                                 if not result:
-                                    await msg.reply_text("⚠️ Лимит видео исчерпан")
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
+
+                                    await msg.reply_text(
+                                        "🎬 Лимит видео исчерпан",
+                                        reply_markup=keyboard
+                                    )
                                     return
 
                             else:
@@ -904,11 +912,8 @@ async def handle_generation_job(job):
                                     RETURNING video_count
                                 """, user_id, limit)
 
-                                if result:
-                                    pass  # бесплатно прошло
+                                if not result:
 
-                                else:
-                                    # ===== проверка paid =====
                                     paid_video = user.get("paid_video") or 0
 
                                     if paid_video <= 0:
@@ -916,7 +921,11 @@ async def handle_generation_job(job):
                                             [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
                                             [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
                                         ])
-                                        await msg.reply_text("🎬 Бесплатный лимит закончился", reply_markup=keyboard)
+
+                                        await msg.reply_text(
+                                            "🎬 Бесплатный лимит закончился",
+                                            reply_markup=keyboard
+                                        )
                                         return
 
                                     # ===== списываем покупку =====
