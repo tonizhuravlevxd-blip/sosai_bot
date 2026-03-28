@@ -1946,21 +1946,7 @@ async def suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ================= REGISTER =================
-# ================= INTERNAL SYNC =================
-@app.post("/internal-refresh")
-async def internal_refresh(request: Request):
-    data = await request.json()
-    user_id = data.get("user_id")
 
-    if not user_id:
-        return {"ok": False}
-
-    # 🔥 сброс кэша пользователя
-    generation_cache.pop(user_id, None)
-
-    logging.info(f"🔄 USER UPDATED AFTER PAYMENT: {user_id}")
-
-    return {"ok": True}
 
 app = ApplicationBuilder().token(TG_TOKEN).build()
 
