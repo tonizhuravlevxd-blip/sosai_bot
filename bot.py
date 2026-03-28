@@ -960,7 +960,11 @@ async def handle_generation_job(job):
                             logging.info(f"USER AFTER PREMIUM CHECK: {dict(user)}")
 
                             # ===== 2. ПЛАТНЫЕ ВИДЕО (ВАЖНО: СРАЗУ ПОСЛЕ PREMIUM) =====
-                            if (user.get("paid_video") or 0) > 0:
+                            paid_video = user["paid_video"] or 0
+
+                            logging.info(f"PAID VIDEO VALUE: {paid_video}")
+
+                            if paid_video > 0:
                                 logging.info("🔥 USING PAID VIDEO")
 
                                 result = await conn.fetchrow("""
