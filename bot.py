@@ -931,7 +931,7 @@ async def handle_generation_job(job):
                         elif mode in ["video", "cartoon"]:
                             # 🔄 ВСЕГДА берём свежего пользователя
                             user = await conn.fetchrow(
-                                "SELECT video_count, paid_video, bonus_videos FROM users WHERE user_id=$1",
+                                "SELECT video_count, paid_video FROM users WHERE user_id=$1",
                                 user_id
                             )
                             premium = await ensure_premium_sync(user_id)
