@@ -108,9 +108,9 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
 # ================= PRICES =================
-PRICE_VIDEO = "100.00"
-PRICE_MUSIC = "100.00"
-PRICE_CARTOON = "100.00"
+PRICE_VIDEO = "28.00"
+PRICE_MUSIC = "50.00"
+PRICE_CARTOON = "29.00"
 
 PREMIUM_IMAGE_LIMIT = 20
 PREMIUM_VIDEO_LIMIT = 5
@@ -878,6 +878,10 @@ async def handle_generation_job(job):
 
                                                                                              # ===== VIDEO =====
                         if mode in ["video", "cartoon"]:
+                            user = await conn.fetchrow(
+                                "SELECT * FROM users WHERE user_id=$1",
+                                user_id
+                            )
 
                             if premium:
                                 limit = PREMIUM_VIDEO_LIMIT
@@ -914,6 +918,10 @@ async def handle_generation_job(job):
 
                                 if not result:
 
+                                    user = await conn.fetchrow(
+                                        "SELECT * FROM users WHERE user_id=$1",
+                                        user_id
+                                    )
                                     paid_video = user.get("paid_video") or 0
 
                                     if paid_video <= 0:
