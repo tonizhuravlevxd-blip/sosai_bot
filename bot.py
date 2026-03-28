@@ -1146,7 +1146,13 @@ async def handle_generation_job(job):
                      user_id
                  )
 
-                 premium = is_premium(user)    
+                 premium = is_premium(user)
+                 await consume_video(
+                     conn,
+                     user_id,
+                     premium,
+                     FREE_VIDEO_LIMIT
+                 )
 
             # ================= MUSIC =================
             elif mode == "music":
