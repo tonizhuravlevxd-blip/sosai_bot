@@ -927,14 +927,17 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                        # ================= VIDEO / CARTOON =================
+                                                # ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
                             # 🔄 ВСЕГДА берём свежего пользователя
                             user = await conn.fetchrow(
-                                "SELECT video_count, paid_video FROM users WHERE user_id=$1",
+                                "SELECT video_count, paid_video, bonus_videos FROM users WHERE user_id=$1",
                                 user_id
                             )
                             premium = await ensure_premium_sync(user_id)
+
+                            # ===== 🔥 ДОБАВЬ ЭТО =====
+                            logging.info(f"USER BEFORE CHECK: {dict(user)}")
 
                             # ===== 1. PREMIUM =====
                             if premium:
@@ -957,8 +960,18 @@ async def handle_generation_job(job):
                                     )
                                     return
 
+                            # ===== 🔥 ПЕРЕЧИТЫВАЕМ USER =====
+                            user = await conn.fetchrow(
+                                "SELECT video_count, paid_video, bonus_videos FROM users WHERE user_id=$1",
+                                user_id
+                            )
+
+                            logging.info(f"USER AFTER REFRESH: {dict(user)}")
+
                             # ===== 2. ПЛАТНЫЕ ВИДЕО =====
-                            elif (user.get("paid_video") or 0) > 0:
+                            if (user.get("paid_video") or 0) > 0:
+                                logging.info("🔥 USING PAID VIDEO")
+
                                 result = await conn.fetchrow("""
                                     UPDATE users
                                     SET paid_video = paid_video - 1
