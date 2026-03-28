@@ -106,7 +106,37 @@ FREE_LIMIT = 5
 FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
-# ===== PREMIUM LIMITS =====
+# =====  LIMITS =====
+async def consume_video_atomic(conn, user_id, premium, free_limit):
+    if premium:
+        result = await conn.fetchrow("""
+            UPDATE users
+            SET video_count = video_count + 1
+            WHERE user_id=$1 AND video_count < $2
+            RETURNING video_count
+        """, user_id, PREMIUM_VIDEO_LIMIT)
+        return bool(result)
+
+    # 🔥 1. сначала платные
+    result = await conn.fetchrow("""
+        UPDATE users
+        SET paid_video = paid_video - 1
+        WHERE user_id=$1 AND paid_video > 0
+        RETURNING paid_video
+    """, user_id)
+
+    if result:
+        return True
+
+    # 🔥 2. free
+    result = await conn.fetchrow("""
+        UPDATE users
+        SET video_count = video_count + 1
+        WHERE user_id=$1 AND video_count < $2
+        RETURNING video_count
+    """, user_id, free_limit)
+
+    return bool(result)
 # ================= PRICES =================
 PRICE_VIDEO = "28.00"
 PRICE_MUSIC = "50.00"
