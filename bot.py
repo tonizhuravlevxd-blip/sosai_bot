@@ -421,35 +421,10 @@ def clean_prompt(prompt: str, mode: str = "image"):
         cleaned = cleaned.replace(bad, good)
         cleaned = cleaned.replace(bad.capitalize(), good)
 
-    # ===== ULTRA BOOSTERS =====
-
-    base_boost = "professional composition"
-
-    video_boost = (
-        "cinematic camera movement, smooth motion, dynamic lighting, "
-        "film scene, realistic motion blur, depth of field"
-    )
-
-    image_boost = (
-        "cinematic lighting, ultra realistic, global illumination, "
-        "highly detailed textures, artstation quality"
-    )
-
-    cartoon_boost = (
-        "2D animated cartoon style, flat shading, simple lighting, expressive characters, clean outlines, vibrant colors"
-    )
-
-    # ===== MODE SWITCH =====
+    # ===== MODE SWITCH (БЕЗ БУСТЕРОВ) =====
     mode = (mode or "").lower()
 
-    if mode == "cartoon":
-        booster = f"{cartoon_boost}"
-    elif mode == "video":
-        booster = f"{video_boost}"
-    else:
-        booster = f"{image_boost}"
-
-    return f"{cleaned}, {booster}"
+    return cleaned
 # ================= FAL MODELS CONFIG =================
 
 FAL_MODELS = {
