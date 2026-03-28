@@ -1694,6 +1694,22 @@ def get_queue_position():
     video_cartoon_queue = generation_queue_video.qsize()
     return generation_queue_image.qsize() + video_cartoon_queue + generation_queue_music.qsize()
 
+async def use_paid_video(user_id):
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT paid_video FROM users WHERE user_id=$1",
+            user_id
+        )
+
+        if user and user["paid_video"] > 0:
+            await conn.execute(
+                "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
+                user_id
+            )
+            return True
+
+        return False
+
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1747,6 +1763,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lock_user_generation(user_id)
+        # ===== ПРОВЕРКА ВИДЕО (PREMIUM → PAID → FREE) =====
+        if mode == "video":
+            premium_active = await ensure_premium_sync(user_id)
+
+            # 1. PREMIUM = безлимит
+            if not premium_active:
+
+                # 2. пробуем списать платное видео
+                used_paid = await use_paid_video(user_id)
+
+                if not used_paid:
+                    user = await get_user(user_id)
+
+                    free_used = user["video_count"]
+                    free_limit = FREE_VIDEO_LIMIT
+
+                    # 3. проверка бесплатного лимита
+                    if free_used >= free_limit:
+                        await update.message.reply_text(
+                            "⚠️ Нет доступных видео.\nКупите пакет или Premium."
+                        )
+                        return
 
         queue_map = {
             "image": generation_queue_image,
@@ -1754,6 +1792,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "cartoon": generation_queue_video,
             "music": generation_queue_music
         }
+
+        
 
         await queue_map.get(mode, generation_queue_image).put({
             "update": update,
@@ -1767,21 +1807,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "status": status
         })
         
-async def use_paid_video(user_id):
-    async with db_pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT paid_video FROM users WHERE user_id=$1",
-            user_id
-        )
-
-        if user and user["paid_video"] > 0:
-            await conn.execute(
-                "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
-                user_id
-            )
-            return True
-
-        return False
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
