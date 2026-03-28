@@ -797,6 +797,45 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
+async def consume_video(conn, user_id, premium, free_limit):
+    """
+    Enterprise atomic limiter:
+    - возвращает True если видео разрешено
+    - False если лимит исчерпан
+    """
+
+    if premium:
+        result = await conn.fetchrow("""
+            UPDATE users
+            SET video_count = video_count + 1
+            WHERE user_id=$1 AND video_count < $2
+            RETURNING video_count
+        """, user_id, PREMIUM_VIDEO_LIMIT)
+
+        return bool(result)
+
+    # ================= FREE + PAID ATOMIC =================
+    result = await conn.fetchrow("""
+        UPDATE users
+        SET video_count = video_count + 1
+        WHERE user_id=$1 AND video_count < $2
+        RETURNING video_count
+    """, user_id, free_limit)
+
+    if result:
+        return True
+
+    # ================= TRY PAID VIDEO ATOMIC =================
+    paid = await conn.fetchrow("""
+        UPDATE users
+        SET paid_video = paid_video - 1,
+            video_count = video_count + 1
+        WHERE user_id=$1 AND paid_video > 0
+        RETURNING paid_video
+    """, user_id)
+
+    return bool(paid)
+
 
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
