@@ -931,7 +931,7 @@ async def handle_generation_job(job):
                         elif mode in ["video", "cartoon"]:
                             # 🔄 ВСЕГДА берём свежего пользователя
                             user = await conn.fetchrow(
-                                "SELECT video_count, paid_video FROM users WHERE user_id=$1",
+                                "SELECT video_count, paid_video, bonus_videos FROM users WHERE user_id=$1",
                                 user_id
                             )
                             premium = await ensure_premium_sync(user_id)
@@ -946,11 +946,19 @@ async def handle_generation_job(job):
                                 """, user_id, PREMIUM_VIDEO_LIMIT)
 
                                 if not result:
-                                    await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
+
+                                    await msg.reply_text(
+                                        "⚠️ Лимит видео исчерпан (Premium)",
+                                        reply_markup=keyboard
+                                    )
                                     return
 
                             # ===== 2. ПЛАТНЫЕ ВИДЕО =====
-                            elif user["paid_video"] > 0:
+                            elif (user.get("paid_video") or 0) > 0:
                                 result = await conn.fetchrow("""
                                     UPDATE users
                                     SET paid_video = paid_video - 1
@@ -964,7 +972,7 @@ async def handle_generation_job(job):
 
                             # ===== 3. БЕСПЛАТНЫЕ =====
                             else:
-                                limit = FREE_VIDEO_LIMIT + user.get("bonus_videos", 0)
+                                limit = FREE_VIDEO_LIMIT + (user.get("bonus_videos") or 0)
 
                                 result = await conn.fetchrow("""
                                     UPDATE users
