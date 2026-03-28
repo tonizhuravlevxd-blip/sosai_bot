@@ -797,6 +797,21 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
+async def can_generate_video(conn, user_id, premium, free_limit):
+
+    user = await conn.fetchrow(
+        "SELECT video_count, paid_video FROM users WHERE user_id=$1",
+        user_id
+    )
+
+    if premium:
+        return user["video_count"] < PREMIUM_VIDEO_LIMIT
+
+    if user["paid_video"] > 0:
+        return True
+
+    return user["video_count"] < free_limit
+
 async def consume_video(conn, user_id, premium, free_limit):
 
     # ===== PREMIUM =====
@@ -928,7 +943,7 @@ async def handle_generation_job(job):
                             premium = is_premium(user)
 
                             # 🎬 ПРОБУЕМ СПИСАТЬ (paid -> free внутри функции)
-                            allowed = await consume_video(
+                            allowed = await can_generate_video(
                                 conn,
                                 user_id,
                                 premium,
@@ -1123,6 +1138,15 @@ async def handle_generation_job(job):
                 except:
                     result_file.seek(0)
                     await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+                # ===== ✅ ВОТ СЮДА ВСТАВИТЬ =====
+                async with db_pool.acquire() as conn:
+
+                 user = await conn.fetchrow(
+                     "SELECT * FROM users WHERE user_id=$1",
+                     user_id
+                 )
+
+                 premium = is_premium(user)    
 
             # ================= MUSIC =================
             elif mode == "music":
