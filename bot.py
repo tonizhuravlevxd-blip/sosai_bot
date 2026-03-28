@@ -797,56 +797,6 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
-async def can_generate_video(conn, user_id, premium, free_limit):
-
-    user = await conn.fetchrow(
-        "SELECT video_count, paid_video FROM users WHERE user_id=$1",
-        user_id
-    )
-
-    if premium:
-        return user["video_count"] < PREMIUM_VIDEO_LIMIT
-
-    if user["paid_video"] > 0:
-        return True
-
-    return user["video_count"] < free_limit
-
-async def consume_video(conn, user_id, premium, free_limit):
-
-    # ===== PREMIUM =====
-    if premium:
-        result = await conn.fetchrow("""
-            UPDATE users
-            SET video_count = video_count + 1
-            WHERE user_id=$1 AND video_count < $2
-            RETURNING video_count
-        """, user_id, PREMIUM_VIDEO_LIMIT)
-
-        return bool(result)
-
-    # ===== ✅ СНАЧАЛА ПЛАТНЫЕ (БЕЗ УВЕЛИЧЕНИЯ video_count) =====
-    result = await conn.fetchrow("""
-        UPDATE users
-        SET paid_video = paid_video - 1
-        WHERE user_id=$1 AND paid_video > 0
-        RETURNING paid_video
-    """, user_id)
-
-    if result:
-        return True
-
-    # ===== FREE =====
-    result = await conn.fetchrow("""
-        UPDATE users
-        SET video_count = video_count + 1
-        WHERE user_id=$1 AND video_count < $2
-        RETURNING video_count
-    """, user_id, free_limit)
-
-    return bool(result)
-
-
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -927,89 +877,31 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                        # ================= VIDEO / CARTOON =================
+# ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
-                            # 🔄 ВСЕГДА берём свежего пользователя
-                            user = await conn.fetchrow(
-                                "SELECT video_count, paid_video FROM users WHERE user_id=$1",
-                                user_id
-                            )
                             premium = await ensure_premium_sync(user_id)
 
-                            # ===== 🔥 ДОБАВЬ ЭТО =====
-                            logging.info(f"USER BEFORE CHECK: {dict(user)}")
-
-                            # ===== 1. PREMIUM =====
-                            if premium:
-                                result = await conn.fetchrow("""
-                                    UPDATE users
-                                    SET video_count = COALESCE(video_count, 0) + 1
-                                    WHERE user_id=$1 AND COALESCE(video_count, 0) < $2
-                                    RETURNING video_count
-                                """, user_id, PREMIUM_VIDEO_LIMIT)
-
-                                if not result:
-                                    keyboard = InlineKeyboardMarkup([
-                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
-                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                    ])
-
-                                    await msg.reply_text(
-                                        "⚠️ Лимит видео исчерпан (Premium)",
-                                        reply_markup=keyboard
-                                    )
-                                    return
-
-                            # ===== 🔥 ПЕРЕЧИТЫВАЕМ USER =====
-                            user = await conn.fetchrow(
-                                "SELECT video_count, paid_video FROM users WHERE user_id=$1",
-                                user_id
+                            ok = await consume_video_atomic(
+                                conn,
+                                user_id,
+                                premium,
+                                FREE_VIDEO_LIMIT
                             )
 
-                            logging.info(f"USER AFTER REFRESH: {dict(user)}")
+                            if not ok:
+                                keyboard = InlineKeyboardMarkup([
+                                    [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                    [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                ])
 
-                            # ===== 2. ПЛАТНЫЕ ВИДЕО =====
-                            if (user.get("paid_video") or 0) > 0:
-                                logging.info("🔥 USING PAID VIDEO")
-
-                                result = await conn.fetchrow("""
-                                    UPDATE users
-                                    SET paid_video = paid_video - 1
-                                    WHERE user_id=$1 AND paid_video > 0
-                                    RETURNING paid_video
-                                """, user_id)
-
-                                if not result:
-                                    await msg.reply_text("⚠️ Ошибка списания купленного видео")
-                                    return
-
-                            # ===== 3. БЕСПЛАТНЫЕ =====
-                            else:
-                                limit = FREE_VIDEO_LIMIT
-
-                                result = await conn.fetchrow("""
-                                    UPDATE users
-                                    SET video_count = COALESCE(video_count, 0) + 1
-                                    WHERE user_id=$1 AND COALESCE(video_count, 0) < $2
-                                    RETURNING video_count
-                                """, user_id, limit)
-
-                                if not result:
-                                    free_left = max(0, limit - (user.get("video_count") or 0))
-                                    paid = user.get("paid_video", 0)
-
-                                    keyboard = InlineKeyboardMarkup([
-                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
-                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                    ])
-
-                                    await msg.reply_text(
-                                        f"🎬 Лимит видео исчерпан\n\n"
-                                        f"🆓 Бесплатно осталось: {free_left}\n"
-                                        f"💰 Куплено: {paid}",
-                                        reply_markup=keyboard
-                                    )
-                                    return
+                                await msg.reply_text(
+                                    f"🎬 Лимит видео исчерпан\n\n"
+                                    f"🆓 Бесплатно осталось: {free_left}\n"
+                                    f"💰 Куплено: {paid}",
+                                    reply_markup=keyboard
+                                )
+                                return
+                                    
                                  
 
     
@@ -1694,21 +1586,6 @@ def get_queue_position():
     video_cartoon_queue = generation_queue_video.qsize()
     return generation_queue_image.qsize() + video_cartoon_queue + generation_queue_music.qsize()
 
-async def use_paid_video(user_id):
-    async with db_pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT paid_video FROM users WHERE user_id=$1",
-            user_id
-        )
-
-        if user and user["paid_video"] > 0:
-            await conn.execute(
-                "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
-                user_id
-            )
-            return True
-
-        return False
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1763,28 +1640,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lock_user_generation(user_id)
-        # ===== ПРОВЕРКА ВИДЕО (PREMIUM → PAID → FREE) =====
-        if mode == "video":
-            premium_active = await ensure_premium_sync(user_id)
-
-            # 1. PREMIUM = безлимит
-            if not premium_active:
-
-                # 2. пробуем списать платное видео
-                used_paid = await use_paid_video(user_id)
-
-                if not used_paid:
-                    user = await get_user(user_id)
-
-                    free_used = user["video_count"]
-                    free_limit = FREE_VIDEO_LIMIT
-
-                    # 3. проверка бесплатного лимита
-                    if free_used >= free_limit:
-                        await update.message.reply_text(
-                            "⚠️ Нет доступных видео.\nКупите пакет или Premium."
-                        )
-                        return
+        
 
         queue_map = {
             "image": generation_queue_image,
