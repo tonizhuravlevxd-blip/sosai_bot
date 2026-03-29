@@ -99,7 +99,7 @@ from telegram.ext import ContextTypes
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FAL_KEY = os.getenv("FAL_KEY")
-ADMIN_IDS = 5523265642 
+ADMIN_IDS = [5523265642] 
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY не установлен")
