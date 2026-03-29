@@ -296,7 +296,7 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⛔ Нет доступа")
         return
 
-    async with context.bot_data["db"].acquire() as conn:
+    async with db_pool.acquire() as conn:
 
         stats = await conn.fetchrow("""
             SELECT
