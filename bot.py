@@ -2019,12 +2019,19 @@ async def post_init(app):
 
     await init_db()
 
-    # Уже объявленные глобальные очереди, не создаем новые
-    # generation_queue_image = asyncio.Queue(maxsize=5000)
-    # generation_queue_video = asyncio.Queue(maxsize=2000)
-    # generation_queue_music = asyncio.Queue(maxsize=2000)
-    
-    # Общая очередь для статистики / повторов
+    # 🔥 ВРЕМЕННЫЙ FIX NULL В БАЗЕ
+    async with db_pool.acquire() as conn:
+        await conn.execute("""
+            UPDATE users
+            SET paid_video = 0
+            WHERE paid_video IS NULL
+        """)
+
+        await conn.execute("""
+            ALTER TABLE users
+            ALTER COLUMN paid_video SET DEFAULT 0
+        """)
+
     global generation_queue
     generation_queue = asyncio.Queue(maxsize=10000)
 
@@ -2037,12 +2044,11 @@ async def post_init(app):
 
     asyncio.create_task(cache_cleaner())
     await set_commands(app)
+
     logging.info("✅ PostgreSQL подключен и бот готов")
+
     if not db_pool:
         raise Exception("❌ DB не инициализирована")
-
-
-app.post_init = post_init
 
 
 
