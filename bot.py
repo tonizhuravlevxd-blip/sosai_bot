@@ -408,6 +408,8 @@ async def reset_user_limits(user_id):
             SET image_count = 0,
                 video_count = 0,
                 music_count = 0,
+                premium = 0,
+                premium_until = 0,
                 week_start = $1
             WHERE user_id = $2
             """,
