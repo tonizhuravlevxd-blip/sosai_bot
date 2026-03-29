@@ -914,7 +914,7 @@ async def handle_generation_job(job):
 
 # ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
-                            premium = await ensure_premium_sync(user_id)
+                        
                             print("DEBUG PREMIUM:", premium)
 
                             ok = await consume_video_atomic(
