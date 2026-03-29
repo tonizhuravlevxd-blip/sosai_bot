@@ -919,6 +919,15 @@ async def handle_generation_job(job):
                             )
 
                             if not ok:
+                                user = await conn.fetchrow("""
+                                    SELECT video_count, paid_video
+                                    FROM users
+                                    WHERE user_id=$1
+                                """, user_id)
+
+                                used_free = user["video_count"]
+                                paid = user["paid_video"]
+                                
                                 keyboard = InlineKeyboardMarkup([
                                     [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
                                     [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
