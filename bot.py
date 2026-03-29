@@ -1596,7 +1596,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= ADMIN (РАННИЙ ВЫХОД) =================
     if data == "reset_limits":
-        if user_id != ADMIN_IDS:
+        if user_id not in ADMIN_IDS:
             await query.message.reply_text("❌ Нет доступа")
             return
         await reset_user_limits(user_id)
