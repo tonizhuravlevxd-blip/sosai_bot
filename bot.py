@@ -926,7 +926,7 @@ async def handle_generation_job(job):
 
                                 await msg.reply_text(
                                     f"🎬 Лимит видео исчерпан\n\n"
-                                    f"🆓 Бесплатно осталось: {free_left}\n"
+                                    f"🆓 Использовано: {used_free}\n"
                                     f"💰 Куплено: {paid}",
                                     reply_markup=keyboard
                                 )
