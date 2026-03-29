@@ -1927,7 +1927,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = await get_user(user_id)
-    premium_active = False  тест надо убрать
+    premium_active = False  # тест надо убрать
     
     if not user:
         await message.reply_text("⚠ Ошибка пользователя. Напишите /start")
