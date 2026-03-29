@@ -2054,7 +2054,7 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = None
 
     # ===== КНОПКА АДМИНА =====
-    if tg_user.id == ADMIN_IDS:
+    if tg_user.id in ADMIN_IDS:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
         ])
