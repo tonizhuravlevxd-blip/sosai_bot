@@ -106,42 +106,7 @@ FREE_LIMIT = 5
 FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
-# =====  LIMITS =====
-async def consume_video_atomic(conn, user_id, premium, free_limit):
-
-    # 1. premium
-    if premium:
-        result = await conn.fetchrow("""
-            UPDATE users
-            SET video_count = video_count + 1
-            WHERE user_id=$1 AND video_count < $2
-            RETURNING video_count
-        """, user_id, PREMIUM_VIDEO_LIMIT)
-        print("DEBUG PAID:", user_id, result)
-
-        return bool(result)
-
-    # 2. paid video (ВАЖНО: просто уменьшаем и проверяем что строка обновилась)
-    result = await conn.fetchrow("""
-        UPDATE users
-        SET paid_video = paid_video - 1
-        WHERE user_id=$1 AND paid_video > 0
-        RETURNING paid_video
-    """, user_id)
-
-    if result:
-        return True
-
-    # 3. free
-    result = await conn.fetchrow("""
-        UPDATE users
-        SET video_count = video_count + 1
-        WHERE user_id=$1 AND video_count < $2
-        RETURNING video_count
-    """, user_id, free_limit)
-
-    return bool(result)
-    
+# ===== PREMIUM LIMITS =====
 # ================= PRICES =================
 PRICE_VIDEO = "28.00"
 PRICE_MUSIC = "50.00"
@@ -260,17 +225,12 @@ def get_queue_position():
 
 async def init_db():
     global db_pool
-    print("🚀 INIT DB START")
-    if not DATABASE_URL:
-        raise Exception("❌ DATABASE_URL не установлен")
 
     # Подключаемся к БД через DATABASE_URL
     db_pool = await asyncpg.create_pool(DATABASE_URL)
-    print("✅ DB POOL CREATED")
 
     # Создаем таблицы, если их нет
     async with db_pool.acquire() as conn:
-        print("✅ DB CONNECTED")
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -837,6 +797,56 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
+async def can_generate_video(conn, user_id, premium, free_limit):
+
+    user = await conn.fetchrow(
+        "SELECT video_count, paid_video FROM users WHERE user_id=$1",
+        user_id
+    )
+
+    if premium:
+        return user["video_count"] < PREMIUM_VIDEO_LIMIT
+
+    if user["paid_video"] > 0:
+        return True
+
+    return user["video_count"] < free_limit
+
+async def consume_video(conn, user_id, premium, free_limit):
+
+    # ===== PREMIUM =====
+    if premium:
+        result = await conn.fetchrow("""
+            UPDATE users
+            SET video_count = video_count + 1
+            WHERE user_id=$1 AND video_count < $2
+            RETURNING video_count
+        """, user_id, PREMIUM_VIDEO_LIMIT)
+
+        return bool(result)
+
+    # ===== ✅ СНАЧАЛА ПЛАТНЫЕ (БЕЗ УВЕЛИЧЕНИЯ video_count) =====
+    result = await conn.fetchrow("""
+        UPDATE users
+        SET paid_video = paid_video - 1
+        WHERE user_id=$1 AND paid_video > 0
+        RETURNING paid_video
+    """, user_id)
+
+    if result:
+        return True
+
+    # ===== FREE =====
+    result = await conn.fetchrow("""
+        UPDATE users
+        SET video_count = video_count + 1
+        WHERE user_id=$1 AND video_count < $2
+        RETURNING video_count
+    """, user_id, free_limit)
+
+    return bool(result)
+
+
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -917,43 +927,89 @@ async def handle_generation_job(job):
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-# ================= VIDEO / CARTOON =================
+                        # ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
-                        
-                            print("DEBUG PREMIUM:", premium)
+                            # 🔄 ВСЕГДА берём свежего пользователя
+                            user = await conn.fetchrow(
+                                "SELECT video_count, paid_video FROM users WHERE user_id=$1",
+                                user_id
+                            )
+                            premium = await ensure_premium_sync(user_id)
 
-                            ok = await consume_video_atomic(
-                                conn,
-                                user_id,
-                                premium,
-                                FREE_VIDEO_LIMIT
+                            # ===== 🔥 ДОБАВЬ ЭТО =====
+                            logging.info(f"USER BEFORE CHECK: {dict(user)}")
+
+                            # ===== 1. PREMIUM =====
+                            if premium:
+                                result = await conn.fetchrow("""
+                                    UPDATE users
+                                    SET video_count = COALESCE(video_count, 0) + 1
+                                    WHERE user_id=$1 AND COALESCE(video_count, 0) < $2
+                                    RETURNING video_count
+                                """, user_id, PREMIUM_VIDEO_LIMIT)
+
+                                if not result:
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
+
+                                    await msg.reply_text(
+                                        "⚠️ Лимит видео исчерпан (Premium)",
+                                        reply_markup=keyboard
+                                    )
+                                    return
+
+                            # ===== 🔥 ПЕРЕЧИТЫВАЕМ USER =====
+                            user = await conn.fetchrow(
+                                "SELECT video_count, paid_video FROM users WHERE user_id=$1",
+                                user_id
                             )
 
-                            if not ok:
-                                user = await conn.fetchrow("""
-                                    SELECT video_count, paid_video
-                                    FROM users
-                                    WHERE user_id=$1
+                            logging.info(f"USER AFTER REFRESH: {dict(user)}")
+
+                            # ===== 2. ПЛАТНЫЕ ВИДЕО =====
+                            if (user.get("paid_video") or 0) > 0:
+                                logging.info("🔥 USING PAID VIDEO")
+
+                                result = await conn.fetchrow("""
+                                    UPDATE users
+                                    SET paid_video = paid_video - 1
+                                    WHERE user_id=$1 AND paid_video > 0
+                                    RETURNING paid_video
                                 """, user_id)
-                                print("DEBUG VIDEO:", user)
 
-                                used_free = user["video_count"]
-                                paid = user["paid_video"]
-                                free_left = FREE_VIDEO_LIMIT - used_free
-                                
-                                keyboard = InlineKeyboardMarkup([
-                                    [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
-                                    [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                ])
+                                if not result:
+                                    await msg.reply_text("⚠️ Ошибка списания купленного видео")
+                                    return
 
-                                await msg.reply_text(
-                                    f"🎬 Лимит видео исчерпан\n\n"
-                                    f"🆓 Использовано: {used_free}\n"
-                                    f"💰 Куплено: {paid}",
-                                    reply_markup=keyboard
-                                )
-                                return
-                                    
+                            # ===== 3. БЕСПЛАТНЫЕ =====
+                            else:
+                                limit = FREE_VIDEO_LIMIT
+
+                                result = await conn.fetchrow("""
+                                    UPDATE users
+                                    SET video_count = COALESCE(video_count, 0) + 1
+                                    WHERE user_id=$1 AND COALESCE(video_count, 0) < $2
+                                    RETURNING video_count
+                                """, user_id, limit)
+
+                                if not result:
+                                    free_left = max(0, limit - (user.get("video_count") or 0))
+                                    paid = user.get("paid_video", 0)
+
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
+
+                                    await msg.reply_text(
+                                        f"🎬 Лимит видео исчерпан\n\n"
+                                        f"🆓 Бесплатно осталось: {free_left}\n"
+                                        f"💰 Куплено: {paid}",
+                                        reply_markup=keyboard
+                                    )
+                                    return
                                  
 
     
@@ -1638,6 +1694,21 @@ def get_queue_position():
     video_cartoon_queue = generation_queue_video.qsize()
     return generation_queue_image.qsize() + video_cartoon_queue + generation_queue_music.qsize()
 
+async def use_paid_video(user_id):
+    async with db_pool.acquire() as conn:
+        user = await conn.fetchrow(
+            "SELECT paid_video FROM users WHERE user_id=$1",
+            user_id
+        )
+
+        if user and user["paid_video"] > 0:
+            await conn.execute(
+                "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
+                user_id
+            )
+            return True
+
+        return False
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1692,7 +1763,28 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lock_user_generation(user_id)
-        
+        # ===== ПРОВЕРКА ВИДЕО (PREMIUM → PAID → FREE) =====
+        if mode == "video":
+            premium_active = await ensure_premium_sync(user_id)
+
+            # 1. PREMIUM = безлимит
+            if not premium_active:
+
+                # 2. пробуем списать платное видео
+                used_paid = await use_paid_video(user_id)
+
+                if not used_paid:
+                    user = await get_user(user_id)
+
+                    free_used = user["video_count"]
+                    free_limit = FREE_VIDEO_LIMIT
+
+                    # 3. проверка бесплатного лимита
+                    if free_used >= free_limit:
+                        await update.message.reply_text(
+                            "⚠️ Нет доступных видео.\nКупите пакет или Premium."
+                        )
+                        return
 
         queue_map = {
             "image": generation_queue_image,
@@ -2024,19 +2116,12 @@ async def post_init(app):
 
     await init_db()
 
-    # 🔥 ВРЕМЕННЫЙ FIX NULL В БАЗЕ
-    async with db_pool.acquire() as conn:
-        await conn.execute("""
-            UPDATE users
-            SET paid_video = 0
-            WHERE paid_video IS NULL
-        """)
-
-        await conn.execute("""
-            ALTER TABLE users
-            ALTER COLUMN paid_video SET DEFAULT 0
-        """)
-
+    # Уже объявленные глобальные очереди, не создаем новые
+    # generation_queue_image = asyncio.Queue(maxsize=5000)
+    # generation_queue_video = asyncio.Queue(maxsize=2000)
+    # generation_queue_music = asyncio.Queue(maxsize=2000)
+    
+    # Общая очередь для статистики / повторов
     global generation_queue
     generation_queue = asyncio.Queue(maxsize=10000)
 
@@ -2049,11 +2134,12 @@ async def post_init(app):
 
     asyncio.create_task(cache_cleaner())
     await set_commands(app)
-
     logging.info("✅ PostgreSQL подключен и бот готов")
-
     if not db_pool:
         raise Exception("❌ DB не инициализирована")
+
+
+app.post_init = post_init
 
 
 
