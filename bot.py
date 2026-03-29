@@ -973,9 +973,9 @@ async def handle_generation_job(job):
                         await reset_week_if_needed(user)
                         premium = is_premium(user)
 
-# ===== IMAGE =====
+                        # ===== IMAGE =====
                         if mode == "image":
-                                
+
                             if not premium:
                                 if user["image_count"] >= 2:
                                     subscribed = await is_user_subscribed(context.bot, user_id)
@@ -986,6 +986,7 @@ async def handle_generation_job(job):
                                             reply_markup=get_subscribe_keyboard()
                                         )
                                         return
+
                             limit = PREMIUM_IMAGE_LIMIT if premium else FREE_LIMIT + user.get("bonus_images", 0)
 
                             result = await conn.fetchrow("""
@@ -1001,16 +1002,18 @@ async def handle_generation_job(job):
 
                         # ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
-                            # ===== ПРОВЕРКА ПОДПИСКИ ДЛЯ БЕСПЛАТНЫХ =====
-                        if not premium:
-                            subscribed = await is_user_subscribed(context.bot, user_id)
 
-                            if not subscribed:
-                                await msg.reply_text(
-                                    "📢 Чтобы использовать бесплатные видео — подпишитесь на канал",
-                                    reply_markup=get_subscribe_keyboard()
-                                )
-                                return
+                            # ===== ПРОВЕРКА ПОДПИСКИ ДЛЯ БЕСПЛАТНЫХ =====
+                            if not premium:
+                                subscribed = await is_user_subscribed(context.bot, user_id)
+
+                                if not subscribed:
+                                    await msg.reply_text(
+                                        "📢 Чтобы использовать бесплатные видео — подпишитесь на канал",
+                                        reply_markup=get_subscribe_keyboard()
+                                    )
+                                    return
+
                             logging.info(f"🎬 START VIDEO FLOW user={user_id}")
 
                             user = await conn.fetchrow(
