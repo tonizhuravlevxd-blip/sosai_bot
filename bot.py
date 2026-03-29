@@ -1927,7 +1927,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = await get_user(user_id)
-    premium_active = False  # тест надо убрать
+    premium_active = await ensure_premium_sync(user_id)
     
     if not user:
         await message.reply_text("⚠ Ошибка пользователя. Напишите /start")
@@ -2034,7 +2034,6 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.get("premium", 0) == 1
         and user.get("premium_until", 0) > int(time.time())
     )
-    premium_active = False  # 🔥 Для проверки бесплатных лимитов
 
     premium_status = "🍩 Пончик-Премиум ЕСТЬ" if premium_active else "❌ Премиум нет"
 
