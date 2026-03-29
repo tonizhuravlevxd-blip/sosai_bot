@@ -99,7 +99,7 @@ from telegram.ext import ContextTypes
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FAL_KEY = os.getenv("FAL_KEY")
-ADMIN_ID = 5523265642  # ← замени на свой Telegram ID
+ADMIN_IDS = 5523265642 
 
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY не установлен")
@@ -292,7 +292,7 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     # 👉 защита админа
-    if user_id not in ADMIN_ID:
+    if user_id not in ADMIN_IDS:
         await update.message.reply_text("⛔ Нет доступа")
         return
 
@@ -1558,7 +1558,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= ADMIN (РАННИЙ ВЫХОД) =================
     if data == "reset_limits":
-        if user_id != ADMIN_ID:
+        if user_id != ADMIN_IDS:
             await query.message.reply_text("❌ Нет доступа")
             return
         await reset_user_limits(user_id)
@@ -2006,7 +2006,7 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = None
 
     # ===== КНОПКА АДМИНА =====
-    if tg_user.id == ADMIN_ID:
+    if tg_user.id == ADMIN_IDS:
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
         ])
