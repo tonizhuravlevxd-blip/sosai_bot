@@ -260,12 +260,17 @@ def get_queue_position():
 
 async def init_db():
     global db_pool
+    print("🚀 INIT DB START")
+    if not DATABASE_URL:
+        raise Exception("❌ DATABASE_URL не установлен")
 
     # Подключаемся к БД через DATABASE_URL
     db_pool = await asyncpg.create_pool(DATABASE_URL)
+    print("✅ DB POOL CREATED")
 
     # Создаем таблицы, если их нет
     async with db_pool.acquire() as conn:
+        print("✅ DB CONNECTED")
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
