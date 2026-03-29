@@ -934,7 +934,7 @@ async def handle_generation_job(job):
                                 "SELECT video_count, paid_video FROM users WHERE user_id=$1",
                                 user_id
                             )
-                            premium = await ensure_premium_sync(user_id)
+                            premium = is_premium(user)
 
                             # ===== 🔥 ДОБАВЬ ЭТО =====
                             logging.info(f"USER BEFORE CHECK: {dict(user)}")
@@ -1763,28 +1763,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         lock_user_generation(user_id)
-        # ===== ПРОВЕРКА ВИДЕО (PREMIUM → PAID → FREE) =====
-        if mode == "video":
-            premium_active = await ensure_premium_sync(user_id)
-
-            # 1. PREMIUM = безлимит
-            if not premium_active:
-
-                # 2. пробуем списать платное видео
-                used_paid = await use_paid_video(user_id)
-
-                if not used_paid:
-                    user = await get_user(user_id)
-
-                    free_used = user["video_count"]
-                    free_limit = FREE_VIDEO_LIMIT
-
-                    # 3. проверка бесплатного лимита
-                    if free_used >= free_limit:
-                        await update.message.reply_text(
-                            "⚠️ Нет доступных видео.\nКупите пакет или Premium."
-                        )
-                        return
 
         queue_map = {
             "image": generation_queue_image,
