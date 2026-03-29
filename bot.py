@@ -909,6 +909,8 @@ async def handle_generation_job(job):
                         if not user:
                             return
 
+                        logging.info(f"USER DATA: {dict(user)}")
+
                         await reset_week_if_needed(user)
                         premium = is_premium(user)
 
@@ -929,6 +931,7 @@ async def handle_generation_job(job):
 
                         # ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
+                            logging.info(f"🎬 START VIDEO FLOW user={user_id}")
                             # 🔄 ВСЕГДА берём свежего пользователя
                             user = await conn.fetchrow(
                                 "SELECT * FROM users WHERE user_id=$1",
@@ -965,26 +968,41 @@ async def handle_generation_job(job):
                                 "SELECT video_count, paid_video FROM users WHERE user_id=$1",
                                 user_id
                             )
+                            logging.info(f"🔄 AFTER REFRESH user={user_id} data={dict(user)}")
 
-                            logging.info(f"USER AFTER REFRESH: {dict(user)}")
+                            
 
                             # ===== 2. ПЛАТНЫЕ ВИДЕО =====
+                            logging.info(
+                                f"🎯 DECISION user={user_id} "
+                                f"paid={user.get('paid_video')} "
+                                f"video_count={user.get('video_count')} "
+                                f"premium={premium}"
+                            )
+                            
                             if (user.get("paid_video") or 0) > 0:
-                                logging.info("🔥 USING PAID VIDEO")
+                                logging.info(f"💰 TRY USE PAID VIDEO user={user_id}")
 
                                 result = await conn.fetchrow("""
                                     UPDATE users
+                                    logging.info(f"✅ PAID VIDEO USED user={user_id}")
                                     SET paid_video = paid_video - 1
                                     WHERE user_id=$1 AND paid_video > 0
                                     RETURNING paid_video
                                 """, user_id)
 
                                 if not result:
+                                    logging.warning(
+                                        f"❌ LIMIT HIT user={user_id} "
+                                        f"video_count={user.get('video_count')} "
+                                        f"paid={user.get('paid_video')}"
+                                    )
                                     await msg.reply_text("⚠️ Ошибка списания купленного видео")
                                     return
 
                             # ===== 3. БЕСПЛАТНЫЕ =====
                             else:
+                                logging.info(f"🆓 USING FREE LIMIT user={user_id}")
                                 limit = FREE_VIDEO_LIMIT
 
                                 result = await conn.fetchrow("""
