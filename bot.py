@@ -108,6 +108,8 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # =====  LIMITS =====
 async def consume_video_atomic(conn, user_id, premium, free_limit):
+
+    # 1. premium
     if premium:
         result = await conn.fetchrow("""
             UPDATE users
@@ -115,9 +117,11 @@ async def consume_video_atomic(conn, user_id, premium, free_limit):
             WHERE user_id=$1 AND video_count < $2
             RETURNING video_count
         """, user_id, PREMIUM_VIDEO_LIMIT)
+        print("DEBUG PAID:", user_id, result)
+
         return bool(result)
 
-    # 🔥 1. сначала платные
+    # 2. paid video (ВАЖНО: просто уменьшаем и проверяем что строка обновилась)
     result = await conn.fetchrow("""
         UPDATE users
         SET paid_video = paid_video - 1
@@ -128,7 +132,7 @@ async def consume_video_atomic(conn, user_id, premium, free_limit):
     if result:
         return True
 
-    # 🔥 2. free
+    # 3. free
     result = await conn.fetchrow("""
         UPDATE users
         SET video_count = video_count + 1
@@ -137,6 +141,7 @@ async def consume_video_atomic(conn, user_id, premium, free_limit):
     """, user_id, free_limit)
 
     return bool(result)
+    
 # ================= PRICES =================
 PRICE_VIDEO = "28.00"
 PRICE_MUSIC = "50.00"
@@ -910,6 +915,7 @@ async def handle_generation_job(job):
 # ================= VIDEO / CARTOON =================
                         elif mode in ["video", "cartoon"]:
                             premium = await ensure_premium_sync(user_id)
+                            print("DEBUG PREMIUM:", premium)
 
                             ok = await consume_video_atomic(
                                 conn,
@@ -924,9 +930,11 @@ async def handle_generation_job(job):
                                     FROM users
                                     WHERE user_id=$1
                                 """, user_id)
+                                print("DEBUG VIDEO:", user)
 
                                 used_free = user["video_count"]
                                 paid = user["paid_video"]
+                                free_left = FREE_VIDEO_LIMIT - used_free
                                 
                                 keyboard = InlineKeyboardMarkup([
                                     [InlineKeyboardButton("💳 Купить 1 видео (89₽)", callback_data="buy_video")],
