@@ -2033,6 +2033,7 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user.get("premium", 0) == 1
         and user.get("premium_until", 0) > int(time.time())
     )
+    premium_active = False  # 🔥 Для проверки бесплатных лимитов
 
     premium_status = "🍩 Пончик-Премиум ЕСТЬ" if premium_active else "❌ Премиум нет"
 
