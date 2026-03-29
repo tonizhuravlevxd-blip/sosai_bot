@@ -92,6 +92,10 @@ from openai import OpenAI
 
 logging.basicConfig(level=logging.INFO)
 
+import logging
+from telegram import Update
+from telegram.ext import ContextTypes
+
 TG_TOKEN = os.getenv("TG_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 FAL_KEY = os.getenv("FAL_KEY")
@@ -265,7 +269,6 @@ async def init_db():
         ADD COLUMN IF NOT EXISTS music_count INTEGER DEFAULT 0
         """)
 
-        # ===== ✅ НОВОЕ: покупки =====
         await conn.execute("""
         ALTER TABLE users 
         ADD COLUMN IF NOT EXISTS paid_video INTEGER DEFAULT 0
@@ -285,6 +288,48 @@ async def init_db():
         """)
 
 
+async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    # 👉 защита админа
+    if user_id not in ADMIN_ID:
+        await update.message.reply_text("⛔ Нет доступа")
+        return
+
+    async with context.bot_data["db"].acquire() as conn:
+
+        stats = await conn.fetchrow("""
+            SELECT
+                COUNT(*) AS total_users,
+                SUM(CASE WHEN premium = 1 THEN 1 ELSE 0 END) AS premium_users,
+                SUM(video_count) AS total_videos,
+                SUM(image_count) AS total_images,
+                SUM(music_count) AS total_music,
+                SUM(paid_video) AS paid_left
+            FROM users
+        """)
+
+        revenue = await conn.fetchval("""
+            SELECT COALESCE(SUM(5 - paid_video), 0) * 0.50
+            FROM users
+        """)
+
+    text = f"""
+📊 <b>СТАТИСТИКА БОТА</b>
+
+👤 Users: {stats['total_users']}
+⭐ Premium: {stats['premium_users']}
+
+🎬 Videos used: {stats['total_videos']}
+🖼 Images used: {stats['total_images']}
+🎵 Music used: {stats['total_music']}
+
+💰 Paid video remaining: {stats['paid_left']}
+📈 Revenue: {revenue:.2f} €
+
+"""
+
+    await update.message.reply_text(text, parse_mode="HTML")
 
 # ================= MUSIC CACHE FUNCTIONS =================
 
@@ -2057,6 +2102,7 @@ app.add_handler(CommandHandler("suno", suno))
 app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("finish", finish))
 app.add_handler(CommandHandler("restart", restart))
+app.add_handler(CommandHandler("stats", stats_handler))
 
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(CallbackQueryHandler(cancel_generation_callback, pattern=r"^cancel_gen:\d+$"))
