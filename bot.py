@@ -975,21 +975,29 @@ async def handle_generation_job(job):
                         await reset_week_if_needed(user)
                         premium = is_premium(user)
 
-                        # ===== IMAGE =====
+                         # ===== IMAGE =====
                         if mode == "image":
 
                             if not premium:
-                                if user["image_count"] >= 2:
+                                free_limit = 2
+
+                                if user["image_count"] >= free_limit:
                                     subscribed = await is_user_subscribed(context.bot, user_id)
 
                                     if not subscribed:
                                         await msg.reply_text(
-                                            "📢 Чтобы продолжить генерацию изображений — подпишитесь на канал",
+                                            "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
+                                            "Подпишитесь на канал, чтобы продолжить 👇",
                                             reply_markup=get_subscribe_keyboard()
                                         )
                                         return
 
-                            limit = PREMIUM_IMAGE_LIMIT if premium else FREE_LIMIT + user.get("bonus_images", 0)
+                                    # ✅ если подписан — даём расширенный лимит
+                                    limit = FREE_LIMIT + user.get("bonus_images", 0)
+                                else:
+                                    limit = free_limit
+                            else:
+                                limit = PREMIUM_IMAGE_LIMIT
 
                             result = await conn.fetchrow("""
                                 UPDATE users
@@ -1010,12 +1018,13 @@ async def handle_generation_job(job):
                                 subscribed = await is_user_subscribed(context.bot, user_id)
 
                                 if not subscribed:
+                                    context.user_data["pending_video"] = True  # 🔥 запоминаем попытку
+
                                     await msg.reply_text(
-                                        "📢 Чтобы использовать бесплатные видео — подпишитесь на канал",
+                                        "📢 Для доступа к бесплатным видео нужно подписаться 👇",
                                         reply_markup=get_subscribe_keyboard()
                                     )
                                     return
-
                             logging.info(f"🎬 START VIDEO FLOW user={user_id}")
 
                             user = await conn.fetchrow(
@@ -1610,7 +1619,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         subscribed = await is_user_subscribed(context.bot, user_id)
 
         if subscribed:
-            await query.message.reply_text("✅ Подписка подтверждена! Теперь можно пользоваться.")
+            await query.message.reply_text("✅ Подписка подтверждена!")
+
+            if context.user_data.get("pending_video"):
+                context.user_data.pop("pending_video")
+
+                await query.message.reply_text(
+                    "🎬 Теперь отправьте промпт или фото — генерация доступна"
+                )
         else:
             await query.message.reply_text("❌ Вы не подписаны на канал")
         return
