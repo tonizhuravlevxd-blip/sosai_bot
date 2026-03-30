@@ -139,6 +139,8 @@ SIZE_CONFIG = {
 
 generation_cache = {}
 CACHE_TIME = 3600
+USER_CACHE = {}
+USER_CACHE_TTL = 60  # секунд
 
 # защита генераций
 active_generations = set()
@@ -219,12 +221,7 @@ def check_rate_limit(user_id):
     return True
 
 
-def get_queue_position():
-    return (
-        generation_queue_image.qsize() +
-        generation_queue_video.qsize() +
-        generation_queue_music.qsize()
-    )
+
 
 
 # ================= DATABASE =================
@@ -365,11 +362,27 @@ async def save_music_cache(prompt, audio_url):
 # ================= USER FUNCTIONS =================
 
 async def get_user(user_id):
+
+    now = time.time()
+
+    cached = USER_CACHE.get(user_id)
+
+    if cached and now - cached["time"] < USER_CACHE_TTL:
+        return cached["data"]
+
     async with db_pool.acquire() as conn:
-        return await conn.fetchrow(
+        user = await conn.fetchrow(
             "SELECT * FROM users WHERE user_id=$1",
             user_id
         )
+
+    if user:
+        USER_CACHE[user_id] = {
+            "data": user,
+            "time": now
+        }
+
+    return user
 
 
 async def reset_week_if_needed(user):
@@ -387,6 +400,9 @@ async def reset_week_if_needed(user):
                 """,
                 now, user["user_id"]
             )
+            USER_CACHE.pop(user_id, None)
+
+
 def is_premium(user):
 
     if not user:
@@ -416,6 +432,7 @@ async def reset_user_limits(user_id):
             int(time.time()),
             user_id
         )
+        USER_CACHE.pop(user_id, None)
 
 async def is_user_subscribed(bot, user_id):
     try:
@@ -545,6 +562,16 @@ async def download_fal_image(session, url):
 
         return await resp.read()
 # ================= UNIVERSAL FAL GENERATOR =================
+
+async def retry(func, *args, retries=3):
+
+    for i in range(retries):
+        try:
+            return await func(*args)
+        except Exception as e:
+            if i == retries - 1:
+                raise
+            await asyncio.sleep(2)
 
 async def fal_generate(model, prompt, images=None):
     prompt = clean_prompt(prompt)  # ✅ очистка перед отправкой
@@ -853,9 +880,9 @@ async def fake_photo_upload(bot, chat_id):
 
 
 # ================= QUEUES AND SEMAPHORES =================
-generation_queue_image = asyncio.Queue(maxsize=5000)
-generation_queue_video = asyncio.Queue(maxsize=2000)
-generation_queue_music = asyncio.Queue(maxsize=2000)
+generation_queue_image = asyncio.Queue(maxsize=1000)
+generation_queue_video = asyncio.Queue(maxsize=500)
+generation_queue_music = asyncio.Queue(maxsize=300)
 user_locks = {}
 
 async def can_generate_video(conn, user_id, premium, free_limit):
@@ -883,6 +910,7 @@ async def consume_video(conn, user_id, premium, free_limit):
             WHERE user_id=$1 AND video_count < $2
             RETURNING video_count
         """, user_id, PREMIUM_VIDEO_LIMIT)
+        USER_CACHE.pop(user_id, None)
 
         return bool(result)
 
@@ -893,6 +921,7 @@ async def consume_video(conn, user_id, premium, free_limit):
         WHERE user_id=$1 AND paid_video > 0
         RETURNING paid_video
     """, user_id)
+    USER_CACHE.pop(user_id, None)
 
     if result:
         return True
@@ -904,6 +933,7 @@ async def consume_video(conn, user_id, premium, free_limit):
         WHERE user_id=$1 AND video_count < $2
         RETURNING video_count
     """, user_id, free_limit)
+    USER_CACHE.pop(user_id, None)
 
     return bool(result)
 
@@ -912,6 +942,7 @@ async def consume_video(conn, user_id, premium, free_limit):
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 active_generations = set()
+GLOBAL_RATE_LIMIT = asyncio.Semaphore(100)
 GLOBAL_SEMAPHORE = asyncio.Semaphore(50)
 
 semaphore_image = asyncio.Semaphore(30)
@@ -956,8 +987,9 @@ async def handle_generation_job(job):
             elif mode == "music":
                 sem = semaphore_music
 
-            async with GLOBAL_SEMAPHORE:
-                async with sem:
+            async with GLOBAL_RATE_LIMIT:
+                async with GLOBAL_SEMAPHORE:
+                    async with sem:            
 
                     # ===== 🔥 АТОМАРНЫЕ ЛИМИТЫ =====
                     async with db_pool.acquire() as conn:
@@ -1005,6 +1037,7 @@ async def handle_generation_job(job):
                                 WHERE user_id=$1 AND image_count < $2
                                 RETURNING image_count
                             """, user_id, limit)
+                            USER_CACHE.pop(user_id, None)
 
                             if not result:
                                 await msg.reply_text("⚠️ Лимит изображений исчерпан")
@@ -1054,6 +1087,7 @@ async def handle_generation_job(job):
                                     WHERE user_id=$1 AND paid_video > 0
                                     RETURNING paid_video
                                 """, user_id)
+                                USER_CACHE.pop(user_id, None)
 
                                 if not result:
                                     logging.error(f"❌ FAILED TO USE PAID VIDEO user={user_id}")
@@ -1072,6 +1106,7 @@ async def handle_generation_job(job):
                                     WHERE user_id=$1 AND video_count < $2
                                     RETURNING video_count
                                 """, user_id, PREMIUM_VIDEO_LIMIT)
+                                USER_CACHE.pop(user_id, None)
 
                                 if not result:
                                     logging.warning(
@@ -1090,6 +1125,7 @@ async def handle_generation_job(job):
                                     WHERE user_id=$1 AND video_count < $2
                                     RETURNING video_count
                                 """, user_id, FREE_VIDEO_LIMIT)
+                                USER_CACHE.pop(user_id, None)
 
                                 if not result:
                                     logging.warning(
@@ -1293,6 +1329,7 @@ async def handle_generation_job(job):
                         await conn.execute("""
                             UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1
                         """, user_id)
+                        USER_CACHE.pop(user_id, None)
 
                 cached_audio_url = await get_cached_music(prompt)
                 chat_id = update.effective_chat.id
@@ -1400,6 +1437,9 @@ async def handle_generation_job(job):
                 active_generations.discard(user_id)
 
             unlock_user_generation(user_id)
+                
+            if user_id in user_locks and not user_locks[user_id].locked():
+                user_locks.pop(user_id, None)
             logging.info(f"🧹 CLEANUP user {user_id}")
 # ================== WORKERS ==================
 async def image_worker():
@@ -1468,6 +1508,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     """,
                     ref_by
                 )
+                USER_CACHE.pop(user_id, None)
 
         db_user = await get_user(user.id)
 
@@ -1573,6 +1614,7 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
             """,
             premium_until, user_id
         )
+        USER_CACHE.pop(user_id, None)
 
     await update.message.reply_text(
         "🍩 Оплата прошла успешно!\n\nPremium активирован на 30 дней 🚀"
@@ -1679,6 +1721,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 """,
                 user_id
             )
+            USER_CACHE.pop(user_id, None)
         await query.edit_message_text("✅ Условия приняты.")
         return
 
@@ -1772,6 +1815,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
             return
 
+        if get_queue_position() > 1000:
+            await message.reply_text("🚫 Сервер перегружен, попробуйте позже")
+            return
+
         position = get_queue_position() + 1
         status = await query.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
@@ -1819,6 +1866,7 @@ async def use_paid_video(user_id):
                 "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
                 user_id
             )
+            USER_CACHE.pop(user_id, None)
             return True
 
         return False
@@ -1863,6 +1911,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if user_id in active_generations:
             await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+            return
+
+        if get_queue_position() > 1000:
+            await message.reply_text("🚫 Сервер перегружен, попробуйте позже")
             return
 
         position = get_queue_position() + 1
@@ -1962,6 +2014,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["last_prompt"] = prompt
     context.user_data["last_images"] = images
+    
+    if get_queue_position() > 1000:
+    await message.reply_text("🚫 Сервер перегружен, попробуйте позже")
+    return
 
     position = get_queue_position() + 1
     status = await message.reply_text(
