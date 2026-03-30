@@ -1130,9 +1130,6 @@ async def handle_generation_job(job):
                                         )
                                         return
                                         
-            cancel_button = InlineKeyboardMarkup.from_button(
-                InlineKeyboardButton("❌ Отменить генерацию", callback_data=f"cancel_gen:{user_id}")
-            )
 
             model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
 
@@ -1217,10 +1214,17 @@ async def handle_generation_job(job):
                 )
 
                 try:
-                    result = await asyncio.wait_for(
-                        fal_generate(model, prompt, images_local),
-                        timeout=300
-                    )
+                    for attempt in range(2):
+                        try:
+                            result = await asyncio.wait_for(
+                                fal_generate(model, prompt, images_local),
+                                timeout=300
+                            )
+                            break
+                        except Exception as e:
+                            if attempt == 1:
+                                raise e
+                            await asyncio.sleep(1)
                 finally:
                     upload_task.cancel()
                     animation_task.cancel()
@@ -1612,17 +1616,6 @@ from telegram.ext import ContextTypes, MessageHandler, filters
 import logging
 
 # ================= CALLBACK =================
-async def cancel_generation_callback(update, context):
-    query = update.callback_query
-    user_id = int(query.data.split(":")[1])
-
-    if user_id in active_generations:
-        active_generations.discard(user_id)
-        unlock_user_generation(user_id)
-
-    await query.edit_message_text("❌ Генерация отменена пользователем")
-
-
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
