@@ -1503,34 +1503,34 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if ref_by and ref_by != user.id:
 
-    async with db_pool.acquire() as conn:
+            async with db_pool.acquire() as conn:
 
-        # ❗ Проверяем, не был ли уже реферал привязан
-        existing = await conn.fetchval(
-            "SELECT ref_by FROM users WHERE user_id=$1",
-            user.id
-        )
-
-        if existing is None:
-
-            # ❗ Проверка: существует ли реферер
-            ref_exists = await conn.fetchval(
-                "SELECT 1 FROM users WHERE user_id=$1",
-                ref_by
-            )
-
-            if ref_exists:
-
-                await conn.execute(
-                    """
-                    UPDATE users 
-                    SET referrals = referrals + 1,
-                        bonus_images = bonus_images + 1
-                    WHERE user_id = $1
-                    """,
-                    ref_by
+                # ❗ Проверяем, не был ли уже реферал привязан
+                existing = await conn.fetchval(
+                    "SELECT ref_by FROM users WHERE user_id=$1",
+                    user.id
                 )
-                USER_CACHE.pop(user_id, None)
+
+                if existing is None:
+
+                    # ❗ Проверка: существует ли реферер
+                    ref_exists = await conn.fetchval(
+                        "SELECT 1 FROM users WHERE user_id=$1",
+                        ref_by
+                    )
+
+                    if ref_exists:
+
+                        await conn.execute(
+                            """
+                            UPDATE users 
+                            SET referrals = referrals + 1,
+                                bonus_images = bonus_images + 1
+                            WHERE user_id = $1
+                            """,
+                            ref_by
+                        )
+                        USER_CACHE.pop(user_id, None)
 
         db_user = await get_user(user.id)
 
