@@ -984,7 +984,7 @@ async def handle_generation_job(job):
                                 if user["image_count"] >= free_limit:
                                     subscribed = await is_user_subscribed(context.bot, user_id)
 
-                                    if not subscribed:
+                                    if True:
                                         await msg.reply_text(
                                             "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
                                             "Подпишитесь на канал, чтобы продолжить 👇",
