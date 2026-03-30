@@ -1998,8 +1998,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_images"] = images
     
     if get_queue_position() > 1000:
-    await message.reply_text("🚫 Сервер перегружен, попробуйте позже")
-    return
+        await message.reply_text("🚫 Сервер перегружен, попробуйте позже")
+        return
 
     position = get_queue_position() + 1
     status = await message.reply_text(
