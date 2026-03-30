@@ -987,9 +987,8 @@ async def handle_generation_job(job):
             elif mode == "music":
                 sem = semaphore_music
 
-            async with GLOBAL_RATE_LIMIT:
-                async with GLOBAL_SEMAPHORE:
-                    async with sem:            
+            async with GLOBAL_SEMAPHORE:
+                async with sem:
 
                     # ===== 🔥 АТОМАРНЫЕ ЛИМИТЫ =====
                     async with db_pool.acquire() as conn:
