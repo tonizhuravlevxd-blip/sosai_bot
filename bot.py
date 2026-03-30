@@ -174,6 +174,20 @@ def unlock_user_generation(user_id):
 # ================= CACHE CLEANER =================
 MAX_CACHE_SIZE = 500
 
+async def user_cache_cleaner():
+    while True:
+        await asyncio.sleep(120)
+
+        now = time.time()
+        to_delete = []
+
+        for k, v in USER_CACHE.items():
+            if now - v["time"] > USER_CACHE_TTL:
+                to_delete.append(k)
+
+        for k in to_delete:
+            USER_CACHE.pop(k, None)
+
 async def cache_cleaner():
 
     while True:
@@ -202,7 +216,7 @@ async def cache_cleaner():
 
 db_lock = asyncio.Lock()
 
-RATE_LIMIT_SECONDS = 3
+RATE_LIMIT_SECONDS = 1.5
 user_last_message = {}
 
 GENERATION_LIMIT = 3
@@ -230,7 +244,12 @@ async def init_db():
     global db_pool
 
     # Подключаемся к БД через DATABASE_URL
-    db_pool = await asyncpg.create_pool(DATABASE_URL)
+    db_pool = await asyncpg.create_pool(
+    DATABASE_URL,
+    min_size=10,
+    max_size=50,
+    command_timeout=60
+)
 
     # Создаем таблицы, если их нет
     async with db_pool.acquire() as conn:
@@ -880,9 +899,9 @@ async def fake_photo_upload(bot, chat_id):
 
 
 # ================= QUEUES AND SEMAPHORES =================
-generation_queue_image = asyncio.Queue(maxsize=1000)
-generation_queue_video = asyncio.Queue(maxsize=500)
-generation_queue_music = asyncio.Queue(maxsize=300)
+generation_queue_image = asyncio.Queue(maxsize=5000)
+generation_queue_video = asyncio.Queue(maxsize=2000)
+generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
 async def can_generate_video(conn, user_id, premium, free_limit):
@@ -1484,7 +1503,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if ref_by and ref_by != user.id:
 
-            async with db_pool.acquire() as conn:
+    async with db_pool.acquire() as conn:
+
+        # ❗ Проверяем, не был ли уже реферал привязан
+        existing = await conn.fetchval(
+            "SELECT ref_by FROM users WHERE user_id=$1",
+            user.id
+        )
+
+        if existing is None:
+
+            # ❗ Проверка: существует ли реферер
+            ref_exists = await conn.fetchval(
+                "SELECT 1 FROM users WHERE user_id=$1",
+                ref_by
+            )
+
+            if ref_exists:
+
                 await conn.execute(
                     """
                     UPDATE users 
@@ -2258,6 +2294,8 @@ async def post_init(app):
 
     for _ in range(max(2, CPU // 2)):
         asyncio.create_task(music_worker())
+
+    asyncio.create_task(user_cache_cleaner())
 
     asyncio.create_task(cache_cleaner())
     await set_commands(app)
