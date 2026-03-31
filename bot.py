@@ -1305,20 +1305,41 @@ async def handle_generation_job(job):
             # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
 
+                import random
+
                 async def progress_updater():
-                    pct = 0
+                    steps = [
+                        "🎬 Анализ промпта...",
+                        "🧠 Подготовка модели...",
+                        "🎥 Генерация сцен...",
+                        "🎞 Рендеринг кадров...",
+                        "✨ Постобработка...",
+                        "📦 Финальная сборка..."
+                    ]
+
+                    idx = 0
                     last_text = ""
+
                     try:
-                        while True:
-                            await asyncio.sleep(2.5)   
-                            pct = min(pct + 5, 100)
-                            new_text = f"🎬 Генерация видео... {pct}%"
+                        while idx < len(steps):
+                            new_text = steps[idx]
+
                             if new_text != last_text:
                                 try:
                                     await status.edit_text(new_text)
                                     last_text = new_text
                                 except:
                                     pass
+
+                            await asyncio.sleep(random.randint(5, 10))
+                            idx += 1
+
+                        # финальное сообщение
+                        try:
+                            await status.edit_text("🚀 Завершение обработки...")
+                        except:
+                            pass
+
                     except asyncio.CancelledError:
                         pass
 
