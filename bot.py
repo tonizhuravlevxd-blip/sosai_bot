@@ -296,6 +296,10 @@ async def init_db():
         ALTER TABLE users 
         ADD COLUMN IF NOT EXISTS paid_music INTEGER DEFAULT 0
         """)
+        await conn.execute("""
+        ALTER TABLE users 
+        ADD COLUMN IF NOT EXISTS ref_rewarded INTEGER DEFAULT 0
+        """)
 
         await conn.execute("""
         CREATE TABLE IF NOT EXISTS music_cache (
@@ -1067,14 +1071,20 @@ async def handle_generation_job(job):
                                 if not premium:
                                     subscribed = await is_user_subscribed(context.bot, user_id)
 
-                                    if not subscribed:
-                                        context.user_data["pending_video"] = True
+                                     # ===== ВСЕГДА показываем кнопку =====
+                                    context.user_data["pending_video"] = True
 
-                                        await msg.reply_text(
-                                            "📢 Для доступа к бесплатным видео нужно подписаться 👇",
-                                            reply_markup=get_subscribe_keyboard()
-                                        )
+                                    await msg.reply_text(
+                                        "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
+                                        "Даже если вы подписаны — нажмите кнопку для проверки",
+                                        reply_markup=get_subscribe_keyboard()
+                                    )
+
+                                    # ===== ПРОВЕРКА =====
+                                    if not subscribed:
                                         return
+
+                                    context.user_data.pop("pending_video", None)
 
                                 logging.info(f"🎬 START VIDEO FLOW user={user_id}")
 
@@ -1264,6 +1274,33 @@ async def handle_generation_job(job):
                 ])
 
                 await msg.reply_photo(photo=result, reply_markup=keyboard)
+                                
+                async with db_pool.acquire() as conn:
+
+                    ref_data = await conn.fetchrow(
+                        "SELECT ref_by, ref_rewarded FROM users WHERE user_id=$1",
+                        user_id
+                    )
+
+                    if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
+
+                        await conn.execute(
+                            """
+                            UPDATE users
+                            SET ref_rewarded = 1
+                            WHERE user_id=$1
+                            """,
+                            user_id
+                        )
+
+                        await conn.execute(
+                            """
+                            UPDATE users
+                            SET bonus_images = bonus_images + 1
+                            WHERE user_id=$1
+                            """,
+                            ref_data["ref_by"]
+                        )
 
                 context.user_data["last_prompt"] = prompt
                 context.user_data["last_images"] = images_local
@@ -1276,8 +1313,8 @@ async def handle_generation_job(job):
                     last_text = ""
                     try:
                         while True:
-                            await asyncio.sleep(1)
-                            pct = min(pct + 10, 100)
+                            await asyncio.sleep(2.5)   
+                            pct = min(pct + 5, 100)
                             new_text = f"🎬 Генерация видео... {pct}%"
                             if new_text != last_text:
                                 try:
@@ -1368,8 +1405,8 @@ async def handle_generation_job(job):
                         last_text = ""
                         try:
                             while True:
-                                await asyncio.sleep(1)
-                                pct = min(pct + 10, 100)
+                                await asyncio.sleep(3)
+                                pct = min(pct + 4, 100)
                                 new_text = f"🎵 Генерация музыки... {pct}%"
                                 if new_text != last_text:
                                     try:
@@ -1521,17 +1558,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                     if ref_exists:
 
+                        # 🔥 анти-абуз: не даем бонус сразу, только фиксируем реферала
                         await conn.execute(
                             """
                             UPDATE users 
-                            SET referrals = referrals + 1,
-                                bonus_images = bonus_images + 1
+                            SET referrals = referrals + 1
                             WHERE user_id = $1
                             """,
                             ref_by
                         )
-                        USER_CACHE.pop(user_id, None)
 
+                        # 🔥 помечаем, что пользователь еще не дал награду
+                        await conn.execute(
+                            """
+                            UPDATE users
+                            SET ref_rewarded = 0
+                            WHERE user_id = $1
+                            """,
+                            user.id
+                        )
+
+                        USER_CACHE.pop(user.id, None)
         db_user = await get_user(user.id)
 
     if db_user["accepted_terms"] == 0:
