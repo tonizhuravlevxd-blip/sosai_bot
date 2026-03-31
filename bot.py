@@ -1071,20 +1071,17 @@ async def handle_generation_job(job):
                                 if not premium:
                                     subscribed = await is_user_subscribed(context.bot, user_id)
 
-                                     # ===== ВСЕГДА показываем кнопку =====
-                                    context.user_data["pending_video"] = True
+                                    # ===== ЖЁСТКАЯ БЛОКИРОВКА ДО ПРОВЕРКИ =====
+                                    if not context.user_data.get("sub_checked"):
 
-                                    await msg.reply_text(
-                                        "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
-                                        "Даже если вы подписаны — нажмите кнопку для проверки",
-                                        reply_markup=get_subscribe_keyboard()
-                                    )
+                                        context.user_data["pending_video"] = True
 
-                                    # ===== ПРОВЕРКА =====
-                                    if not subscribed:
+                                        await msg.reply_text(
+                                            "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
+                                            "Даже если вы подписаны — нажмите кнопку для проверки",
+                                            reply_markup=get_subscribe_keyboard()
+                                        )
                                         return
-
-                                    context.user_data.pop("pending_video", None)
 
                                 logging.info(f"🎬 START VIDEO FLOW user={user_id}")
 
@@ -1719,6 +1716,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         subscribed = await is_user_subscribed(context.bot, user_id)
 
         if subscribed:
+            context.user_data["sub_checked"] = True  # 🔥 ВАЖНО
+
             await query.message.reply_text("✅ Подписка подтверждена!")
 
             if context.user_data.get("pending_video"):
