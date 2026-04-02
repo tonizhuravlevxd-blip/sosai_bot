@@ -8,7 +8,13 @@ import gc
 import aiohttp
 import json
 import io
-uvloop.install()
+
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass
+
 
 from telegram.ext import PreCheckoutQueryHandler
 
