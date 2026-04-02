@@ -8,6 +8,7 @@ import gc
 import aiohttp
 import json
 import io
+uvloop.install()
 
 from telegram.ext import PreCheckoutQueryHandler
 
@@ -243,15 +244,14 @@ def check_rate_limit(user_id):
 async def init_db():
     global db_pool
 
-    # Подключаемся к БД через DATABASE_URL
+    # 🔥 ОПТИМИЗИРОВАННЫЙ ПУЛ
     db_pool = await asyncpg.create_pool(
-    DATABASE_URL,
-    min_size=10,
-    max_size=50,
-    command_timeout=60
-)
+        DATABASE_URL,
+        min_size=5,
+        max_size=20,
+        command_timeout=60
+    )
 
-    # Создаем таблицы, если их нет
     async with db_pool.acquire() as conn:
 
         await conn.execute("""
@@ -270,35 +270,52 @@ async def init_db():
             last_payment_id TEXT,
             music_count INTEGER DEFAULT 0,
 
-            -- ✅ ПОКУПКИ
             paid_video INTEGER DEFAULT 0,
-            paid_music INTEGER DEFAULT 0
+            paid_music INTEGER DEFAULT 0,
+
+            -- 🔥 НОВОЕ
+            created_at BIGINT DEFAULT 0,
+            last_active BIGINT DEFAULT 0,
+            ref_rewarded INTEGER DEFAULT 0
         )
         """)
 
-        # ===== Старые ALTER (оставил как у тебя) =====
+        # ===== SAFE ALTER =====
         await conn.execute("""
-        ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS last_payment_id TEXT
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_payment_id TEXT
         """)
 
         await conn.execute("""
-        ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS music_count INTEGER DEFAULT 0
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS music_count INTEGER DEFAULT 0
         """)
 
         await conn.execute("""
-        ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS paid_video INTEGER DEFAULT 0
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_video INTEGER DEFAULT 0
         """)
 
         await conn.execute("""
-        ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS paid_music INTEGER DEFAULT 0
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS paid_music INTEGER DEFAULT 0
         """)
+
         await conn.execute("""
-        ALTER TABLE users 
-        ADD COLUMN IF NOT EXISTS ref_rewarded INTEGER DEFAULT 0
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS ref_rewarded INTEGER DEFAULT 0
+        """)
+
+        await conn.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS created_at BIGINT DEFAULT 0
+        """)
+
+        await conn.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active BIGINT DEFAULT 0
+        """)
+
+        # 🔥 ИНДЕКСЫ (очень важно для нагрузки)
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)
+        """)
+
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_users_last_active ON users(last_active)
         """)
 
         await conn.execute("""
@@ -313,42 +330,66 @@ async def init_db():
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    # 👉 защита админа
     if user_id not in ADMIN_IDS:
         await update.message.reply_text("⛔ Нет доступа")
         return
 
+    now = int(time.time())
+    day_ago = now - 86400
+
     async with db_pool.acquire() as conn:
 
-        stats = await conn.fetchrow("""
-            SELECT
-                COUNT(*) AS total_users,
-                SUM(CASE WHEN premium = 1 THEN 1 ELSE 0 END) AS premium_users,
-                SUM(video_count) AS total_videos,
-                SUM(image_count) AS total_images,
-                SUM(music_count) AS total_music,
-                SUM(paid_video) AS paid_left
-            FROM users
-        """)
+        total_users = await conn.fetchval("SELECT COUNT(*) FROM users")
 
-        revenue = await conn.fetchval("""
-            SELECT COALESCE(SUM(5 - paid_video), 0) * 0.50
-            FROM users
-        """)
+        new_users_24h = await conn.fetchval("""
+            SELECT COUNT(*) FROM users WHERE created_at > $1
+        """, day_ago)
+
+        active_24h = await conn.fetchval("""
+            SELECT COUNT(*) FROM users WHERE last_active > $1
+        """, day_ago)
+
+        total_images = await conn.fetchval("SELECT SUM(image_count) FROM users")
+        total_videos = await conn.fetchval("SELECT SUM(video_count) FROM users")
+        total_music = await conn.fetchval("SELECT SUM(music_count) FROM users")
+
+        paid_video = await conn.fetchval("SELECT SUM(paid_video) FROM users")
+        paid_music = await conn.fetchval("SELECT SUM(paid_music) FROM users")
+
+    total_images = total_images or 0
+    total_videos = total_videos or 0
+    total_music = total_music or 0
+
+    total_generations = total_images + total_videos + total_music
+
+    # 🔥 ОНЛАЙН ИЗ ПАМЯТИ
+    online = sum(
+        1 for t in ONLINE_USERS.values()
+        if time.time() - t < ONLINE_TTL
+    )
 
     text = f"""
 📊 <b>СТАТИСТИКА БОТА</b>
 
-👤 Users: {stats['total_users']}
-⭐ Premium: {stats['premium_users']}
+👤 Всего пользователей: {total_users}
+🆕 Новые за 24ч: {new_users_24h}
+🔥 Активные за 24ч: {active_24h}
+👀 Онлайн сейчас: {online}
 
-🎬 Videos used: {stats['total_videos']}
-🖼 Images used: {stats['total_images']}
-🎵 Music used: {stats['total_music']}
+🎨 Генерации:
+🖼 Фото: {total_images}
+🎬 Видео: {total_videos}
+🎵 Музыка: {total_music}
+📦 Всего: {total_generations}
 
-💰 Paid video remaining: {stats['paid_left']}
-📈 Revenue: {revenue:.2f} €
+💳 Куплено:
+🎬 Видео: {paid_video or 0}
+🎵 Музыка: {paid_music or 0}
 
+⚙️ Очередь:
+🖼 Image: {generation_queue_image.qsize()}
+🎬 Video: {generation_queue_video.qsize()}
+🎵 Music: {generation_queue_music.qsize()}
 """
 
     await update.message.reply_text(text, parse_mode="HTML")
@@ -964,6 +1005,8 @@ async def consume_video(conn, user_id, premium, free_limit):
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+ONLINE_USERS = {}
+ONLINE_TTL = 300
 active_generations = set()
 GLOBAL_RATE_LIMIT = asyncio.Semaphore(100)
 GLOBAL_SEMAPHORE = asyncio.Semaphore(50)
@@ -1547,13 +1590,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not db_user:
 
+        now = int(time.time())
+
         async with db_pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO users (user_id, week_start, accepted_terms, ref_by)
-                VALUES ($1, $2, 0, $3)
+                INSERT INTO users (
+                    user_id,
+                    week_start,
+                    accepted_terms,
+                    ref_by,
+                    created_at,
+                    last_active
+                )
+                VALUES ($1, $2, 0, $3, $4, $5)
                 """,
-                user.id, int(time.time()), ref_by
+                user.id, now, ref_by, now, now
             )
 
         if ref_by and ref_by != user.id:
@@ -1597,7 +1649,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         )
 
                         USER_CACHE.pop(user.id, None)
+
         db_user = await get_user(user.id)
+
+    # 🔥 ОБНОВЛЯЕМ АКТИВНОСТЬ (ВАЖНО ДЛЯ /stats)
+    await update_last_active(user.id)
 
     if db_user["accepted_terms"] == 0:
 
@@ -1950,7 +2006,16 @@ async def use_paid_video(user_id):
         return False
 
 
+async def update_last_active(user_id):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET last_active=$1 WHERE user_id=$2",
+            int(time.time()), user_id
+        )
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ONLINE_USERS[user_id] = time.time()
     user_id = update.effective_user.id
     mode = context.user_data.get("mode")
 
@@ -2030,6 +2095,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ONLINE_USERS[user_id] = time.time()
     user_id = update.effective_user.id
     message = update.message
 
@@ -2334,8 +2400,6 @@ async def set_commands(app):
 
 
 # ================= POST INIT =================
-# Убираем повторное создание очередей в post_init
-# Вместо этого используем глобальные очереди
 
 async def post_init(app):
     global generation_queue_image, generation_queue_video, generation_queue_music
@@ -2349,18 +2413,19 @@ async def post_init(app):
     
     # Общая очередь для статистики / повторов
     global generation_queue
-    generation_queue = asyncio.Queue(maxsize=10000)
+    # ОПТИМАЛЬНО ДЛЯ НАГРУЗКИ
+IMAGE_WORKERS = 8
+VIDEO_WORKERS = 3
+MUSIC_WORKERS = 2
 
-    CPU = os.cpu_count() or 4
+for _ in range(IMAGE_WORKERS):
+    asyncio.create_task(image_worker())
 
-    for _ in range(CPU * 2):
-        asyncio.create_task(image_worker())
+for _ in range(VIDEO_WORKERS):
+    asyncio.create_task(video_worker())
 
-    for _ in range(CPU):
-        asyncio.create_task(video_worker())
-
-    for _ in range(max(2, CPU // 2)):
-        asyncio.create_task(music_worker())
+for _ in range(MUSIC_WORKERS):
+    asyncio.create_task(music_worker())
 
     asyncio.create_task(user_cache_cleaner())
 
