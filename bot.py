@@ -2039,6 +2039,23 @@ async def update_last_active(user_id):
         )
 
 
+async def support_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+
+    if not data.startswith("reply_"):
+        return
+
+    target_user_id = int(data.split("_")[1])
+
+    context.user_data["reply_to_user"] = target_user_id
+
+    await query.message.reply_text(
+        f"✍️ Напишите ответ пользователю {target_user_id}"
+    )
+
 async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["support_mode"] = True
 
@@ -2157,6 +2174,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
                 return
 
+    # ===== ADMIN BUTTON REPLY =====
+    if user_id in ADMIN_IDS and context.user_data.get("reply_to_user"):
+
+        target_user_id = context.user_data.get("reply_to_user")
+
+        try:
+            await context.bot.send_message(
+                target_user_id,
+                f"💬 Ответ поддержки:\n\n{message.text}"
+            )
+
+            await message.reply_text("✅ Ответ отправлен")
+
+        except:
+            await message.reply_text("❌ Ошибка отправки")
+
+        context.user_data["reply_to_user"] = None
+        return
+
     # ===== SUPPORT =====
     if context.user_data.get("support_mode"):
 
@@ -2178,7 +2214,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sent = await context.bot.send_message(
                     admin_id,
                     msg,
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💬 Ответить", callback_data=f"reply_{user.id}")]
+                    ])
                 )
 
                 SUPPORT_REPLY_MAP[sent.message_id] = user.id
@@ -2460,6 +2499,7 @@ app.add_handler(CommandHandler("restart", restart))
 app.add_handler(CommandHandler("stats", stats_handler))
 app.add_handler(CommandHandler("sos", sos_handler))
 
+app.add_handler(CallbackQueryHandler(support_reply_button))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(PreCheckoutQueryHandler(pre_checkout))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
