@@ -1021,6 +1021,7 @@ async def consume_video(conn, user_id, premium, free_limit):
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+SUPPORT_REPLY_MAP = {}
 ONLINE_USERS = {}
 ONLINE_TTL = 300
 active_generations = set()
@@ -2038,6 +2039,14 @@ async def update_last_active(user_id):
         )
 
 
+async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["support_mode"] = True
+
+    await update.message.reply_text(
+        "🆘 Напишите ваше сообщение, и я передам его в поддержку."
+    )
+
+
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = update.effective_user.id
@@ -2126,6 +2135,59 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
 
     if not message:
+        return
+
+    # ===== ADMIN REPLY SUPPORT =====
+    if user_id in ADMIN_IDS:
+        if message.reply_to_message:
+
+            original_msg_id = message.reply_to_message.message_id
+            target_user_id = SUPPORT_REPLY_MAP.get(original_msg_id)
+
+            if target_user_id:
+                try:
+                    await context.bot.send_message(
+                        target_user_id,
+                        f"💬 Ответ поддержки:\n\n{message.text}"
+                    )
+
+                    await message.reply_text("✅ Ответ отправлен")
+                except:
+                    await message.reply_text("❌ Ошибка отправки")
+
+                return
+
+    # ===== SUPPORT =====
+    if context.user_data.get("support_mode"):
+
+        user = update.effective_user
+        text = message.text
+
+        msg = f"""
+🆘 <b>Новое обращение</b>
+
+👤 ID: <code>{user.id}</code>
+📛 @{user.username or "нет"}
+👀 {user.first_name}
+
+💬 {text}
+"""
+
+        for admin_id in ADMIN_IDS:
+            try:
+                sent = await context.bot.send_message(
+                    admin_id,
+                    msg,
+                    parse_mode="HTML"
+                )
+
+                SUPPORT_REPLY_MAP[sent.message_id] = user.id
+
+            except:
+                pass
+
+        await message.reply_text("✅ Сообщение отправлено в поддержку")
+        context.user_data["support_mode"] = False
         return
 
     prompt = message.text if message.text else None
@@ -2396,6 +2458,7 @@ app.add_handler(CommandHandler("uu", uu))
 app.add_handler(CommandHandler("finish", finish))
 app.add_handler(CommandHandler("restart", restart))
 app.add_handler(CommandHandler("stats", stats_handler))
+app.add_handler(CommandHandler("sos", sos_handler))
 
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(PreCheckoutQueryHandler(pre_checkout))
