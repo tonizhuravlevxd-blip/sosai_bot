@@ -355,6 +355,20 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         paid_video = await conn.fetchval("SELECT SUM(paid_video) FROM users")
         paid_music = await conn.fetchval("SELECT SUM(paid_music) FROM users")
 
+        # ✅ НОВОЕ: premium пользователи
+        premium_users = await conn.fetchval("""
+            SELECT COUNT(*) FROM users WHERE premium = 1
+        """)
+
+        # ✅ НОВОЕ: все генерации за всё время
+        total_generations_all = await conn.fetchval("""
+            SELECT 
+                COALESCE(SUM(image_count),0) +
+                COALESCE(SUM(video_count),0) +
+                COALESCE(SUM(music_count),0)
+            FROM users
+        """)
+
     total_images = total_images or 0
     total_videos = total_videos or 0
     total_music = total_music or 0
@@ -384,6 +398,9 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💳 Куплено:
 🎬 Видео: {paid_video or 0}
 🎵 Музыка: {paid_music or 0}
+💰 Premium: {premium_users}
+
+📦 Всего генераций за всё время: {total_generations_all}
 
 ⚙️ Очередь:
 🖼 Image: {generation_queue_image.qsize()}
@@ -1079,16 +1096,24 @@ async def handle_generation_job(job):
                                     free_limit = 2
 
                                     if user["image_count"] >= free_limit:
-                                        subscribed = await is_user_subscribed(context.bot, user_id)
 
-                                        if True:
-                                            await msg.reply_text(
-                                                "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
-                                                "Подпишитесь на канал, чтобы продолжить 👇",
-                                                reply_markup=get_subscribe_keyboard()
-                                            )
-                                            return
+                                        # ✅ сначала проверяем, нажал ли пользователь кнопку
+                                        if not context.user_data.get("sub_checked"):
 
+                                            subscribed = await is_user_subscribed(context.bot, user_id)
+
+                                            if not subscribed:
+                                                await msg.reply_text(
+                                                    "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
+                                                    "Подпишитесь на канал и нажмите проверить 👇",
+                                                    reply_markup=get_subscribe_keyboard()
+                                                )
+                                                return
+
+                                            # ✅ если реально подписан — сохраняем
+                                            context.user_data["sub_checked"] = True
+
+                                        # ✅ даём расширенный лимит
                                         limit = FREE_LIMIT + user.get("bonus_images", 0)
                                     else:
                                         limit = free_limit
@@ -1528,7 +1553,7 @@ async def handle_generation_job(job):
                         "• уберите чувствительные слова\n"
                         "• используйте более общий стиль\n\n"
                         "📌 Пример:\n"
-                        "`cartoon family sitting in a living room watching TV`",
+                        "`Пусть ест пончик и скажет : Всем привет`",
                         parse_mode="Markdown"
                     )
                 except:
