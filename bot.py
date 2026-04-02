@@ -2406,38 +2406,37 @@ async def post_init(app):
 
     await init_db()
 
-    # Уже объявленные глобальные очереди, не создаем новые
-    # generation_queue_image = asyncio.Queue(maxsize=5000)
-    # generation_queue_video = asyncio.Queue(maxsize=2000)
-    # generation_queue_music = asyncio.Queue(maxsize=2000)
-    
-    # Общая очередь для статистики / повторов
     global generation_queue
-    # ОПТИМАЛЬНО ДЛЯ НАГРУЗКИ
-IMAGE_WORKERS = 8
-VIDEO_WORKERS = 3
-MUSIC_WORKERS = 2
+    generation_queue = asyncio.Queue(maxsize=10000)
 
-for _ in range(IMAGE_WORKERS):
-    asyncio.create_task(image_worker())
+    # ================= ОПТИМАЛЬНЫЕ ВОРКЕРЫ =================
+    IMAGE_WORKERS = 8
+    VIDEO_WORKERS = 3
+    MUSIC_WORKERS = 2
 
-for _ in range(VIDEO_WORKERS):
-    asyncio.create_task(video_worker())
+    for _ in range(IMAGE_WORKERS):
+        asyncio.create_task(image_worker())
 
-for _ in range(MUSIC_WORKERS):
-    asyncio.create_task(music_worker())
+    for _ in range(VIDEO_WORKERS):
+        asyncio.create_task(video_worker())
 
+    for _ in range(MUSIC_WORKERS):
+        asyncio.create_task(music_worker())
+
+    # ================= ФОНОВЫЕ ЗАДАЧИ =================
     asyncio.create_task(user_cache_cleaner())
-
     asyncio.create_task(cache_cleaner())
+
+    # ================= КОМАНДЫ =================
     await set_commands(app)
+
     logging.info("✅ PostgreSQL подключен и бот готов")
+
     if not db_pool:
         raise Exception("❌ DB не инициализирована")
 
 
 app.post_init = post_init
-
 
 
 
