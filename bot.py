@@ -9,13 +9,6 @@ import aiohttp
 import json
 import io
 
-try:
-    import uvloop
-    uvloop.install()
-except ImportError:
-    pass
-
-
 from telegram.ext import PreCheckoutQueryHandler
 
 from yookassa import Configuration, Payment
