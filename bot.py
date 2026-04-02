@@ -2014,8 +2014,9 @@ async def update_last_active(user_id):
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ONLINE_USERS[user_id] = time.time()
+    
     user_id = update.effective_user.id
+    ONLINE_USERS[user_id] = time.time()
     mode = context.user_data.get("mode")
 
     if mode not in ["video", "cartoon", "image"]:
@@ -2094,8 +2095,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ONLINE_USERS[user_id] = time.time()
+    
     user_id = update.effective_user.id
+    ONLINE_USERS[user_id] = time.time()
     message = update.message
 
     if not message:
