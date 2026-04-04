@@ -1378,10 +1378,20 @@ async def handle_generation_job(job):
                 async def progress_updater():
                     steps = [
                         "🎬 Анализ промпта...",
-                        "🧠 Подготовка модели...",
+                        "֎🇦🇮 Подготовка модели...",
                         "🎥 Генерация сцен...",
                         "🎞 Рендеринг кадров...",
+                        "🧙 Просим волшебника помочь...",
+                        "🦄 Происходит магия...",
+                        "✩°｡⋆⸜(˙꒳​˙ )...",
+                        "🍕 Перерыв на обед...",
+                        "👨🏻‍💻 Рендеринг кадров...",
+                        "🐇 Кролик попал в кадр...",
+                        "🕵🏼 Ищем кролика...",
+                        "🧹 Убираем лишнее...",
                         "✨ Постобработка...",
+                        "🦕 Шедевр почти готов...",
+                        "😱 Осталось совсем немного...",
                         "📦 Финальная сборка..."
                     ]
 
@@ -1492,7 +1502,7 @@ async def handle_generation_job(job):
                         try:
                             while True:
                                 await asyncio.sleep(3)
-                                pct = min(pct + 4, 100)
+                                pct = min(pct + 2, 100)
                                 new_text = f"🎵 Генерация музыки... {pct}%"
                                 if new_text != last_text:
                                     try:
@@ -1922,9 +1932,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_images"] = []
 
         await query.message.reply_text(
-            "🎵 Напишите тему песни\n\n"
+            "🎵 Напишите тему песни и выберите жанр\n\n"
             "Пример:\n"
-            "emotional pop song about lost love"
+            "Сделай веселую песню в жанре Рэп про мою сестру Вику"
         )
         return
 
@@ -2469,7 +2479,7 @@ async def suno(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["mode"] = "music"
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎵 Hit song", callback_data="suno_hit")]
+        [InlineKeyboardButton("🎵 Создать хит", callback_data="suno_hit")]
     ])
 
     await update.message.reply_text(
