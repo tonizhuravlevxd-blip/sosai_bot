@@ -106,6 +106,7 @@ if not OPENAI_API_KEY:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+FREE_CHAT_LIMIT = 4
 FREE_LIMIT = 5
 FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
@@ -1991,6 +1992,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    elif data == "psychologist_mode":
+
+        # Включаем режим психолога
+        context.user_data["chat_mode"] = True
+        context.user_data["system_prompt"] = (
+            "Ты профессиональный психолог. Отвечай спокойно, поддерживающе, "
+            "помогай человеку разобраться в эмоциях, не осуждай, задавай мягкие вопросы."
+        )
+
+        # Сбрасываем режим генерации
+        context.user_data["mode"] = None
+        context.user_data["last_prompt"] = None
+        context.user_data["last_images"] = []
+        context.user_data["input_images"] = []
+
+        await query.message.reply_text(
+            "🧠 Режим психолога активирован\n\n"
+            "Можете написать, что вас беспокоит. Я постараюсь помочь 💙"
+        )
+        return
+
     # ================= REPEAT (ОСТАВЛЯЕМ) =================
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
@@ -2033,6 +2055,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ================= CLEAR OLD STYLES =================
     if context.user_data.get("mode") not in ["cartoon"]:
         context.user_data["cartoon_style"] = None
+
+
         
 
 # ================= PHOTO / TEXT HANDLERS =================
@@ -2280,16 +2304,43 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if context.user_data.get("chat_mode"):
+
+        chat_count = context.user_data.get("chat_count", 0)
+
+        if not premium_active and chat_count >= FREE_CHAT_LIMIT:
+            await message.reply_text(
+                "⚠️ Бесплатный лимит ChatGPT (4 запроса) исчерпан.\n\nКупите Premium 👇",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_stars")]
+                ])
+            )
+            return
+
         try:
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}]
+                messages=[
+                    {
+                        "role": "system",
+                        "content": context.user_data.get("system_prompt", "")
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
             )
+
             answer = response.choices[0].message.content
+
+            context.user_data["chat_count"] = chat_count + 1
+
             await message.reply_text(answer)
+
         except Exception as e:
             logging.error(f"ChatGPT error: {e}")
             await message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
+
         return
 
     if mode in ["video", "cartoon"] and not prompt and not images:
@@ -2378,10 +2429,18 @@ async def cartoon(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🧠 Психолог", callback_data="psychologist_mode")]
+    ])
+
     context.user_data["chat_mode"] = True
+    context.user_data["system_prompt"] = ""
+
     await update.message.reply_text(
         "🤖 Режим ChatGPT включен\n\n"
-        "Напишите чем вам помочь."
+        "Выберите режим:",
+        reply_markup=keyboard
     )
 
 async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
