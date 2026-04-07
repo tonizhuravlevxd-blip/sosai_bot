@@ -1020,7 +1020,7 @@ async def consume_video(conn, user_id, premium, free_limit):
 
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-
+ADMIN_REPLY_STATE = {}
 SUPPORT_REPLY_MAP = {}
 ONLINE_USERS = {}
 ONLINE_TTL = 300
@@ -1819,6 +1819,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
 
+    # ================= SUPPORT REPLY =================
+    if data.startswith("reply_"):
+
+        target_user_id = int(data.split("_")[1])
+
+        ADMIN_REPLY_STATE[user_id] = target_user_id
+
+        await query.message.reply_text(
+            f"✍️ Напишите ответ пользователю {target_user_id}"
+        )
+        return
+
     # ================= ADMIN (РАННИЙ ВЫХОД) =================
     if data == "reset_limits":
         if user_id not in ADMIN_IDS:
@@ -2190,9 +2202,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
     # ===== ADMIN BUTTON REPLY =====
-    if user_id in ADMIN_IDS and context.user_data.get("reply_to_user"):
+    if user_id in ADMIN_IDS and ADMIN_REPLY_STATE.get(user_id):
 
-        target_user_id = context.user_data.get("reply_to_user")
+        target_user_id = ADMIN_REPLY_STATE.get(user_id)
 
         try:
             await context.bot.send_message(
@@ -2205,7 +2217,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             await message.reply_text("❌ Ошибка отправки")
 
-        context.user_data["reply_to_user"] = None
+        ADMIN_REPLY_STATE.pop(user_id, None)
         return
 
     # ===== SUPPORT =====
@@ -2226,7 +2238,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         for admin_id in ADMIN_IDS:
             try:
-                sent = await context.bot.send_message(
+                await context.bot.send_message(
                     admin_id,
                     msg,
                     parse_mode="HTML",
@@ -2234,8 +2246,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         [InlineKeyboardButton("💬 Ответить", callback_data=f"reply_{user.id}")]
                     ])
                 )
-
-                SUPPORT_REPLY_MAP[sent.message_id] = user.id
 
             except:
                 pass
