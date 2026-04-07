@@ -1611,10 +1611,11 @@ async def music_worker():
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # 🔥 Сброс ChatGPT / психолога режима
-context.user_data.pop("chat_mode", None)
-context.user_data.pop("system_prompt", None)
-context.user_data.pop("chat_count", None)
+        
+    context.user_data.pop("chat_mode", None)
+    context.user_data.pop("system_prompt", None)
+    context.user_data.pop("chat_count", None)
+
 
     user = update.effective_user
 
