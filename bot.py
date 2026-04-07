@@ -2511,7 +2511,7 @@ app.add_handler(CommandHandler("sos", sos_handler))
 
 
 app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(CallbackQueryHandler(support_reply_button))
+app.add_handler(CallbackQueryHandler(support_reply_button, pattern="^reply_"))
 app.add_handler(PreCheckoutQueryHandler(pre_checkout))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
