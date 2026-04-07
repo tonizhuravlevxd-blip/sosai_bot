@@ -1994,6 +1994,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "psychologist_mode":
 
+    context.user_data.clear()
+
+    context.user_data["chat_mode"] = True
+
         # Включаем режим психолога
         context.user_data["chat_mode"] = True
         context.user_data["system_prompt"] = (
@@ -2282,7 +2286,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     images = context.user_data.get("input_images", [])
     mode = context.user_data.get("mode")
 
-    if not mode:
+    if not mode and not context.user_data.get("chat_mode"):
         await message.reply_text("↩ Пожалуйста, выберите режим в меню слева")
         return
 
@@ -2302,6 +2306,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if prompt and len(prompt) > 800:
         await message.reply_text("⚠ Слишком длинный запрос.")
         return
+
+        # ===== FIX: получаем premium ДО использования =====
+    user = await get_user(user_id)
+    premium_active = await ensure_premium_sync(user_id)
 
     if context.user_data.get("chat_mode"):
 
@@ -2435,6 +2443,7 @@ async def uu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ])
 
     context.user_data["chat_mode"] = True
+    context.user_data["mode"] = None
     context.user_data["system_prompt"] = ""
 
     await update.message.reply_text(
