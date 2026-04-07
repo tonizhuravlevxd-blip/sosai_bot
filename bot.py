@@ -1378,7 +1378,7 @@ async def handle_generation_job(job):
                 async def progress_updater():
                     steps = [
                         "🎬 Анализ промпта...",
-                        "֎🇦🇮 Подготовка модели...",
+                        "֎ Подготовка модели...",
                         "🎥 Генерация сцен...",
                         "🎞 Рендеринг кадров...",
                         "🧙 Просим волшебника помочь...",
@@ -2257,6 +2257,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = message.text if message.text else None
     images = context.user_data.get("input_images", [])
     mode = context.user_data.get("mode")
+
+    if not mode:
+        await message.reply_text("↩ Пожалуйста, выберите режим в меню слева")
+        return
 
     if user_id in active_generations:
         await message.reply_text("⏳ Ваша генерация уже выполняется")
