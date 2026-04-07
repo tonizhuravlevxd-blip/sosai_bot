@@ -1994,9 +1994,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "psychologist_mode":
 
-    context.user_data.clear()
-
-    context.user_data["chat_mode"] = True
+        context.user_data.clear()
 
         # Включаем режим психолога
         context.user_data["chat_mode"] = True
