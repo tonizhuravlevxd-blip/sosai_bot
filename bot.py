@@ -1067,7 +1067,7 @@ ONLINE_USERS = {}
 ONLINE_TTL = 300
 active_generations = set()
 GLOBAL_RATE_LIMIT = asyncio.Semaphore(100)
-GLOBAL_SEMAPHORE = asyncio.Semaphore(50)
+GLOBAL_SEMAPHORE = asyncio.Semaphore(100)
 
 semaphore_image = asyncio.Semaphore(30)
 semaphore_video = asyncio.Semaphore(10)
@@ -1796,7 +1796,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🍩 Пончик-статус Premium\n\n"
         "Что входит:\n"
-        "🐳 50 генераций изображений\n"
+        "🐳 20 генераций изображений\n"
         "🎬 5 видео / мультфильмов\n"
         "🎵 3 генераций музыки\n\n"
         "499 рублей через СПБ\n\n"
@@ -1806,20 +1806,6 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def ensure_premium_sync(user_id):
-    async with db_pool.acquire() as conn:
-        user = await conn.fetchrow(
-            "SELECT premium, premium_until FROM users WHERE user_id=$1",
-            user_id
-        )
-
-        if not user:
-            return False
-
-        if user["premium"] == 1 and user["premium_until"] > int(time.time()):
-            return True
-
-        return False
 
 # ================= PAYMENT SUCCESS =================
 async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2060,7 +2046,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ================= REPEAT (ОСТАВЛЯЕМ) =================
+    # ================= REPEAT (ИСПРАВЛЕН) =================
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
@@ -2070,9 +2056,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
             return
 
-        if get_queue_position() > 1000:
-            await query.reply_text("🚫 Сервер перегружен, попробуйте позже")
+        # 🔥 ДОБАВЛЕНО: проверка лимита
+        allowed, msg = check_user_generation_limit(user_id)
+        if not allowed:
+            await query.message.reply_text(msg)
             return
+
+        # 🔥 ДОБАВЛЕНО: защита от перегрузки
+        if get_queue_position() > 1000:
+            await query.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
+            return
+
+        # 🔥 ДОБАВЛЕНО: блокировка
+        lock_user_generation(user_id)
 
         position = get_queue_position() + 1
         status = await query.message.reply_text(
@@ -2086,17 +2082,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        await queue_map.get(mode, generation_queue_image).put({
-            "update": update,
-            "context": context,
-            "prompt": prompt,
-            "size": context.user_data.get("size", "1024x1024"),
-            "model": context.user_data.get("model", "banana2"),
-            "images": images,
-            "user_id": user_id,
-            "mode": mode,
-            "status": status
-        })
+        try:
+            await queue_map.get(mode, generation_queue_image).put({
+                "update": update,
+                "context": context,
+                "prompt": prompt,
+                "size": context.user_data.get("size", "1024x1024"),
+                "model": context.user_data.get("model", "banana2"),
+                "images": images,
+                "user_id": user_id,
+                "mode": mode,
+                "status": status
+            })
+        except:
+            unlock_user_generation(user_id)
+            raise
+
         return
 
     # ================= CLEAR OLD STYLES =================
@@ -2129,11 +2130,22 @@ async def use_paid_video(user_id):
         return False
 
 
+LAST_ACTIVE_CACHE = {}
+
 async def update_last_active(user_id):
+    now = time.time()
+
+    last = LAST_ACTIVE_CACHE.get(user_id, 0)
+
+    if now - last < 60:  # обновляем раз в минуту
+        return
+
+    LAST_ACTIVE_CACHE[user_id] = now
+
     async with db_pool.acquire() as conn:
         await conn.execute(
             "UPDATE users SET last_active=$1 WHERE user_id=$2",
-            int(time.time()), user_id
+            int(now), user_id
         )
 
 
@@ -2361,7 +2373,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["support_mode"] = False
         return
 
-    prompt = message.text if message.text else None
     images = context.user_data.get("input_images", [])
     mode = context.user_data.get("mode")
 
@@ -2388,7 +2399,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ===== FIX: получаем premium ДО использования =====
     user = await get_user(user_id)
-    premium_active = await ensure_premium_sync(user_id)
+    premium_active = (
+        user["premium"] == 1 and user["premium_until"] > int(time.time())
+    )
 
     if context.user_data.get("chat_mode"):
 
@@ -2441,7 +2454,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user = await get_user(user_id)
-    premium_active = await ensure_premium_sync(user_id)
+    premium_active = (
+        user["premium"] == 1 and user["premium_until"] > int(time.time())
+    )
     
     if not user:
         await message.reply_text("⚠ Ошибка пользователя. Напишите /start")
@@ -2721,9 +2736,9 @@ async def post_init(app):
     generation_queue = asyncio.Queue(maxsize=10000)
 
     # ================= ОПТИМАЛЬНЫЕ ВОРКЕРЫ =================
-    IMAGE_WORKERS = 8
-    VIDEO_WORKERS = 3
-    MUSIC_WORKERS = 2
+    IMAGE_WORKERS = 12
+    VIDEO_WORKERS = 4
+    MUSIC_WORKERS = 3
 
     for _ in range(IMAGE_WORKERS):
         asyncio.create_task(image_worker())
