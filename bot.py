@@ -235,6 +235,32 @@ def check_rate_limit(user_id):
     user_last_message[user_id] = now
     return True
 
+def check_global_spam(user_id):
+
+    now = time.time()
+
+    # ===== ЕСЛИ ЗАБЛОКАН =====
+    blocked_until = user_blocked_until.get(user_id, 0)
+    if now < blocked_until:
+        return False
+
+    # ===== ЛОГ СООБЩЕНИЙ =====
+    log = user_message_log.get(user_id, [])
+
+    # очищаем старые
+    log = [t for t in log if now - t < SPAM_WINDOW]
+
+    log.append(now)
+    user_message_log[user_id] = log
+
+    # ===== ЕСЛИ СПАМ =====
+    if len(log) > SPAM_LIMIT:
+        user_blocked_until[user_id] = now + SPAM_BLOCK_TIME
+        user_message_log[user_id] = []
+        return False
+
+    return True
+
 
 
 
@@ -1026,6 +1052,13 @@ async def consume_video(conn, user_id, premium, free_limit):
 
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+# ===== GLOBAL ANTISPAM =====
+user_message_log = {}
+user_blocked_until = {}
+
+SPAM_WINDOW = 10        # секунд
+SPAM_LIMIT = 6         # сообщений за окно
+SPAM_BLOCK_TIME = 30   # бан (сек)
 ADMIN_REPLY_STATE = {}
 SUPPORT_REPLY_MAP = {}
 ONLINE_USERS = {}
@@ -2123,7 +2156,7 @@ async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["support_mode"] = True
 
     await update.message.reply_text(
-        "🆘 Напишите ваше сообщение, и я передам его в поддержку."
+        "🆘 Напишите ваше сообщение,и я передам ее в поддержку,они попытаются максимально быстро решить вашу проблему🦦."
     )
 
 
@@ -2131,6 +2164,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_id = update.effective_user.id
     ONLINE_USERS[user_id] = time.time()
+   
+    if not check_global_spam(user_id):
+        return
+        
     mode = context.user_data.get("mode")
 
     if mode not in ["video", "cartoon", "image"]:
@@ -2215,6 +2252,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     message = update.message
 
     if not message:
+        return
+
+        # ===== ✅ ГЛОБАЛЬНЫЙ АНТИ-СПАМ =====
+    if not check_global_spam(user_id):
         return
 
     # ===== ADMIN REPLY SUPPORT =====
