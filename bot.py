@@ -1872,6 +1872,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("♻️ Лимиты обнулены")
         return
 
+    # ================= ADMIN POST =================
+    if data == "admin_post":
+        if user_id not in ADMIN_IDS:
+            await query.message.reply_text("❌ Нет доступа")
+            return
+
+        context.user_data["admin_post_mode"] = True
+
+        await query.message.reply_text(
+            "📢 Режим поста включен\n\n"
+            "✍️ Напишите сообщение — оно отправится ВСЕМ пользователям"
+        )
+        return
        
     elif data == "check_sub":
         subscribed = await is_user_subscribed(context.bot, user_id)
@@ -2285,6 +2298,36 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
 
+        # ===== ✅ ADMIN POST =====
+    if user_id in ADMIN_IDS and context.user_data.get("admin_post_mode"):
+
+        text = message.text
+
+        await message.reply_text("🚀 Начинаю рассылку...")
+
+        sent = 0
+        failed = 0
+
+        async with db_pool.acquire() as conn:
+            users = await conn.fetch("SELECT user_id FROM users")
+
+        for u in users:
+            try:
+                await context.bot.send_message(u["user_id"], text)
+                sent += 1
+                await asyncio.sleep(0.03)  # анти-флуд Telegram
+            except:
+                failed += 1
+
+        await message.reply_text(
+            f"✅ Рассылка завершена\n\n"
+            f"📤 Отправлено: {sent}\n"
+            f"❌ Ошибок: {failed}"
+        )
+
+        context.user_data["admin_post_mode"] = False
+        return
+
         # ===== ✅ ГЛОБАЛЬНЫЙ АНТИ-СПАМ =====
     if not check_global_spam(user_id):
         return
@@ -2599,7 +2642,8 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ===== КНОПКА АДМИНА =====
     if tg_user.id in ADMIN_IDS:
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")]
+            [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")],
+            [InlineKeyboardButton("📢 Сделать пост", callback_data="admin_post")]
         ])
 
     # ===== ТЕКСТ ПРОФИЛЯ =====
