@@ -2209,7 +2209,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["input_images"] = []
 
     if len(context.user_data["input_images"]) >= MAX_INPUT_IMAGES:
-        context.user_data["input_images"] = []
+        await update.message.reply_text(f"⚠ Можно загрузить максимум {MAX_INPUT_IMAGES} фото")
+        return
 
     photo = update.message.photo[-1]
 
@@ -2218,7 +2219,13 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     file = await photo.get_file()
-    image_bytes = bytes(await file.download_as_bytearray())
+
+    try:
+        image_bytes = bytes(await file.download_as_bytearray())
+    except:
+        await update.message.reply_text("❌ Ошибка загрузки фото, попробуйте снова")
+        return
+
     context.user_data["input_images"].append(image_bytes)
 
     caption = update.message.caption
@@ -2371,13 +2378,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await message.reply_text("✅ Сообщение отправлено в поддержку")
         context.user_data["support_mode"] = False
-        return
-
-    images = context.user_data.get("input_images", [])
-    mode = context.user_data.get("mode")
-
-    if not mode and not context.user_data.get("chat_mode"):
-        await message.reply_text("↩ Пожалуйста, выберите режим в меню слева")
         return
 
     if user_id in active_generations:
