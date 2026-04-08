@@ -269,6 +269,7 @@ async def init_db():
             premium_until BIGINT DEFAULT 0,
             last_payment_id TEXT,
             music_count INTEGER DEFAULT 0,
+            chat_count INTEGER DEFAULT 0,
 
             paid_video INTEGER DEFAULT 0,
             paid_music INTEGER DEFAULT 0,
@@ -307,6 +308,10 @@ async def init_db():
 
         await conn.execute("""
         ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active BIGINT DEFAULT 0
+        """)
+            
+        await conn.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_count INTEGER DEFAULT 0
         """)
 
         # 🔥 ИНДЕКСЫ (очень важно для нагрузки)
@@ -2310,19 +2315,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-        # ===== FIX: получаем premium ДО использования =====
+    # ===== FIX: получаем premium ДО использования =====
     user = await get_user(user_id)
     premium_active = await ensure_premium_sync(user_id)
 
     if context.user_data.get("chat_mode"):
 
-        chat_count = context.user_data.get("chat_count", 0)
+        # ===== ✅ БЕРЁМ ИЗ БД =====
+        chat_count = user.get("chat_count", 0)
 
         if not premium_active and chat_count >= FREE_CHAT_LIMIT:
             await message.reply_text(
                 "⚠️ Бесплатный лимит ChatGPT (4 запроса) исчерпан.\n\nКупите Premium 👇",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_stars")]
+                    [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
                 ])
             )
             return
@@ -2344,7 +2350,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             answer = response.choices[0].message.content
 
-            context.user_data["chat_count"] = chat_count + 1
+            # ===== ✅ УВЕЛИЧИВАЕМ В БД =====
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE users SET chat_count = chat_count + 1 WHERE user_id=$1",
+                    user_id
+                )
+                USER_CACHE.pop(user_id, None)
 
             await message.reply_text(answer)
 
@@ -2353,7 +2365,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
 
         return
-
     if mode in ["video", "cartoon"] and not prompt and not images:
         await message.reply_text("⚠ Пожалуйста, отправьте текст или фото для генерации видео/мультфильма")
         return
