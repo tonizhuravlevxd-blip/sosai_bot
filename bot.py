@@ -142,6 +142,8 @@ generation_cache = {}
 CACHE_TIME = 3600
 USER_CACHE = {}
 USER_CACHE_TTL = 60  # секунд
+no_mode_cooldown = {}
+NO_MODE_COOLDOWN_TIME = 10
 
 # защита генераций
 active_generations = set()
@@ -2054,7 +2056,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "🧠 Режим психолога активирован\n\n"
-            "Можете написать, что вас беспокоит. Я постараюсь помочь 💙"
+            "Можете написать, что вас беспокоит. Я постараюсь помочь вам эмоционально 💙"
         )
         return
 
@@ -2156,7 +2158,7 @@ async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["support_mode"] = True
 
     await update.message.reply_text(
-        "🆘 Напишите ваше сообщение,и я передам ее в поддержку,они попытаются максимально быстро решить вашу проблему🦦."
+        "🆘 Напишите ваше сообщение,и я передам его в поддержку,они попытаются максимально быстро решить вашу проблему🦦."
     )
 
 
@@ -2171,6 +2173,16 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mode = context.user_data.get("mode")
 
     if mode not in ["video", "cartoon", "image"]:
+
+        # 🔥 анти-флуд именно для этого сообщения
+        now = time.time()
+        last_warn = context.user_data.get("last_mode_warn", 0)
+
+        if now - last_warn < 5:
+            return  # ❌ молча игнорим флуд
+
+        context.user_data["last_mode_warn"] = now
+
         await update.message.reply_text(
             "⚠ Сначала выберите режим генерации: /photo, /video, /cartoon или /suno"
         )
@@ -2256,6 +2268,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # ===== ✅ ГЛОБАЛЬНЫЙ АНТИ-СПАМ =====
     if not check_global_spam(user_id):
+        return
+
+    prompt = message.text if message.text else None
+    images = context.user_data.get("input_images", [])
+    mode = context.user_data.get("mode")
+
+    if not mode and not context.user_data.get("chat_mode"):
+
+        # 🔥 анти-флуд для "выберите режим"
+        now = time.time()
+        last_warn = context.user_data.get("last_mode_warn", 0)
+
+        if now - last_warn < 5:
+            return  # ❌ игнорим спам
+
+        context.user_data["last_mode_warn"] = now
+
+        await message.reply_text("↩ Пожалуйста, выберите режим в меню слева")
         return
 
     # ===== ADMIN REPLY SUPPORT =====
