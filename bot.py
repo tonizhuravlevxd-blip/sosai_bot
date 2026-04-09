@@ -1051,6 +1051,16 @@ async def consume_video(conn, user_id, premium, free_limit):
 
     return bool(result)
 
+async def safe_edit(message, text, **kwargs):
+    try:
+        if getattr(message, "text", None) == text:
+            return
+        await message.edit_text(text, **kwargs)
+    except Exception as e:
+        if "message is not modified" in str(e):
+            return
+        logging.warning(f"EDIT ERROR: {e}")
+
 
 # ================== UNIVERSAL HANDLER (FIXED FINAL) ==================
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
@@ -1334,11 +1344,11 @@ async def handle_generation_job(job):
                             dots = dots_list[i % len(dots_list)]
                             text = f"<pre>🦕 Пожалуйста ожидайте,шедевр создает {model_name}{dots}</pre>"
                             try:
-                                await status.edit_text(text, parse_mode="HTML")
+                                await safe_edit(status, text, parse_mode="HTML")
                             except:
                                 pass
                             i += 1
-                            await asyncio.sleep(0.6)
+                            await asyncio.sleep(1.5)
                     except asyncio.CancelledError:
                         pass
 
@@ -1445,7 +1455,7 @@ async def handle_generation_job(job):
 
                             if new_text != last_text:
                                 try:
-                                    await status.edit_text(new_text)
+                                    await safe_edit(status, new_text)
                                     last_text = new_text
                                 except:
                                     pass
@@ -1547,7 +1557,7 @@ async def handle_generation_job(job):
                                 new_text = f"🎵 Генерация музыки... {pct}%"
                                 if new_text != last_text:
                                     try:
-                                        await status.edit_text(new_text)
+                                        await safe_edit(status, new_text)
                                         last_text = new_text
                                     except:
                                         pass
