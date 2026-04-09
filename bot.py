@@ -979,6 +979,68 @@ async def fal_video_generate(prompt, images=None):
 
         raise Exception("Sora video timeout")
 
+# ================= FAL VIDEO REMIX =================
+async def fal_video_remix(video_bytes, prompt):
+    prompt = clean_prompt(prompt)
+
+    url = "https://queue.fal.run/fal-ai/sora-2/video-to-video/remix"
+
+    headers = {
+        "Authorization": f"Key {FAL_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    async with aiohttp.ClientSession() as session:
+
+        # 🔥 кодируем видео в base64
+        video_base64 = base64.b64encode(video_bytes).decode()
+        video_data_uri = f"data:video/mp4;base64,{video_base64}"
+
+        payload = {
+            "video": video_data_uri,
+            "prompt": prompt
+        }
+
+        async with session.post(url, json=payload, headers=headers) as resp:
+            data = await resp.json()
+
+            if "request_id" not in data:
+                raise Exception(f"Fal remix error: {data}")
+
+            request_id = data["request_id"]
+
+        status_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}/status"
+        result_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}"
+
+        for _ in range(300):
+            async with session.get(status_url, headers=headers) as s:
+                status = await s.json()
+
+                if status.get("status") == "COMPLETED":
+
+                    async with session.get(result_url, headers=headers) as r:
+                        result = await r.json()
+
+                        video_url = None
+
+                        if "video" in result:
+                            video_url = result["video"]["url"]
+                        elif "videos" in result:
+                            video_url = result["videos"][0]["url"]
+
+                        if not video_url:
+                            raise Exception(f"Fal remix bad response: {result}")
+
+                        async with session.get(video_url) as v:
+                            return await v.read()
+
+                if status.get("status") == "FAILED":
+                    raise Exception("Remix failed")
+
+            await asyncio.sleep(2)
+
+        raise Exception("Remix timeout")
+
 # ================= FAKE PHOTO UPLOAD ACTION =================
 async def fake_photo_upload(bot, chat_id):
     try:
@@ -998,6 +1060,31 @@ generation_queue_image = asyncio.Queue(maxsize=5000)
 generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
+
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+    mode = context.user_data.get("mode")
+
+    if mode != "remix":
+        return
+
+    video = update.message.video
+
+    if not video:
+        return
+
+    if video.file_size > 10_000_000:
+        await update.message.reply_text("⚠️ Видео слишком большое (макс 10MB)")
+        return
+
+    file = await video.get_file()
+    video_bytes = bytes(await file.download_as_bytearray())
+
+    context.user_data["input_video"] = video_bytes
+
+    await update.message.reply_text("✅ Видео загружено\nТеперь отправьте текст ✏")
+
 
 async def can_generate_video(conn, user_id, premium, free_limit):
 
@@ -1116,7 +1203,7 @@ async def handle_generation_job(job):
         try:
             # ===== СЕМАФОРЫ =====
             sem = semaphore_image
-            if mode in ["video", "cartoon"]:
+            if mode in ["video", "cartoon", "remix"]:
                 sem = semaphore_video
             elif mode == "music":
                 sem = semaphore_music
@@ -1185,7 +1272,7 @@ async def handle_generation_job(job):
                                     return
 
                             # ================= VIDEO / CARTOON =================
-                            elif mode in ["video", "cartoon"]:
+                            elif mode in ["video", "cartoon", "remix"]:
 
                                 if not premium:
                                     subscribed = await is_user_subscribed(context.bot, user_id)
@@ -1282,6 +1369,7 @@ async def handle_generation_job(job):
                 "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
                 "video": "<pre>🎬 Генерация видео... 0%</pre>",
                 "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
+                "remix": "<pre>🔥 Создание тренда (Remix)... 0%</pre>",
                 "music": "<pre>🎵 Генерация музыки... 0%</pre>"
             }
 
@@ -1314,7 +1402,7 @@ async def handle_generation_job(job):
             if prompt:
                 if mode == "image" and style:
                     prompt = f"{style} {prompt}"
-                elif mode in ["cartoon", "video"] and cartoon_style:
+                elif mode in ["cartoon", "video", "remix"] and cartoon_style:
                     prompt = f"{cartoon_style}, {prompt}"
 
             if prompt:
@@ -1463,7 +1551,6 @@ async def handle_generation_job(job):
                             await asyncio.sleep(random.randint(5, 10))
                             idx += 1
 
-                        # финальное сообщение
                         try:
                             await status.edit_text("🚀 Завершение обработки...")
                         except:
@@ -1496,6 +1583,87 @@ async def handle_generation_job(job):
                 except:
                     result_file.seek(0)
                     await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+
+
+            # ================= REMIX =================
+            elif mode == "remix":
+
+                import random
+
+                async def progress_updater():
+                    steps = [
+                        "🔥 Анализ тренда...",
+                        "🎬 Подготовка remix модели...",
+                        "🎥 Обработка видео...",
+                        "✨ Применение эффектов...",
+                        "🧠 AI думает как TikTok...",
+                        "🦄 Добавляем магию...",
+                        "🎞 Рендеринг кадров...",
+                        "🦕 Почти готово...",
+                        "📦 Финальная сборка..."
+                    ]
+
+                    idx = 0
+                    last_text = ""
+
+                    try:
+                        while idx < len(steps):
+                            new_text = steps[idx]
+
+                            if new_text != last_text:
+                                try:
+                                    await safe_edit(status, new_text)
+                                    last_text = new_text
+                                except:
+                                    pass
+
+                            await asyncio.sleep(random.randint(4, 8))
+                            idx += 1
+
+                        try:
+                            await status.edit_text("🚀 Завершение remix...")
+                        except:
+                            pass
+
+                    except asyncio.CancelledError:
+                        pass
+
+                video_bytes = context.user_data.get("input_video")
+
+                if not video_bytes:
+                    await msg.reply_text("⚠️ Сначала отправьте видео")
+                    return
+
+                progress_task = asyncio.create_task(progress_updater())
+
+                try:
+                    result_bytes = await asyncio.wait_for(
+                        fal_video_remix(video_bytes, prompt),
+                        timeout=600
+                    )
+                finally:
+                    progress_task.cancel()
+
+                try:
+                    await status.delete()
+                except:
+                    pass
+
+                result_file = io.BytesIO(result_bytes)
+                result_file.name = "remix.mp4"
+                result_file.seek(0)
+
+                try:
+                    await context.bot.send_video(
+                        chat_id=update.effective_chat.id,
+                        video=result_file
+                    )
+                except:
+                    result_file.seek(0)
+                    await context.bot.send_document(
+                        chat_id=update.effective_chat.id,
+                        document=result_file
+                    )
                 
             # ================= MUSIC =================
             elif mode == "music":
@@ -1996,6 +2164,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("📱 Вертикальное разрешение выбрано")
         return
 
+    elif data == "video_remix":
+        context.user_data.clear()
+        context.user_data["mode"] = "remix"
+        context.user_data["input_images"] = []
+        context.user_data["input_video"] = None
+
+        await query.message.reply_text(
+            "🔥 Режим Sora2 Remix\n\n"
+            "Отправьте:\n"
+            "1. 🎥 Видео\n"
+            "2. 🖼 Фото (опционально)\n"
+            "3. ✏ Текст\n\n"
+            "Пример:\n"
+            "Сделай стиль TikTok тренда, добавь неон и эффект glitch"
+        )
+        return
+
     # ================= MUSIC =================
     elif data == "suno_hit":
         context.user_data["mode"] = "music"
@@ -2102,6 +2287,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "image": generation_queue_image,
             "video": generation_queue_video,
             "cartoon": generation_queue_video,
+            "remix": generation_queue_video,
             "music": generation_queue_music
         }
 
@@ -2281,6 +2467,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "image": generation_queue_image,
             "video": generation_queue_video,
             "cartoon": generation_queue_video,
+            "remix": generation_queue_video,
             "music": generation_queue_music
         }
 
@@ -2502,7 +2689,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
 
         return
-    if mode in ["video", "cartoon"] and not prompt and not images:
+    if mode in ["video", "cartoon", "remix"] and not prompt:
         await message.reply_text("⚠ Пожалуйста, отправьте текст или фото для генерации видео/мультфильма")
         return
 
@@ -2521,6 +2708,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "image": generation_queue_image,
         "video": generation_queue_video,
         "cartoon": generation_queue_video,
+        "remix": generation_queue_video,
         "music": generation_queue_music
     }
 
@@ -2556,9 +2744,18 @@ async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     context.user_data["mode"] = "video"
     context.user_data["cartoon_style"] = None  # ✅ сброс старого стиля мультфильма
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔥 Сделать тренд (Remix)", callback_data="video_remix")]
+    ])
+
     await update.message.reply_text(
-        "🎬 Режим видео включён (Sora2)\n\n"
-        "Отправьте промпт или фото + текст."
+        "🎬 Режим видео (Sora2)\n\n"
+        "Обычная генерация:\n"
+        "• текст\n"
+        "• фото + текст\n\n"
+        "🔥 Или сделайте тренд замену:",
+        reply_markup=keyboard
     )
 
 
@@ -2753,6 +2950,7 @@ app.add_handler(CommandHandler("sos", sos_handler))
 
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(PreCheckoutQueryHandler(pre_checkout))
+app.add_handler(MessageHandler(filters.VIDEO, handle_video))
 app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 app.add_handler(MessageHandler(filters.SUCCESSFUL_PAYMENT, successful_payment))
