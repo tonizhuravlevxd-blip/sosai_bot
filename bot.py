@@ -1139,15 +1139,20 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Не удалось загрузить видео")
             return
 
-        # 🔥 2. СОХРАНЯЕМ BYTES временно
-        context.user_data["input_video_bytes"] = bytes(video_bytes)
+        # 🔥 2. СОХРАНЯЕМ ВСЁ КОРРЕКТНО (ВАЖНО ДЛЯ REMIX PIPELINE)
+        context.user_data["input_video"] = bytes(video_bytes)          # ✅ главный фикс
+        context.user_data["input_video_bytes"] = bytes(video_bytes)     # (fallback)
+        context.user_data["input_video_ready"] = True
 
-        # 🔥 3. ВАЖНО: очищаем старый URL (если был)
+        # 🔥 3. ОБЯЗАТЕЛЬНО: формируем URL сразу (чтобы не ловить None в worker)
         context.user_data["input_video_url"] = None
 
         # 🔥 4. картинки сохраняем (для @Image1)
         if "input_images" not in context.user_data:
             context.user_data["input_images"] = []
+
+        # 🔥 5. страховка от старых данных
+        context.user_data["last_video_error"] = None
 
         await update.message.reply_text(
             "✅ Видео загружено\n\n"
@@ -1158,6 +1163,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
+        context.user_data["last_video_error"] = str(e)
         await update.message.reply_text(f"⚠️ Ошибка загрузки видео: {e}")
 async def can_generate_video(conn, user_id, premium, free_limit):
 
@@ -1700,9 +1706,12 @@ async def handle_generation_job(job):
                 video_bytes = job.get("video")
                 images = job.get("images", [])
 
-                # 🔥 fallback если job пустой
+                # 🔥 HARD FALLBACK (главный фикс против "сначала отправьте видео")
                 if not video_bytes:
-                    video_bytes = context.user_data.get("input_video")
+                    video_bytes = (
+                        context.user_data.get("input_video")
+                        or context.user_data.get("input_video_bytes")
+                    )
 
                 if not images:
                     images = context.user_data.get("input_images", [])
@@ -1712,20 +1721,20 @@ async def handle_generation_job(job):
                         await msg.reply_text("⚠️ Сначала отправьте видео")
                     return
 
-                # 🔥 лимит Kling (макс 4 элемента)
+                # 🔥 Kling limit fix
                 if len(images) > 4:
                     images = images[:4]
 
-                # 🔥 авто добавление reference
+                # 🔥 safe prompt injection
                 if images and "@Image" not in prompt:
-                    prompt = prompt + " Use @Image1 for style reference"
+                    prompt = prompt + " Use @Image1 as style reference"
 
                 progress_task = asyncio.create_task(progress_updater())
 
                 result_bytes = None
 
                 try:
-                    # 🔥 UPLOAD видео в FAL (ОБЯЗАТЕЛЬНО)
+                    # 🔥 1. UPLOAD (СТАБИЛЬНЫЙ ENDPOINT)
                     async with aiohttp.ClientSession() as session:
 
                         data = aiohttp.FormData()
@@ -1737,7 +1746,7 @@ async def handle_generation_job(job):
                         )
 
                         async with session.post(
-                            "https://queue.fal.run/upload",
+                            "https://fal.run/upload",
                             headers={"Authorization": f"Key {FAL_KEY}"},
                             data=data
                         ) as upload_resp:
@@ -1745,7 +1754,10 @@ async def handle_generation_job(job):
                             upload_data = await upload_resp.json()
                             video_url = upload_data.get("url")
 
-                    # 🔥 K L I N G  API
+                            if not video_url:
+                                raise Exception(f"Upload failed: {upload_data}")
+
+                    # 🔥 2. K L I N G  API (STABLE)
                     import fal_client
 
                     result = await fal_client.subscribe(
@@ -1753,15 +1765,23 @@ async def handle_generation_job(job):
                         arguments={
                             "prompt": prompt,
                             "video_url": video_url,
-                            "image_urls": images if images else None
+                            "image_urls": images[:4] if images else []
                         },
                         with_logs=True
                     )
 
-                    video_url = result["video"]["url"]
+                    video_url = result.get("video", {}).get("url")
 
+                    if not video_url:
+                        raise Exception(f"Bad Kling response: {result}")
+
+                    # 🔥 3. DOWNLOAD RESULT
                     async with aiohttp.ClientSession() as session:
                         async with session.get(video_url) as r:
+
+                            if r.status != 200:
+                                raise Exception(f"Download error: {r.status}")
+
                             result_bytes = await r.read()
 
                 except Exception as e:
@@ -2600,7 +2620,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # 🔥 FIX: для remix проверяем видео
-        if mode == "remix" and not context.user_data.get("input_video"):
+        if mode == "remix" and not context.user_data.get("input_video_ready"):
             await update.message.reply_text("⚠️ Для Remix сначала отправьте видео")
             return
 
@@ -2632,6 +2652,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "model": context.user_data.get("model", "banana2"),
             "images": context.user_data.get("input_images", []),
             "video": context.user_data.get("input_video"),
+            "video_ready": context.user_data.get("input_video_ready"),
             "user_id": user_id,
             "mode": mode,
             "status": status
@@ -2885,6 +2906,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "model": context.user_data.get("model", "banana2"),
         "images": images,
         "video": context.user_data.get("input_video"),
+        "video_ready": context.user_data.get("input_video_ready"),
         "images": context.user_data.get("input_images", []),
         "user_id": user_id,
         "mode": mode,
