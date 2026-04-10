@@ -992,46 +992,22 @@ async def fal_video_remix(video_bytes, prompt, images=None):
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
 
-        # 🔥 1. UPLOAD FIX (НЕ storage.fal.run)
-        upload_data = aiohttp.FormData()
+        # 🔥 1. UPLOAD FIX (НОВЫЙ FAL СПОСОБ)
+        import fal_client
 
-        upload_data.add_field(
-            "file",
-            video_bytes,
-            filename="video.mp4",
-            content_type="video/mp4"
-        )
+        video_url = await fal_client.upload_file(video_bytes)
 
-        async with session.post(
-            "https://queue.fal.run/upload",   # ✅ FIX
-            headers=headers,
-            data=upload_data
-        ) as upload_resp:
-
-            if upload_resp.status != 200:
-                text = await upload_resp.text()
-                raise Exception(f"Upload HTTP error: {upload_resp.status} | {text}")
-
-            upload_json = await upload_resp.json()
-
-            video_url = upload_json.get("url")
-
-            if not video_url:
-                raise Exception(f"Upload error: {upload_json}")
-
-        # 🔥 2. REMIX -> K L I N G O1 (FIXED ENDPOINT)
+        # 🔥 2. REMIX
         payload = {
             "prompt": prompt,
-            "video_url": video_url,   # ✅ ВАЖНО: теперь используем upload_url
-
-            # 🔥 optional images support
+            "video_url": video_url,
             "image_urls": images if images else []
         }
 
         async with session.post(
             "https://queue.fal.run/fal-ai/kling-video/o1/standard/video-to-video/edit",
             json=payload,
-            headers={**headers, "Content-Type": "application/json"}
+            headers=headers
         ) as resp:
 
             if resp.status != 200:
@@ -1072,7 +1048,6 @@ async def fal_video_remix(video_bytes, prompt, images=None):
                             raise Exception(f"Bad result: {result}")
 
                         async with session.get(video_url) as v:
-
                             return await v.read()
 
                 if state == "FAILED":
@@ -1101,7 +1076,6 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
-# ================= HANDLE VIDEO =================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
@@ -1124,7 +1098,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not video:
         return
 
-    # ⚠️ лимит (Kling до 200MB)
+    # ⚠️ лимит (Telegram + FAL safe limit)
     if video.file_size and video.file_size > 200_000_000:
         await update.message.reply_text("⚠️ Видео слишком большое (макс 200MB)")
         return
@@ -1132,26 +1106,29 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # 🔥 1. получаем файл из Telegram
         file = await context.bot.get_file(video.file_id)
-
         video_bytes = await file.download_as_bytearray()
 
         if not video_bytes:
             await update.message.reply_text("⚠️ Не удалось загрузить видео")
             return
 
-        # 🔥 2. СОХРАНЯЕМ ВСЁ КОРРЕКТНО (ВАЖНО ДЛЯ REMIX PIPELINE)
-        context.user_data["input_video"] = bytes(video_bytes)          # ✅ главный фикс
-        context.user_data["input_video_bytes"] = bytes(video_bytes)     # (fallback)
+        video_bytes = bytes(video_bytes)
+
+        # 🔥 2. СОХРАНЯЕМ (единый источник истины)
+        context.user_data["input_video"] = video_bytes
+        context.user_data["input_video_bytes"] = video_bytes
         context.user_data["input_video_ready"] = True
 
-        # 🔥 3. ОБЯЗАТЕЛЬНО: формируем URL сразу (чтобы не ловить None в worker)
+        # 🔥 3. ВАЖНО: НЕ делаем upload тут вообще
+        # (FAL upload теперь внутри fal_video_remix через fal_client.upload_file)
+
         context.user_data["input_video_url"] = None
 
-        # 🔥 4. картинки сохраняем (для @Image1)
+        # 🔥 4. картинки (для @Image1)
         if "input_images" not in context.user_data:
             context.user_data["input_images"] = []
 
-        # 🔥 5. страховка от старых данных
+        # 🔥 5. очистка старых ошибок
         context.user_data["last_video_error"] = None
 
         await update.message.reply_text(
@@ -1159,7 +1136,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Теперь отправьте:\n"
             "• ✏ Текст\n"
             "• 🖼 Фото (опционально как @Image1)\n\n"
-            "Я автоматически обработаю всё в Kling AI 🚀"
+            "Готовлю Kling AI Remix 🚀"
         )
 
     except Exception as e:
@@ -1667,7 +1644,8 @@ async def handle_generation_job(job):
             # ================= REMIX =================
             if mode == "remix":
 
-                import random                
+                import random
+                import fal_client
 
                 async def progress_updater():
                     steps = [
@@ -1706,7 +1684,7 @@ async def handle_generation_job(job):
                 video_bytes = job.get("video")
                 images = job.get("images", [])
 
-                # 🔥 HARD FALLBACK (главный фикс против "сначала отправьте видео")
+                # 🔥 HARD FALLBACK
                 if not video_bytes:
                     video_bytes = (
                         context.user_data.get("input_video")
@@ -1734,32 +1712,10 @@ async def handle_generation_job(job):
                 result_bytes = None
 
                 try:
-                    # 🔥 1. UPLOAD (СТАБИЛЬНЫЙ ENDPOINT)
-                    async with aiohttp.ClientSession() as session:
+                    # 🔥 1. UPLOAD FIX (НОВЫЙ FAL СПОСОБ)
+                    video_url = await fal_client.upload_file(video_bytes)
 
-                        data = aiohttp.FormData()
-                        data.add_field(
-                            "file",
-                            video_bytes,
-                            filename="video.mp4",
-                            content_type="video/mp4"
-                        )
-
-                        async with session.post(
-                            "https://fal.run/upload",
-                            headers={"Authorization": f"Key {FAL_KEY}"},
-                            data=data
-                        ) as upload_resp:
-
-                            upload_data = await upload_resp.json()
-                            video_url = upload_data.get("url")
-
-                            if not video_url:
-                                raise Exception(f"Upload failed: {upload_data}")
-
-                    # 🔥 2. K L I N G  API (STABLE)
-                    import fal_client
-
+                    # 🔥 2. K L I N G API (STABLE)
                     result = await fal_client.subscribe(
                         "fal-ai/kling-video/o1/standard/video-to-video/edit",
                         arguments={
