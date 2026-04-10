@@ -989,7 +989,7 @@ async def fal_video_remix(video_bytes, prompt):
 
     async with aiohttp.ClientSession() as session:
 
-        # 🔥 1. upload → получаем URL
+        # 🔥 1. UPLOAD (fal storage)
         data = aiohttp.FormData()
         data.add_field(
             "file",
@@ -999,19 +999,20 @@ async def fal_video_remix(video_bytes, prompt):
         )
 
         async with session.post(
-            "https://queue.fal.run/fal-ai/storage/upload",
+            "https://queue.fal.run/storage/upload",
             headers=headers,
             data=data
         ) as upload_resp:
 
             upload_data = await upload_resp.json()
 
-            if "url" not in upload_data:
+            # ⚠️ FAL возвращает url, не id
+            video_url = upload_data.get("url")
+
+            if not video_url:
                 raise Exception(f"Upload error: {upload_data}")
 
-            video_url = upload_data["url"]
-
-        # 🔥 2. remix request
+        # 🔥 2. REMIX
         payload = {
             "video_url": video_url,
             "prompt": prompt
@@ -1030,7 +1031,7 @@ async def fal_video_remix(video_bytes, prompt):
 
             request_id = data["request_id"]
 
-        # 🔥 3. polling
+        # 🔥 3. POLLING
         status_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}/status"
         result_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}"
 
