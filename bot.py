@@ -989,26 +989,31 @@ async def fal_video_remix(video_bytes, prompt):
 
     async with aiohttp.ClientSession() as session:
 
-        # 🔥 1. upload → получаем video_id
+        # 🔥 1. upload → получаем URL
         data = aiohttp.FormData()
-        data.add_field("file", video_bytes, filename="video.mp4", content_type="video/mp4")
+        data.add_field(
+            "file",
+            video_bytes,
+            filename="video.mp4",
+            content_type="video/mp4"
+        )
 
         async with session.post(
-            "https://queue.fal.run/storage/upload",
+            "https://queue.fal.run/fal-ai/storage/upload",
             headers=headers,
             data=data
         ) as upload_resp:
 
             upload_data = await upload_resp.json()
 
-            if "id" not in upload_data:
+            if "url" not in upload_data:
                 raise Exception(f"Upload error: {upload_data}")
 
-            video_id = upload_data["id"]
+            video_url = upload_data["url"]
 
-        # 🔥 2. remix
+        # 🔥 2. remix request
         payload = {
-            "video_id": video_id,
+            "video_url": video_url,
             "prompt": prompt
         }
 
@@ -1046,7 +1051,7 @@ async def fal_video_remix(video_bytes, prompt):
                             video_url = result["videos"][0]["url"]
 
                         if not video_url:
-                            raise Exception(f"Fal remix bad response: {result}")
+                            raise Exception(f"Bad response: {result}")
 
                         async with session.get(video_url) as v:
                             return await v.read()
@@ -1091,17 +1096,31 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not video:
         return
 
-    if video.file_size > 10_000_000:
+    # ⚠️ лимит
+    if video.file_size and video.file_size > 10_000_000:
         await update.message.reply_text("⚠️ Видео слишком большое (макс 10MB)")
         return
 
-    file = await context.bot.get_file(video.file_id)
+    try:
+        # 🔥 получаем file object
+        file = await context.bot.get_file(video.file_id)
 
-    video_bytes = bytes(await file.download_as_bytearray())
+        # 🔥 качаем как bytes
+        video_bytes = await file.download_as_bytearray()
 
-    context.user_data["input_video"] = video_bytes  # 🔥 сохраняем байты
+        if not video_bytes:
+            await update.message.reply_text("⚠️ Не удалось загрузить видео")
+            return
 
-    await update.message.reply_text("✅ Видео загружено\nТеперь отправьте текст ✏")
+        # 🔥 сохраняем в контекст (ВАЖНО: bytes)
+        context.user_data["input_video"] = bytes(video_bytes)
+
+        await update.message.reply_text(
+            "✅ Видео загружено\nТеперь отправьте текст ✏"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"⚠️ Ошибка загрузки видео: {e}")
 
 async def can_generate_video(conn, user_id, premium, free_limit):
 
@@ -1606,6 +1625,8 @@ async def handle_generation_job(job):
             elif mode == "remix":
 
                 import random
+                import asyncio
+                import io
 
                 async def progress_updater():
                     steps = [
@@ -1645,6 +1666,7 @@ async def handle_generation_job(job):
                     except asyncio.CancelledError:
                         pass
 
+
                 video_bytes = context.user_data.get("input_video")
 
                 if not video_bytes:
@@ -1653,11 +1675,21 @@ async def handle_generation_job(job):
 
                 progress_task = asyncio.create_task(progress_updater())
 
+                result_bytes = None
+
                 try:
                     result_bytes = await asyncio.wait_for(
                         fal_video_remix(video_bytes, prompt),
                         timeout=600
                     )
+
+                except Exception as e:
+                    try:
+                        await status.edit_text(f"⚠️ Ошибка remix: {e}")
+                    except:
+                        pass
+                    return
+
                 finally:
                     progress_task.cancel()
 
@@ -1665,6 +1697,10 @@ async def handle_generation_job(job):
                     await status.delete()
                 except:
                     pass
+
+                if not result_bytes:
+                    await msg.reply_text("⚠️ FAL не вернул видео")
+                    return
 
                 result_file = io.BytesIO(result_bytes)
                 result_file.name = "remix.mp4"
