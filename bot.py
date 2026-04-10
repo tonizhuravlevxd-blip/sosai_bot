@@ -980,7 +980,7 @@ async def fal_video_generate(prompt, images=None):
         raise Exception("Sora video timeout")
 
 # ================= FAL VIDEO REMIX =================
-async def fal_video_remix(video_bytes, prompt):
+async def fal_video_remix(video_bytes, prompt, image_bytes_list=None):
     prompt = clean_prompt(prompt)
 
     headers = {
@@ -991,7 +991,7 @@ async def fal_video_remix(video_bytes, prompt):
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
 
-        # 🔥 1. UPLOAD (fal storage)
+        # 🔥 1. UPLOAD VIDEO (fal storage)
         data = aiohttp.FormData()
         data.add_field(
             "file",
@@ -1016,14 +1016,47 @@ async def fal_video_remix(video_bytes, prompt):
             if not video_url:
                 raise Exception(f"Upload error: {upload_data}")
 
-        # 🔥 2. REMIX
+        # 🔥 2. UPLOAD IMAGES (если есть)
+        image_urls = []
+
+        if image_bytes_list:
+            for img_bytes in image_bytes_list:
+
+                img_data = aiohttp.FormData()
+                img_data.add_field(
+                    "file",
+                    img_bytes,
+                    filename="image.png",
+                    content_type="image/png"
+                )
+
+                async with session.post(
+                    "https://fal.run/upload",
+                    headers=headers,
+                    data=img_data
+                ) as img_resp:
+
+                    if img_resp.status != 200:
+                        raise Exception(f"Image upload error: {img_resp.status}")
+
+                    img_json = await img_resp.json()
+                    img_url = img_json.get("url")
+
+                    if img_url:
+                        image_urls.append(img_url)
+
+        # 🔥 3. REMIX (Kling вместо Sora)
         payload = {
-            "video_id": video_id,
-            "prompt": prompt
+            "prompt": prompt,
+            "video_url": video_url,
+            "keep_audio": True
         }
 
+        if image_urls:
+            payload["image_urls"] = image_urls
+
         async with session.post(
-            "https://queue.fal.run/fal-ai/sora-2/video-to-video/remix",
+            "https://queue.fal.run/fal-ai/kling-video/o1/video-to-video/edit",
             json=payload,
             headers={**headers, "Content-Type": "application/json"}
         ) as resp:
@@ -1039,9 +1072,9 @@ async def fal_video_remix(video_bytes, prompt):
 
             request_id = data["request_id"]
 
-        # 🔥 3. POLLING
-        status_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}/status"
-        result_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}"
+        # 🔥 4. POLLING (оставляем как у тебя)
+        status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
+        result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
 
         for _ in range(300):
             async with session.get(status_url, headers=headers) as s:
@@ -1067,8 +1100,6 @@ async def fal_video_remix(video_bytes, prompt):
 
                         if "video" in result and result["video"]:
                             video_url = result["video"].get("url")
-                        elif "videos" in result and result["videos"]:
-                            video_url = result["videos"][0].get("url")
 
                         if not video_url:
                             raise Exception(f"Bad response: {result}")
@@ -1128,9 +1159,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not video:
         return
 
-    # ⚠️ лимит
-    if video.file_size and video.file_size > 10_000_000:
-        await update.message.reply_text("⚠️ Видео слишком большое (макс 10MB)")
+    # ⚠️ лимит (Kling до 200MB, но Telegram лучше ограничить)
+    if video.file_size and video.file_size > 200_000_000:
+        await update.message.reply_text("⚠️ Видео слишком большое (макс 200MB)")
         return
 
     try:
@@ -1144,14 +1175,20 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Не удалось загрузить видео")
             return
 
-        # 🔥 сохраняем в контекст (ВАЖНО: bytes)
+        # 🔥 сохраняем видео (bytes → потом загрузится в fal)
         context.user_data["input_video"] = bytes(video_bytes)
 
-        # 🔥 сбрасываем старые картинки (важно для remix)
-        context.user_data.pop("input_images", None)
+        # 🔥 НЕ удаляем картинки (теперь они нужны как референсы)
+        if "input_images" not in context.user_data:
+            context.user_data["input_images"] = []
 
         await update.message.reply_text(
-            "✅ Видео загружено\nТеперь отправьте текст ✏"
+            "✅ Видео загружено\n\n"
+            "Теперь отправьте:\n"
+            "• ✏ Текст\n"
+            "• 🖼 Фото (опционально как референс)\n\n"
+            "Пример:\n"
+            "Сделай стиль как @Image1 и добавь неон"
         )
 
     except Exception as e:
@@ -1694,7 +1731,8 @@ async def handle_generation_job(job):
                         pass
 
 
-                video_bytes = job.get("video")  # 🔥 FIX: берём из job
+                video_bytes = job.get("video")
+                images = job.get("images", [])  # 🔥 ДОБАВИЛИ картинки
 
                 if not video_bytes:
                     if msg:
@@ -1706,8 +1744,9 @@ async def handle_generation_job(job):
                 result_bytes = None
 
                 try:
+                    # 🔥 ПЕРЕДАЕМ images В remix
                     result_bytes = await asyncio.wait_for(
-                        fal_video_remix(video_bytes, prompt),
+                        fal_video_remix(video_bytes, prompt, images),
                         timeout=600
                     )
 
@@ -2831,6 +2870,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "model": context.user_data.get("model", "banana2"),
         "images": images,
         "video": context.user_data.get("input_video"),
+        "images": context.user_data.get("input_images", []),
         "user_id": user_id,
         "mode": mode,
         "status": status
