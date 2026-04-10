@@ -980,24 +980,44 @@ async def fal_video_generate(prompt, images=None):
         raise Exception("Sora video timeout")
 
 # ================= FAL VIDEO REMIX =================
-async def fal_video_remix(video_url, prompt):
+async def fal_video_remix(video_bytes, prompt):
     prompt = clean_prompt(prompt)
 
-    url = "https://queue.fal.run/fal-ai/sora-2/video-to-video/remix"
-
     headers = {
-        "Authorization": f"Key {FAL_KEY}",
-        "Content-Type": "application/json"
+        "Authorization": f"Key {FAL_KEY}"
     }
 
     async with aiohttp.ClientSession() as session:
 
+        # 🔥 1. upload → получаем video_id
+        data = aiohttp.FormData()
+        data.add_field("file", video_bytes, filename="video.mp4", content_type="video/mp4")
+
+        async with session.post(
+            "https://queue.fal.run/storage/upload",
+            headers=headers,
+            data=data
+        ) as upload_resp:
+
+            upload_data = await upload_resp.json()
+
+            if "id" not in upload_data:
+                raise Exception(f"Upload error: {upload_data}")
+
+            video_id = upload_data["id"]
+
+        # 🔥 2. remix
         payload = {
-            "video_url": video_url,
+            "video_id": video_id,
             "prompt": prompt
         }
 
-        async with session.post(url, json=payload, headers=headers) as resp:
+        async with session.post(
+            "https://queue.fal.run/fal-ai/sora-2/video-to-video/remix",
+            json=payload,
+            headers={**headers, "Content-Type": "application/json"}
+        ) as resp:
+
             data = await resp.json()
 
             if "request_id" not in data:
@@ -1005,6 +1025,7 @@ async def fal_video_remix(video_url, prompt):
 
             request_id = data["request_id"]
 
+        # 🔥 3. polling
         status_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}/status"
         result_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}"
 
@@ -1076,7 +1097,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     file = await context.bot.get_file(video.file_id)
 
-    context.user_data["input_video_file"] = file  # 🔥 сохраняем file, а не байты
+    video_bytes = bytes(await file.download_as_bytearray())
+
+    context.user_data["input_video"] = video_bytes  # 🔥 сохраняем байты
 
     await update.message.reply_text("✅ Видео загружено\nТеперь отправьте текст ✏")
 
@@ -1622,19 +1645,17 @@ async def handle_generation_job(job):
                     except asyncio.CancelledError:
                         pass
 
-                file = context.user_data.get("input_video_file")
+                video_bytes = context.user_data.get("input_video")
 
-                if not file:
+                if not video_bytes:
                     await msg.reply_text("⚠️ Сначала отправьте видео")
                     return
-
-                video_url = file.file_path  # 🔥 ВОТ ГЛАВНОЕ
 
                 progress_task = asyncio.create_task(progress_updater())
 
                 try:
                     result_bytes = await asyncio.wait_for(
-                        fal_video_remix(video_url, prompt),
+                        fal_video_remix(video_bytes, prompt),
                         timeout=600
                     )
                 finally:
