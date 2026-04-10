@@ -1074,13 +1074,11 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Видео слишком большое (макс 10MB)")
         return
 
-    file = await video.get_file()
-    video_bytes = bytes(await file.download_as_bytearray())
+    file = await context.bot.get_file(video.file_id)
 
-    context.user_data["input_video"] = video_bytes
+    context.user_data["input_video_file"] = file  # 🔥 сохраняем file, а не байты
 
     await update.message.reply_text("✅ Видео загружено\nТеперь отправьте текст ✏")
-
 
 async def can_generate_video(conn, user_id, premium, free_limit):
 
@@ -1624,17 +1622,19 @@ async def handle_generation_job(job):
                     except asyncio.CancelledError:
                         pass
 
-                video_bytes = context.user_data.get("input_video")
+                file = context.user_data.get("input_video_file")
 
-                if not video_bytes:
+                if not file:
                     await msg.reply_text("⚠️ Сначала отправьте видео")
                     return
+
+                video_url = file.file_path  # 🔥 ВОТ ГЛАВНОЕ
 
                 progress_task = asyncio.create_task(progress_updater())
 
                 try:
                     result_bytes = await asyncio.wait_for(
-                        fal_video_remix(video_bytes, prompt),
+                        fal_video_remix(video_url, prompt),
                         timeout=600
                     )
                 finally:
