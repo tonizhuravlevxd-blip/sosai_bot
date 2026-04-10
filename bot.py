@@ -1624,9 +1624,7 @@ async def handle_generation_job(job):
             # ================= REMIX =================
             elif mode == "remix":
 
-                import random
-                import asyncio
-                import io
+                import random                
 
                 async def progress_updater():
                     steps = [
