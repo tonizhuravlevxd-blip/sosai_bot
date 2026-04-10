@@ -980,10 +980,10 @@ async def fal_video_generate(prompt, images=None):
         raise Exception("Sora video timeout")
 
 # ================= FAL VIDEO REMIX =================
-async def fal_video_remix(video_bytes, prompt):
+async def fal_video_remix(video_url, prompt):
     prompt = clean_prompt(prompt)
 
-    remix_url = "https://queue.fal.run/fal-ai/sora-2/video-to-video/remix"
+    url = "https://queue.fal.run/fal-ai/sora-2/video-to-video/remix"
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -992,30 +992,12 @@ async def fal_video_remix(video_bytes, prompt):
 
     async with aiohttp.ClientSession() as session:
 
-        # 🔥 1. СНАЧАЛА загружаем видео → получаем video_id
-        async with session.post(
-            "https://fal.run/api/storage/upload",
-            headers={
-                "Authorization": f"Key {FAL_KEY}",
-                "Content-Type": "application/octet-stream"
-            },
-            data=video_bytes
-        ) as upload_resp:
-
-            upload_data = await upload_resp.json()
-
-            if "id" not in upload_data:
-                raise Exception(f"Upload error: {upload_data}")
-
-            video_id = upload_data["id"]
-
-        # 🔥 2. запускаем remix уже с video_id
         payload = {
-            "video_id": video_id,
+            "video_url": video_url,
             "prompt": prompt
         }
 
-        async with session.post(remix_url, json=payload, headers=headers) as resp:
+        async with session.post(url, json=payload, headers=headers) as resp:
             data = await resp.json()
 
             if "request_id" not in data:
@@ -1026,7 +1008,6 @@ async def fal_video_remix(video_bytes, prompt):
         status_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}/status"
         result_url = f"https://queue.fal.run/fal-ai/sora-2/requests/{request_id}"
 
-        # 🔥 3. polling (оставил твой)
         for _ in range(300):
             async with session.get(status_url, headers=headers) as s:
                 status = await s.json()
