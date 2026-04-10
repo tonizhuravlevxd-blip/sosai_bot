@@ -980,7 +980,8 @@ async def fal_video_generate(prompt, images=None):
         raise Exception("Sora video timeout")
 
 # ================= FAL VIDEO REMIX =================
-async def fal_video_remix(video_bytes, prompt, image_bytes_list=None):
+async def fal_video_remix(video_bytes, prompt, images=None):
+
     prompt = clean_prompt(prompt)
 
     headers = {
@@ -991,9 +992,10 @@ async def fal_video_remix(video_bytes, prompt, image_bytes_list=None):
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
 
-        # 🔥 1. UPLOAD VIDEO (FIXED URL)
-        data = aiohttp.FormData()
-        data.add_field(
+        # 🔥 1. UPLOAD FIX (НЕ storage.fal.run)
+        upload_data = aiohttp.FormData()
+
+        upload_data.add_field(
             "file",
             video_bytes,
             filename="video.mp4",
@@ -1001,80 +1003,54 @@ async def fal_video_remix(video_bytes, prompt, image_bytes_list=None):
         )
 
         async with session.post(
-            "https://storage.fal.run/files",  # ✅ FIX
+            "https://queue.fal.run/upload",   # ✅ FIX
             headers=headers,
-            data=data
+            data=upload_data
         ) as upload_resp:
 
             if upload_resp.status != 200:
-                raise Exception(f"Upload HTTP error: {upload_resp.status}")
+                text = await upload_resp.text()
+                raise Exception(f"Upload HTTP error: {upload_resp.status} | {text}")
 
-            upload_data = await upload_resp.json()
+            upload_json = await upload_resp.json()
 
-            video_url = upload_data.get("url")
+            video_url = upload_json.get("url")
 
             if not video_url:
-                raise Exception(f"Upload error: {upload_data}")
+                raise Exception(f"Upload error: {upload_json}")
 
-        # 🔥 2. UPLOAD IMAGES (если есть)
-        image_urls = []
-
-        if image_bytes_list:
-            for img_bytes in image_bytes_list:
-
-                img_data = aiohttp.FormData()
-                img_data.add_field(
-                    "file",
-                    img_bytes,
-                    filename="image.png",
-                    content_type="image/png"
-                )
-
-                async with session.post(
-                    "https://storage.fal.run/files",
-                    headers=headers,
-                    data=img_data
-                ) as img_resp:
-
-                    if img_resp.status != 200:
-                        continue
-
-                    img_json = await img_resp.json()
-                    url = img_json.get("url")
-
-                    if url:
-                        image_urls.append(url)
-
-        # 🔥 3. EDIT (KLING)
+        # 🔥 2. REMIX -> K L I N G O1 (FIXED ENDPOINT)
         payload = {
             "prompt": prompt,
-            "video_url": video_url,
-            "image_urls": image_urls[:4],  # максимум 4
-            "keep_audio": True
+            "video_url": video_url,   # ✅ ВАЖНО: теперь используем upload_url
+
+            # 🔥 optional images support
+            "image_urls": images if images else []
         }
 
         async with session.post(
-            "https://queue.fal.run/fal-ai/kling-video/o1/video-to-video/edit",
+            "https://queue.fal.run/fal-ai/kling-video/o1/standard/video-to-video/edit",
             json=payload,
             headers={**headers, "Content-Type": "application/json"}
         ) as resp:
 
             if resp.status != 200:
                 text = await resp.text()
-                raise Exception(f"Kling HTTP error: {resp.status} | {text}")
+                raise Exception(f"Kling remix HTTP error: {resp.status} | {text}")
 
             data = await resp.json()
 
-            if "request_id" not in data:
-                raise Exception(f"Kling error: {data}")
+            request_id = data.get("request_id")
 
-            request_id = data["request_id"]
+            if not request_id:
+                raise Exception(f"No request_id: {data}")
 
-        # 🔥 4. POLLING
+        # 🔥 3. STATUS
         status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
         result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
 
         for _ in range(300):
+
             async with session.get(status_url, headers=headers) as s:
 
                 if s.status != 200:
@@ -1088,23 +1064,14 @@ async def fal_video_remix(video_bytes, prompt, image_bytes_list=None):
 
                     async with session.get(result_url, headers=headers) as r:
 
-                        if r.status != 200:
-                            raise Exception(f"Result HTTP error: {r.status}")
-
                         result = await r.json()
 
-                        video_url = None
-
-                        if "video" in result:
-                            video_url = result["video"].get("url")
+                        video_url = result.get("video", {}).get("url")
 
                         if not video_url:
-                            raise Exception(f"Bad response: {result}")
+                            raise Exception(f"Bad result: {result}")
 
                         async with session.get(video_url) as v:
-
-                            if v.status != 200:
-                                raise Exception(f"Download error: {v.status}")
 
                             return await v.read()
 
@@ -1134,6 +1101,7 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
+# ================= HANDLE VIDEO =================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
@@ -1156,26 +1124,28 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not video:
         return
 
-    # ⚠️ лимит (Kling до 200MB, но Telegram лучше ограничить)
+    # ⚠️ лимит (Kling до 200MB)
     if video.file_size and video.file_size > 200_000_000:
         await update.message.reply_text("⚠️ Видео слишком большое (макс 200MB)")
         return
 
     try:
-        # 🔥 получаем file object
+        # 🔥 1. получаем файл из Telegram
         file = await context.bot.get_file(video.file_id)
 
-        # 🔥 качаем как bytes
         video_bytes = await file.download_as_bytearray()
 
         if not video_bytes:
             await update.message.reply_text("⚠️ Не удалось загрузить видео")
             return
 
-        # 🔥 сохраняем видео (bytes → потом загрузится в fal)
-        context.user_data["input_video"] = bytes(video_bytes)
+        # 🔥 2. СОХРАНЯЕМ BYTES временно
+        context.user_data["input_video_bytes"] = bytes(video_bytes)
 
-        # 🔥 НЕ удаляем картинки (теперь они нужны как референсы)
+        # 🔥 3. ВАЖНО: очищаем старый URL (если был)
+        context.user_data["input_video_url"] = None
+
+        # 🔥 4. картинки сохраняем (для @Image1)
         if "input_images" not in context.user_data:
             context.user_data["input_images"] = []
 
@@ -1183,9 +1153,8 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Видео загружено\n\n"
             "Теперь отправьте:\n"
             "• ✏ Текст\n"
-            "• 🖼 Фото (опционально как референс)\n\n"
-            "Пример:\n"
-            "Сделай стиль как @Image1 и добавь неон"
+            "• 🖼 Фото (опционально как @Image1)\n\n"
+            "Я автоматически обработаю всё в Kling AI 🚀"
         )
 
     except Exception as e:
@@ -1731,7 +1700,7 @@ async def handle_generation_job(job):
                 video_bytes = job.get("video")
                 images = job.get("images", [])
 
-                # 🔥 fallback если job пустой (очень важно)
+                # 🔥 fallback если job пустой
                 if not video_bytes:
                     video_bytes = context.user_data.get("input_video")
 
@@ -1743,23 +1712,57 @@ async def handle_generation_job(job):
                         await msg.reply_text("⚠️ Сначала отправьте видео")
                     return
 
-                # 🔥 ограничение Kling (без этого будут random FAIL)
+                # 🔥 лимит Kling (макс 4 элемента)
                 if len(images) > 4:
                     images = images[:4]
 
-                # 🔥 авто-подсказка если есть картинки но нет @Image
+                # 🔥 авто добавление reference
                 if images and "@Image" not in prompt:
-                    prompt = prompt + " Use @Image1 as style reference"
+                    prompt = prompt + " Use @Image1 for style reference"
 
                 progress_task = asyncio.create_task(progress_updater())
 
                 result_bytes = None
 
                 try:
-                    result_bytes = await asyncio.wait_for(
-                        fal_video_remix(video_bytes, prompt, images),
-                        timeout=600
+                    # 🔥 UPLOAD видео в FAL (ОБЯЗАТЕЛЬНО)
+                    async with aiohttp.ClientSession() as session:
+
+                        data = aiohttp.FormData()
+                        data.add_field(
+                            "file",
+                            video_bytes,
+                            filename="video.mp4",
+                            content_type="video/mp4"
+                        )
+
+                        async with session.post(
+                            "https://queue.fal.run/upload",
+                            headers={"Authorization": f"Key {FAL_KEY}"},
+                            data=data
+                        ) as upload_resp:
+
+                            upload_data = await upload_resp.json()
+                            video_url = upload_data.get("url")
+
+                    # 🔥 K L I N G  API
+                    import fal_client
+
+                    result = await fal_client.subscribe(
+                        "fal-ai/kling-video/o1/standard/video-to-video/edit",
+                        arguments={
+                            "prompt": prompt,
+                            "video_url": video_url,
+                            "image_urls": images if images else None
+                        },
+                        with_logs=True
                     )
+
+                    video_url = result["video"]["url"]
+
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(video_url) as r:
+                            result_bytes = await r.read()
 
                 except Exception as e:
                     try:
