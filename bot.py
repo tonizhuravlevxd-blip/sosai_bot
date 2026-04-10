@@ -1001,7 +1001,7 @@ async def fal_video_remix(video_bytes, prompt):
         )
 
         async with session.post(
-            "https://queue.fal.run/storage/upload",
+            "https://fal.run/upload",
             headers=headers,
             data=data
         ) as upload_resp:
@@ -1018,7 +1018,7 @@ async def fal_video_remix(video_bytes, prompt):
 
         # 🔥 2. REMIX
         payload = {
-            "video_url": video_url,
+            "video_id": video_id,
             "prompt": prompt
         }
 
