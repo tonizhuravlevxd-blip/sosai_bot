@@ -987,7 +987,9 @@ async def fal_video_remix(video_bytes, prompt):
         "Authorization": f"Key {FAL_KEY}"
     }
 
-    async with aiohttp.ClientSession() as session:
+    timeout = aiohttp.ClientTimeout(total=600)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
 
         # 🔥 1. UPLOAD (fal storage)
         data = aiohttp.FormData()
@@ -1004,9 +1006,11 @@ async def fal_video_remix(video_bytes, prompt):
             data=data
         ) as upload_resp:
 
+            if upload_resp.status != 200:
+                raise Exception(f"Upload HTTP error: {upload_resp.status}")
+
             upload_data = await upload_resp.json()
 
-            # ⚠️ FAL возвращает url, не id
             video_url = upload_data.get("url")
 
             if not video_url:
@@ -1024,6 +1028,10 @@ async def fal_video_remix(video_bytes, prompt):
             headers={**headers, "Content-Type": "application/json"}
         ) as resp:
 
+            if resp.status != 200:
+                text = await resp.text()
+                raise Exception(f"Fal remix HTTP error: {resp.status} | {text}")
+
             data = await resp.json()
 
             if "request_id" not in data:
@@ -1037,33 +1045,47 @@ async def fal_video_remix(video_bytes, prompt):
 
         for _ in range(300):
             async with session.get(status_url, headers=headers) as s:
+
+                if s.status != 200:
+                    await asyncio.sleep(2)
+                    continue
+
                 status = await s.json()
 
-                if status.get("status") == "COMPLETED":
+                state = status.get("status")
+
+                if state == "COMPLETED":
 
                     async with session.get(result_url, headers=headers) as r:
+
+                        if r.status != 200:
+                            raise Exception(f"Result HTTP error: {r.status}")
+
                         result = await r.json()
 
                         video_url = None
 
-                        if "video" in result:
-                            video_url = result["video"]["url"]
-                        elif "videos" in result:
-                            video_url = result["videos"][0]["url"]
+                        if "video" in result and result["video"]:
+                            video_url = result["video"].get("url")
+                        elif "videos" in result and result["videos"]:
+                            video_url = result["videos"][0].get("url")
 
                         if not video_url:
                             raise Exception(f"Bad response: {result}")
 
                         async with session.get(video_url) as v:
+
+                            if v.status != 200:
+                                raise Exception(f"Download error: {v.status}")
+
                             return await v.read()
 
-                if status.get("status") == "FAILED":
+                if state == "FAILED":
                     raise Exception(f"Remix failed: {status}")
 
             await asyncio.sleep(2)
 
         raise Exception("Remix timeout")
-
 # ================= FAKE PHOTO UPLOAD ACTION =================
 async def fake_photo_upload(bot, chat_id):
     try:
@@ -1087,6 +1109,15 @@ user_locks = {}
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
+    ONLINE_USERS[user_id] = time.time()
+
+    if not check_global_spam(user_id):
+        return
+
+    if user_id in active_generations:
+        await update.message.reply_text("⏳ Дождитесь завершения текущей генерации")
+        return
+
     mode = context.user_data.get("mode")
 
     if mode != "remix":
@@ -1116,13 +1147,15 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 🔥 сохраняем в контекст (ВАЖНО: bytes)
         context.user_data["input_video"] = bytes(video_bytes)
 
+        # 🔥 сбрасываем старые картинки (важно для remix)
+        context.user_data.pop("input_images", None)
+
         await update.message.reply_text(
             "✅ Видео загружено\nТеперь отправьте текст ✏"
         )
 
     except Exception as e:
         await update.message.reply_text(f"⚠️ Ошибка загрузки видео: {e}")
-
 async def can_generate_video(conn, user_id, premium, free_limit):
 
     user = await conn.fetchrow(
@@ -1623,7 +1656,7 @@ async def handle_generation_job(job):
 
 
             # ================= REMIX =================
-            elif mode == "remix":
+            if mode == "remix":
 
                 import random                
 
@@ -1644,8 +1677,8 @@ async def handle_generation_job(job):
                     last_text = ""
 
                     try:
-                        while idx < len(steps):
-                            new_text = steps[idx]
+                        while True:
+                            new_text = steps[idx % len(steps)]
 
                             if new_text != last_text:
                                 try:
@@ -1657,19 +1690,15 @@ async def handle_generation_job(job):
                             await asyncio.sleep(random.randint(4, 8))
                             idx += 1
 
-                        try:
-                            await status.edit_text("🚀 Завершение remix...")
-                        except:
-                            pass
-
                     except asyncio.CancelledError:
                         pass
 
 
-                video_bytes = context.user_data.get("input_video")
+                video_bytes = video  # 🔥 FIX: используем из job
 
                 if not video_bytes:
-                    await msg.reply_text("⚠️ Сначала отправьте видео")
+                    if msg:
+                        await msg.reply_text("⚠️ Сначала отправьте видео")
                     return
 
                 progress_task = asyncio.create_task(progress_updater())
@@ -1684,21 +1713,27 @@ async def handle_generation_job(job):
 
                 except Exception as e:
                     try:
-                        await status.edit_text(f"⚠️ Ошибка remix: {e}")
+                        await safe_edit(status, f"⚠️ Ошибка remix: {e}")
                     except:
                         pass
                     return
 
                 finally:
                     progress_task.cancel()
+                    try:
+                        await progress_task
+                    except:
+                        pass
 
                 try:
-                    await status.delete()
+                    if status:
+                        await status.delete()
                 except:
                     pass
 
                 if not result_bytes:
-                    await msg.reply_text("⚠️ FAL не вернул видео")
+                    if msg:
+                        await msg.reply_text("⚠️ FAL не вернул видео")
                     return
 
                 result_file = io.BytesIO(result_bytes)
@@ -1846,9 +1881,18 @@ async def handle_generation_job(job):
                 active_generations.discard(user_id)
 
             unlock_user_generation(user_id)
+
+            # 🔥 FIX: очистка состояния пользователя
+            try:
+                if context and hasattr(context, "user_data"):
+                    context.user_data.pop("input_video", None)
+                    context.user_data.pop("input_images", None)
+            except:
+                pass
                 
             if user_id in user_locks and not user_locks[user_id].locked():
                 user_locks.pop(user_id, None)
+
             logging.info(f"🧹 CLEANUP user {user_id}")
 # ================== WORKERS ==================
 async def image_worker():
@@ -2445,7 +2489,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     mode = context.user_data.get("mode")
 
-    if mode not in ["video", "cartoon", "image"]:
+    if mode not in ["video", "cartoon", "image", "remix"]:
 
         # 🔥 анти-флуд именно для этого сообщения
         now = time.time()
@@ -2457,14 +2501,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_mode_warn"] = now
 
         await update.message.reply_text(
-            "⚠ Сначала выберите режим генерации: /photo, /video, /cartoon или /suno"
+            "⚠ Сначала выберите режим генерации: /photo, /video, /cartoon, /remix или /suno"
         )
         return
 
     if mode in ["image", "cartoon"] and "model" not in context.user_data:
         context.user_data["model"] = "banana2"  # ✅ Автоустановка модели для мультфильмов
-        # await update.message.reply_text("⚠ Сначала выберите модель\nВведите /photo")
-        # return
 
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
@@ -2500,7 +2542,12 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         if get_queue_position() > 1000:
-            await update.reply_text("🚫 Сервер перегружен, попробуйте позже")
+            await update.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
+            return
+
+        # 🔥 FIX: для remix проверяем видео
+        if mode == "remix" and not context.user_data.get("input_video"):
+            await update.message.reply_text("⚠️ Для Remix сначала отправьте видео")
             return
 
         position = get_queue_position() + 1
@@ -2523,8 +2570,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        
-
         await queue_map.get(mode, generation_queue_image).put({
             "update": update,
             "context": context,
@@ -2532,6 +2577,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "size": context.user_data.get("size", "1024x1024"),
             "model": context.user_data.get("model", "banana2"),
             "images": context.user_data["input_images"],
+            "video": context.user_data.get("input_video"),
             "user_id": user_id,
             "mode": mode,
             "status": status
@@ -2689,15 +2735,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text("⚠ Слишком длинный запрос.")
         return
 
-    # ===== FIX: получаем premium ДО использования =====
+    # ===== FIX: получаем пользователя заранее =====
     user = await get_user(user_id)
+
+    if not user:
+        await message.reply_text("⚠ Ошибка пользователя. Напишите /start")
+        return
+
     premium_active = (
         user["premium"] == 1 and user["premium_until"] > int(time.time())
     )
 
     if context.user_data.get("chat_mode"):
 
-        # ===== ✅ БЕРЁМ ИЗ БД =====
         chat_count = user.get("chat_count", 0)
 
         if not premium_active and chat_count >= FREE_CHAT_LIMIT:
@@ -2726,7 +2776,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             answer = response.choices[0].message.content
 
-            # ===== ✅ УВЕЛИЧИВАЕМ В БД =====
             async with db_pool.acquire() as conn:
                 await conn.execute(
                     "UPDATE users SET chat_count = chat_count + 1 WHERE user_id=$1",
@@ -2741,19 +2790,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("⚠ Ошибка ChatGPT. Попробуйте позже.")
 
         return
+
     if mode in ["video", "cartoon", "remix"] and not prompt:
         await message.reply_text("⚠ Пожалуйста, отправьте текст или фото для генерации видео/мультфильма")
         return
 
-    user = await get_user(user_id)
-    premium_active = (
-        user["premium"] == 1 and user["premium_until"] > int(time.time())
-    )
-    
-    if not user:
-        await message.reply_text("⚠ Ошибка пользователя. Напишите /start")
+    # 🔥 FIX: проверка видео для remix
+    if mode == "remix" and not context.user_data.get("input_video"):
+        await message.reply_text("⚠️ Сначала отправьте видео для Remix")
         return
-
+    
     await reset_week_if_needed(user)
 
     queue_map = {
@@ -2784,6 +2830,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "size": context.user_data.get("size", "1024x1024"),
         "model": context.user_data.get("model", "banana2"),
         "images": images,
+        "video": context.user_data.get("input_video"),
         "user_id": user_id,
         "mode": mode,
         "status": status
