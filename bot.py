@@ -994,7 +994,7 @@ async def fal_video_remix(video_bytes, prompt):
 
         # 🔥 1. СНАЧАЛА загружаем видео → получаем video_id
         async with session.post(
-            "https://storage.fal.run/upload",
+            "https://fal.run/api/storage/upload",
             headers={
                 "Authorization": f"Key {FAL_KEY}",
                 "Content-Type": "application/octet-stream"
