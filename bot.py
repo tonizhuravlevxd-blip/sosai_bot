@@ -1694,7 +1694,7 @@ async def handle_generation_job(job):
                         pass
 
 
-                video_bytes = video  # 🔥 FIX: используем из job
+                video_bytes = job.get("video")  # 🔥 FIX: берём из job
 
                 if not video_bytes:
                     if msg:
