@@ -982,6 +982,8 @@ async def fal_video_generate(prompt, images=None):
 # ================= FAL VIDEO REMIX =================
 async def fal_video_remix(video_bytes, prompt, images=None):
 
+    import base64
+
     prompt = clean_prompt(prompt)
 
     headers = {
@@ -992,33 +994,9 @@ async def fal_video_remix(video_bytes, prompt, images=None):
 
     async with aiohttp.ClientSession(timeout=timeout) as session:
 
-        # 🔥 1. UPLOAD (ПРАВИЛЬНЫЙ FAL ENDPOINT)
-        upload_data = aiohttp.FormData()
-
-        upload_data.add_field(
-            "file",
-            video_bytes,
-            filename="video.mp4",
-            content_type="video/mp4"
-        )
-
-        async with session.post(
-            "https://queue.fal.run/upload",
-            headers=headers,
-            data=upload_data
-        ) as upload_resp:
-
-            text = await upload_resp.text()
-
-            try:
-                upload_json = await upload_resp.json()
-            except:
-                raise Exception(f"Upload not JSON: {text}")
-
-            video_url = upload_json.get("url")
-
-            if not video_url:
-                raise Exception(f"Upload error: {upload_json}")
+        # 🔥 1. FIX: NO UPLOAD API (убираем источник 502)
+        video_b64 = base64.b64encode(video_bytes).decode("utf-8")
+        video_url = f"data:video/mp4;base64,{video_b64}"
 
         # 🔥 2. REMIX REQUEST
         payload = {
@@ -1103,60 +1081,72 @@ user_locks = {}
 # ================= HANDLE VIDEO =================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    import traceback
+    import logging
+
     user_id = update.effective_user.id
     ONLINE_USERS[user_id] = time.time()
 
+    logging.info(f"🎬 HANDLE VIDEO START user={user_id}")
+
     if not check_global_spam(user_id):
+        logging.warning(f"🚫 SPAM BLOCK user={user_id}")
         return
 
     if user_id in active_generations:
+        logging.warning(f"⏳ ALREADY GENERATING user={user_id}")
         await update.message.reply_text("⏳ Дождитесь завершения текущей генерации")
         return
 
     mode = context.user_data.get("mode")
+    logging.info(f"📌 MODE={mode} user={user_id}")
 
     if mode != "remix":
+        logging.info(f"❌ WRONG MODE user={user_id}")
         return
 
     video = update.message.video
 
     if not video:
+        logging.warning(f"❌ NO VIDEO user={user_id}")
         return
 
     # ⚠️ лимит (Telegram + FAL safe limit)
     if video.file_size and video.file_size > 200_000_000:
+        logging.warning(f"⚠️ VIDEO TOO BIG user={user_id} size={video.file_size}")
         await update.message.reply_text("⚠️ Видео слишком большое (макс 200MB)")
         return
 
     try:
+        logging.info(f"⬇️ DOWNLOADING VIDEO user={user_id}")
+
         # 🔥 1. получаем файл из Telegram
         file = await context.bot.get_file(video.file_id)
         video_bytes = await file.download_as_bytearray()
 
         if not video_bytes:
+            logging.error(f"❌ EMPTY VIDEO BYTES user={user_id}")
             await update.message.reply_text("⚠️ Не удалось загрузить видео")
             return
 
         video_bytes = bytes(video_bytes)
 
-        # 🔥 2. СОХРАНЯЕМ (единый источник истины для remix pipeline)
+        logging.info(f"✅ VIDEO DOWNLOADED user={user_id} size={len(video_bytes)}")
+
+        # 🔥 2. СОХРАНЯЕМ (единый источник истины)
         context.user_data["input_video"] = video_bytes
         context.user_data["input_video_bytes"] = video_bytes
         context.user_data["input_video_ready"] = True
 
-        # 🔥 3. ВАЖНО: никаких upload URL тут больше НЕ создаём
-        # upload теперь только внутри fal_video_remix()
-
         context.user_data["input_video_url"] = None
+        context.user_data["last_video_error"] = None
 
-        # 🔥 4. картинки (для @Image1)
+        # 🔥 3. images init
         if "input_images" not in context.user_data:
             context.user_data["input_images"] = []
 
-        # 🔥 5. страховка от старых ошибок
-        context.user_data["last_video_error"] = None
+        logging.info(f"🧠 CONTEXT SAVED user={user_id}")
 
-        # 🔥 6. UX улучшение (чтобы не думали что бот "умер")
         await update.message.reply_text(
             "✅ Видео загружено\n\n"
             "Теперь отправьте:\n"
@@ -1166,8 +1156,17 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     except Exception as e:
+
+        error_trace = traceback.format_exc()
+
+        logging.error(f"❌ HANDLE VIDEO ERROR user={user_id}: {e}")
+        logging.error(error_trace)
+
         context.user_data["last_video_error"] = str(e)
-        await update.message.reply_text(f"⚠️ Ошибка загрузки видео: {e}")
+
+        await update.message.reply_text(
+            f"⚠️ Ошибка загрузки видео:\n{e}"
+        )
 async def can_generate_video(conn, user_id, premium, free_limit):
 
     user = await conn.fetchrow(
@@ -1667,204 +1666,195 @@ async def handle_generation_job(job):
                     await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
 
 
-            # ================= REMIX =================
-            if mode == "remix":
+# ================= REMIX =================
+if mode == "remix":
 
-                import random                
+    import random
+    import json
+    import traceback
 
-                async def progress_updater():
-                    steps = [
-                        "🔥 Анализ тренда...",
-                        "🎬 Подготовка remix модели...",
-                        "🎥 Обработка видео...",
-                        "✨ Применение эффектов...",
-                        "🧠 AI думает как TikTok...",
-                        "🦄 Добавляем магию...",
-                        "🎞 Рендеринг кадров...",
-                        "🦕 Почти готово...",
-                        "📦 Финальная сборка..."
-                    ]
+    async def progress_updater():
+        steps = [
+            "🔥 Анализ тренда...",
+            "🎬 Подготовка remix модели...",
+            "🎥 Обработка видео...",
+            "✨ Применение эффектов...",
+            "🧠 AI думает как TikTok...",
+            "🦄 Добавляем магию...",
+            "🎞 Рендеринг кадров...",
+            "🦕 Почти готово...",
+            "📦 Финальная сборка..."
+        ]
 
-                    idx = 0
-                    last_text = ""
+        idx = 0
+        last_text = ""
 
+        try:
+            while True:
+                new_text = steps[idx % len(steps)]
+
+                if new_text != last_text:
                     try:
-                        while True:
-                            new_text = steps[idx % len(steps)]
-
-                            if new_text != last_text:
-                                try:
-                                    await safe_edit(status, new_text)
-                                    last_text = new_text
-                                except:
-                                    pass
-
-                            await asyncio.sleep(random.randint(4, 8))
-                            idx += 1
-
-                    except asyncio.CancelledError:
+                        await safe_edit(status, new_text)
+                        last_text = new_text
+                    except:
                         pass
 
+                await asyncio.sleep(random.randint(4, 8))
+                idx += 1
 
-                video_bytes = job.get("video")
-                images = job.get("images", [])
+        except asyncio.CancelledError:
+            pass
 
-                # 🔥 HARD FALLBACK (фикс "сначала отправьте видео")
-                if not video_bytes:
-                    video_bytes = (
-                        context.user_data.get("input_video")
-                        or context.user_data.get("input_video_bytes")
-                    )
 
-                if not images:
-                    images = context.user_data.get("input_images", [])
+    video_bytes = job.get("video")
+    images = job.get("images", [])
 
-                if not video_bytes:
-                    if msg:
-                        await msg.reply_text("⚠️ Сначала отправьте видео")
-                    return
+    # 🔥 HARD FALLBACK (фикс "сначала отправьте видео")
+    if not video_bytes:
+        video_bytes = (
+            context.user_data.get("input_video")
+            or context.user_data.get("input_video_bytes")
+        )
 
-                # 🔥 Kling limit
-                if len(images) > 4:
-                    images = images[:4]
+    if not images:
+        images = context.user_data.get("input_images", [])
 
-                # 🔥 prompt injection fix
-                if images and "@Image" not in prompt:
-                    prompt = prompt + " Use @Image1 for style reference"
+    if not video_bytes:
+        if msg:
+            await msg.reply_text("⚠️ Сначала отправьте видео")
+        return
 
-                progress_task = asyncio.create_task(progress_updater())
+    # 🔥 Kling limit
+    if len(images) > 4:
+        images = images[:4]
 
-                result_bytes = None
+    # 🔥 prompt fix
+    if images and "@Image" not in prompt:
+        prompt = prompt + " Use @Image1 for style reference"
+
+    progress_task = asyncio.create_task(progress_updater())
+
+    result_bytes = None
+    video_url = None
+
+    try:
+
+        # ================= UPLOAD (FIXED - NO queue.fal.run/upload) =================
+        import base64
+
+        video_b64 = base64.b64encode(video_bytes).decode("utf-8")
+        video_url = f"data:video/mp4;base64,{video_b64}"
+
+        # ================= REQUEST =================
+        async with aiohttp.ClientSession() as session:
+
+            async with session.post(
+                "https://queue.fal.run/fal-ai/kling-video/o1/standard/video-to-video/edit",
+                json={
+                    "prompt": prompt,
+                    "video_url": video_url,
+                    "image_urls": images[:4] if images else []
+                },
+                headers={
+                    "Authorization": f"Key {FAL_KEY}",
+                    "Content-Type": "application/json"
+                }
+            ) as resp:
+
+                text = await resp.text()
 
                 try:
-                    # ================= UPLOAD =================
-                    async with aiohttp.ClientSession() as session:
+                    data = await resp.json()
+                except:
+                    raise Exception(f"Kling not JSON: {text}")
 
-                        data = aiohttp.FormData()
-                        data.add_field(
-                            "file",
-                            video_bytes,
-                            filename="video.mp4",
-                            content_type="video/mp4"
-                        )
+                request_id = data.get("request_id")
 
-                        async with session.post(
-                            "https://queue.fal.run/upload",
-                            headers={"Authorization": f"Key {FAL_KEY}"},
-                            data=data
-                        ) as upload_resp:
+                if not request_id:
+                    raise Exception(f"No request_id: {data}")
 
-                            upload_text = await upload_resp.text()
+        # ================= POLL =================
+        status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
+        result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
 
-                            try:
-                                upload_json = json.loads(upload_text)
-                            except:
-                                raise Exception(f"Upload not JSON: {upload_text}")
+        async with aiohttp.ClientSession() as session:
 
-                            video_url = upload_json.get("url")
+            for _ in range(300):
+
+                async with session.get(status_url) as s:
+
+                    status_json = await s.json()
+                    state = status_json.get("status")
+
+                    if state == "COMPLETED":
+
+                        async with session.get(result_url) as r:
+                            result = await r.json()
+
+                            video_url = result.get("video", {}).get("url")
 
                             if not video_url:
-                                raise Exception(f"Upload failed: {upload_json}")
+                                raise Exception(f"Bad result: {result}")
+
+                            async with session.get(video_url) as v:
+                                result_bytes = await v.read()
+
+                        break
+
+                    if state == "FAILED":
+                        raise Exception(f"FAL failed: {status_json}")
+
+                await asyncio.sleep(2)
+
+    except Exception as e:
+
+        err = traceback.format_exc()
+
+        try:
+            await safe_edit(status, f"⚠️ Ошибка remix:\n{e}")
+        except:
+            pass
+
+        print("❌ REMIX ERROR:", err)
+        return
+
+    finally:
+        progress_task.cancel()
+        try:
+            await progress_task
+        except:
+            pass
 
 
-                    # ================= REQUEST =================
-                    async with aiohttp.ClientSession() as session:
-
-                        async with session.post(
-                            "https://queue.fal.run/fal-ai/kling-video/o1/standard/video-to-video/edit",
-                            json={
-                                "prompt": prompt,
-                                "video_url": video_url,
-                                "image_urls": images[:4] if images else []
-                            },
-                            headers={
-                                "Authorization": f"Key {FAL_KEY}",
-                                "Content-Type": "application/json"
-                            }
-                        ) as resp:
-
-                            data = await resp.json()
-
-                            request_id = data.get("request_id")
-
-                            if not request_id:
-                                raise Exception(f"No request_id: {data}")
+    try:
+        if status:
+            await status.delete()
+    except:
+        pass
 
 
-                    # ================= POLL =================
-                    status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
-                    result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
-
-                    for _ in range(300):
-
-                        async with session.get(status_url) as s:
-
-                            status_json = await s.json()
-                            state = status_json.get("status")
-
-                            if state == "COMPLETED":
-
-                                async with session.get(result_url) as r:
-                                    result = await r.json()
-
-                                    video_url = result.get("video", {}).get("url")
-
-                                    if not video_url:
-                                        raise Exception(f"Bad result: {result}")
-
-                                    async with session.get(video_url) as v:
-                                        result_bytes = await v.read()
-
-                                break
-
-                            if state == "FAILED":
-                                raise Exception(f"FAL failed: {status_json}")
-
-                        await asyncio.sleep(2)
-
-                except Exception as e:
-                    try:
-                        await safe_edit(status, f"⚠️ Ошибка remix: {e}")
-                    except:
-                        pass
-                    return
-
-                finally:
-                    progress_task.cancel()
-                    try:
-                        await progress_task
-                    except:
-                        pass
+    if not result_bytes:
+        if msg:
+            await msg.reply_text("⚠️ FAL не вернул видео")
+        return
 
 
-                try:
-                    if status:
-                        await status.delete()
-                except:
-                    pass
+    result_file = io.BytesIO(result_bytes)
+    result_file.name = "remix.mp4"
+    result_file.seek(0)
 
-
-                if not result_bytes:
-                    if msg:
-                        await msg.reply_text("⚠️ FAL не вернул видео")
-                    return
-
-
-                result_file = io.BytesIO(result_bytes)
-                result_file.name = "remix.mp4"
-                result_file.seek(0)
-
-                try:
-                    await context.bot.send_video(
-                        chat_id=update.effective_chat.id,
-                        video=result_file
-                    )
-                except:
-                    result_file.seek(0)
-                    await context.bot.send_document(
-                        chat_id=update.effective_chat.id,
-                        document=result_file
-                    )
+    try:
+        await context.bot.send_video(
+            chat_id=update.effective_chat.id,
+            video=result_file
+        )
+    except:
+        result_file.seek(0)
+        await context.bot.send_document(
+            chat_id=update.effective_chat.id,
+            document=result_file
+        )
                 
             # ================= MUSIC =================
             elif mode == "music":
