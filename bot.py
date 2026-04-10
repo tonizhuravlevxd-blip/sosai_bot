@@ -8,6 +8,7 @@ import gc
 import aiohttp
 import json
 import io
+import traceback
 
 from telegram.ext import PreCheckoutQueryHandler
 
@@ -1081,7 +1082,7 @@ user_locks = {}
 # ================= HANDLE VIDEO =================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    import traceback
+    
     import logging
 
     user_id = update.effective_user.id
