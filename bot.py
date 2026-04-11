@@ -1084,6 +1084,9 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     
     import logging
+    import tempfile
+    import subprocess
+    import os
 
     user_id = update.effective_user.id
     ONLINE_USERS[user_id] = time.time()
@@ -1118,19 +1121,14 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not video.width or not video.height:
         await update.message.reply_text(
             "⚠️ Не удалось определить размер видео\n"
-            "Пожалуйста отправьте видео 720x720"
+            "Пожалуйста отправьте видео"
         )
         return
 
-    if video.width != 720 or video.height != 720:
-        await update.message.reply_text(
-            "⚠️ Видео должно быть формата 720x720\n\n"
-            "📌 Как исправить:\n"
-            "• Обрежьте видео до квадрата\n"
-            "• Используйте CapCut / InShot\n\n"
-            "🎬 Формат: 720x720 (1:1)"
-        )
-        return
+    original_w = video.width
+    original_h = video.height
+
+    logging.info(f"📐 ORIGINAL SIZE {original_w}x{original_h}")
 
     # ===== ПРОВЕРКА ФОРМАТА =====
     if video.mime_type not in ["video/mp4", "video/quicktime"]:
@@ -1161,8 +1159,47 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         logging.info(f"✅ VIDEO DOWNLOADED user={user_id} size={len(video_bytes)}")
 
-        context.user_data["input_video"] = video_bytes
-        context.user_data["input_video_bytes"] = video_bytes
+        # ================= АВТО РЕСАЙЗ ДО 720x720 =================
+        try:
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as input_tmp:
+                input_tmp.write(video_bytes)
+                input_path = input_tmp.name
+
+            output_path = input_path.replace(".mp4", "_720.mp4")
+
+            command = [
+                "ffmpeg",
+                "-i", input_path,
+                "-vf",
+                "scale=720:720:force_original_aspect_ratio=increase,crop=720:720",
+                "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "23",
+                "-c:a", "aac",
+                "-b:a", "128k",
+                "-y",
+                output_path
+            ]
+
+            subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            with open(output_path, "rb") as f:
+                processed_bytes = f.read()
+
+            os.remove(input_path)
+            os.remove(output_path)
+
+            logging.info(f"✅ RESIZED TO 720x720 user={user_id}")
+
+        except Exception as e:
+            logging.error(f"❌ RESIZE ERROR user={user_id}: {e}")
+            await update.message.reply_text("⚠️ Ошибка обработки видео")
+            return
+
+        # ================= СОХРАНЯЕМ =================
+        context.user_data["input_video"] = processed_bytes
+        context.user_data["input_video_bytes"] = processed_bytes
         context.user_data["input_video_ready"] = True
 
         context.user_data["input_video_url"] = None
@@ -1174,7 +1211,7 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.info(f"🧠 CONTEXT SAVED user={user_id}")
 
         await update.message.reply_text(
-            "✅ Видео загружено\n\n"
+            "✅ Видео обработано (720x720)\n\n"
             "Теперь отправьте:\n"
             "• ✏ Текст\n"
             "• 🖼 Фото (опционально как @Image1)\n\n"
