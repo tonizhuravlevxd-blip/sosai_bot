@@ -1112,6 +1112,88 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.warning(f"❌ NO VIDEO user={user_id}")
         return
 
+    # ================= VALIDATION =================
+
+    # ===== ПРОВЕРКА РАЗМЕРА =====
+    if not video.width or not video.height:
+        await update.message.reply_text(
+            "⚠️ Не удалось определить размер видео\n"
+            "Пожалуйста отправьте видео 720x720"
+        )
+        return
+
+    if video.width != 720 or video.height != 720:
+        await update.message.reply_text(
+            "⚠️ Видео должно быть формата 720x720\n\n"
+            "📌 Как исправить:\n"
+            "• Обрежьте видео до квадрата\n"
+            "• Используйте CapCut / InShot\n\n"
+            "🎬 Формат: 720x720 (1:1)"
+        )
+        return
+
+    # ===== ПРОВЕРКА ФОРМАТА =====
+    if video.mime_type not in ["video/mp4", "video/quicktime"]:
+        await update.message.reply_text(
+            "⚠️ Поддерживается только формат MP4\n\n"
+            "📌 Пожалуйста отправьте .mp4 видео"
+        )
+        return
+
+    # ===== ПРОВЕРКА РАЗМЕРА ФАЙЛА =====
+    if video.file_size and video.file_size > 200_000_000:
+        logging.warning(f"⚠️ VIDEO TOO BIG user={user_id} size={video.file_size}")
+        await update.message.reply_text("⚠️ Видео слишком большое (макс 200MB)")
+        return
+
+    try:
+        logging.info(f"⬇️ DOWNLOADING VIDEO user={user_id}")
+
+        file = await context.bot.get_file(video.file_id)
+        video_bytes = await file.download_as_bytearray()
+
+        if not video_bytes:
+            logging.error(f"❌ EMPTY VIDEO BYTES user={user_id}")
+            await update.message.reply_text("⚠️ Не удалось загрузить видео")
+            return
+
+        video_bytes = bytes(video_bytes)
+
+        logging.info(f"✅ VIDEO DOWNLOADED user={user_id} size={len(video_bytes)}")
+
+        context.user_data["input_video"] = video_bytes
+        context.user_data["input_video_bytes"] = video_bytes
+        context.user_data["input_video_ready"] = True
+
+        context.user_data["input_video_url"] = None
+        context.user_data["last_video_error"] = None
+
+        if "input_images" not in context.user_data:
+            context.user_data["input_images"] = []
+
+        logging.info(f"🧠 CONTEXT SAVED user={user_id}")
+
+        await update.message.reply_text(
+            "✅ Видео загружено\n\n"
+            "Теперь отправьте:\n"
+            "• ✏ Текст\n"
+            "• 🖼 Фото (опционально как @Image1)\n\n"
+            "Готовлю Kling AI Remix 🚀"
+        )
+
+    except Exception as e:
+
+        error_trace = traceback.format_exc()
+
+        logging.error(f"❌ HANDLE VIDEO ERROR user={user_id}: {e}")
+        logging.error(error_trace)
+
+        context.user_data["last_video_error"] = str(e)
+
+        await update.message.reply_text(
+            f"⚠️ Ошибка загрузки видео:\n{e}"
+        )
+
     # ⚠️ лимит (Telegram + FAL safe limit)
     if video.file_size and video.file_size > 200_000_000:
         logging.warning(f"⚠️ VIDEO TOO BIG user={user_id} size={video.file_size}")
@@ -1844,7 +1926,10 @@ async def handle_generation_job(job):
                 try:
                     await context.bot.send_video(
                         chat_id=update.effective_chat.id,
-                        video=result_file
+                        video=result_file,
+                        supports_streaming=True,
+                        width=720,
+                        height=720
                     )
                 except:
                     result_file.seek(0)
