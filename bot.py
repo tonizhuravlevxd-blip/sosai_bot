@@ -1162,35 +1162,43 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ================= АВТО РЕСАЙЗ ДО 720x720 =================
         try:
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as input_tmp:
-                input_tmp.write(video_bytes)
-                input_path = input_tmp.name
+            # 🔥 если уже 720x720 — не трогаем
+            if original_w == 720 and original_h == 720:
+                logging.info(f"⚡ SKIP RESIZE (already 720x720) user={user_id}")
+                processed_bytes = video_bytes
 
-            output_path = input_path.replace(".mp4", "_720.mp4")
+            else:
+                logging.info(f"🔄 RESIZE START user={user_id}")
 
-            command = [
-                "ffmpeg",
-                "-i", input_path,
-                "-vf",
-                "scale=720:720:force_original_aspect_ratio=increase,crop=720:720",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "23",
-                "-c:a", "aac",
-                "-b:a", "128k",
-                "-y",
-                output_path
-            ]
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as input_tmp:
+                    input_tmp.write(video_bytes)
+                    input_path = input_tmp.name
 
-            subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                output_path = input_path.replace(".mp4", "_720.mp4")
 
-            with open(output_path, "rb") as f:
-                processed_bytes = f.read()
+                command = [
+                    "ffmpeg",
+                    "-i", input_path,
+                    "-vf",
+                    "scale=720:720:force_original_aspect_ratio=increase,crop=720:720",
+                    "-c:v", "libx264",
+                    "-preset", "fast",
+                    "-crf", "23",
+                    "-c:a", "aac",
+                    "-b:a", "128k",
+                    "-y",
+                    output_path
+                ]
 
-            os.remove(input_path)
-            os.remove(output_path)
+                subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            logging.info(f"✅ RESIZED TO 720x720 user={user_id}")
+                with open(output_path, "rb") as f:
+                    processed_bytes = f.read()
+
+                os.remove(input_path)
+                os.remove(output_path)
+
+                logging.info(f"✅ RESIZED TO 720x720 user={user_id}")
 
         except Exception as e:
             logging.error(f"❌ RESIZE ERROR user={user_id}: {e}")
@@ -1205,63 +1213,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["input_video_url"] = None
         context.user_data["last_video_error"] = None
 
-        if "input_images" not in context.user_data:
-            context.user_data["input_images"] = []
-
-        logging.info(f"🧠 CONTEXT SAVED user={user_id}")
-
-        await update.message.reply_text(
-            "✅ Видео обработано (720x720)\n\n"
-            "Теперь отправьте:\n"
-            "• ✏ Текст\n"
-            "• 🖼 Фото (опционально как @Image1)\n\n"
-            "Готовлю Kling AI Remix 🚀"
-        )
-
-    except Exception as e:
-
-        error_trace = traceback.format_exc()
-
-        logging.error(f"❌ HANDLE VIDEO ERROR user={user_id}: {e}")
-        logging.error(error_trace)
-
-        context.user_data["last_video_error"] = str(e)
-
-        await update.message.reply_text(
-            f"⚠️ Ошибка загрузки видео:\n{e}"
-        )
-
-    # ⚠️ лимит (Telegram + FAL safe limit)
-    if video.file_size and video.file_size > 200_000_000:
-        logging.warning(f"⚠️ VIDEO TOO BIG user={user_id} size={video.file_size}")
-        await update.message.reply_text("⚠️ Видео слишком большое (макс 200MB)")
-        return
-
-    try:
-        logging.info(f"⬇️ DOWNLOADING VIDEO user={user_id}")
-
-        # 🔥 1. получаем файл из Telegram
-        file = await context.bot.get_file(video.file_id)
-        video_bytes = await file.download_as_bytearray()
-
-        if not video_bytes:
-            logging.error(f"❌ EMPTY VIDEO BYTES user={user_id}")
-            await update.message.reply_text("⚠️ Не удалось загрузить видео")
-            return
-
-        video_bytes = bytes(video_bytes)
-
-        logging.info(f"✅ VIDEO DOWNLOADED user={user_id} size={len(video_bytes)}")
-
-        # 🔥 2. СОХРАНЯЕМ (единый источник истины)
-        context.user_data["input_video"] = video_bytes
-        context.user_data["input_video_bytes"] = video_bytes
-        context.user_data["input_video_ready"] = True
-
-        context.user_data["input_video_url"] = None
-        context.user_data["last_video_error"] = None
-
-        # 🔥 3. images init
         if "input_images" not in context.user_data:
             context.user_data["input_images"] = []
 
