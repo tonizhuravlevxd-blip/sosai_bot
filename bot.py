@@ -1790,6 +1790,8 @@ async def handle_generation_job(job):
             if mode == "remix":
 
                 import random
+                import tempfile
+                import subprocess
                                              
                 async def progress_updater():
                     steps = [
@@ -1828,7 +1830,7 @@ async def handle_generation_job(job):
                 video_bytes = job.get("video")
                 images = job.get("images", [])
 
-                # 🔥 HARD FALLBACK (фикс "сначала отправьте видео")
+                # 🔥 HARD FALLBACK
                 if not video_bytes:
                     video_bytes = (
                         context.user_data.get("input_video")
@@ -1842,6 +1844,36 @@ async def handle_generation_job(job):
                     if msg:
                         await msg.reply_text("⚠️ Сначала отправьте видео")
                     return
+
+                # ================= AUTO RESIZE 720x720 =================
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".mp4") as inp, \
+                         tempfile.NamedTemporaryFile(suffix=".mp4") as out:
+
+                        inp.write(video_bytes)
+                        inp.flush()
+
+                        cmd = [
+                            "ffmpeg",
+                            "-y",
+                            "-i", inp.name,
+                            "-vf", "scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2",
+                            "-c:v", "libx264",
+                            "-preset", "veryfast",
+                            "-crf", "23",
+                            "-pix_fmt", "yuv420p",
+                            "-movflags", "+faststart",
+                            "-an",
+                            out.name
+                        ]
+
+                        subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                        with open(out.name, "rb") as f:
+                            video_bytes = f.read()
+
+                except Exception as e:
+                    print("⚠️ RESIZE ERROR:", e)
 
                 # 🔥 Kling limit
                 if len(images) > 4:
@@ -1964,9 +1996,7 @@ async def handle_generation_job(job):
                     await context.bot.send_video(
                         chat_id=update.effective_chat.id,
                         video=result_file,
-                        supports_streaming=True,
-                        width=720,
-                        height=720
+                        supports_streaming=True
                     )
                 except:
                     result_file.seek(0)
