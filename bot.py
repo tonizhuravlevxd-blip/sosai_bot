@@ -1873,7 +1873,8 @@ async def handle_generation_job(job):
                             "-crf", "23",
                             "-pix_fmt", "yuv420p",
                             "-movflags", "+faststart",
-                            "-an",
+                            "-c:a", "aac",
+                            "-b:a", "128k",
                             out.name
                         ]
 
@@ -2017,7 +2018,8 @@ async def handle_generation_job(job):
                     await context.bot.send_video(
                         chat_id=update.effective_chat.id,
                         video=result_file,
-                        supports_streaming=True
+                        supports_streaming=True,
+                        filename="video.mp4"
                     )
                 except:
                     result_file.seek(0)
@@ -2551,6 +2553,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif data == "video_remix":
+
+        subscribed = await is_user_subscribed(context.bot, user_id)
+
+        if not subscribed:
+            context.user_data["pending_video"] = True
+
+            await query.message.reply_text(
+                "📢 Перед использованием Kling нужно подписаться 👇",
+                reply_markup=get_subscribe_keyboard()
+            )
+            return
+
+        # ===== ЕСЛИ ПОДПИСАН =====
+        context.user_data["sub_checked"] = True
+
         context.user_data.clear()
         context.user_data["mode"] = "remix"
         context.user_data["input_images"] = []
@@ -2563,7 +2580,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "2. 🖼 Фото (опционально)\n"
             "3. ✏ Текст\n\n"
             "Пример:\n"
-            "Замени авто на видео на авто из фото"
+            "Замени авто на видео на авто из фото\n"
             "Видео автоматически подстроится под Kling,поэтому надо подождать 👇"
         )
         return
