@@ -2468,9 +2468,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Нажмите кнопку сверху «✳️ Сделать замену (KLING)»\n"
                     
                 )
+                return
 
             # ================= ОСТАЛЬНЫЕ РЕЖИМЫ =================
-            if context.user_data.get("pending_video"):
+            if context.user_data.get("pending_video") and context.user_data.get("mode") != "remix":
                 context.user_data.pop("pending_video")
 
                 await query.message.reply_text(
