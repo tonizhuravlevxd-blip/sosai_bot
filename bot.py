@@ -2460,12 +2460,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await query.message.reply_text("✅ Подписка подтверждена!")
 
+            # ================= REMIX MODE =================
+            if context.user_data.get("mode") == "remix":
+                await query.message.reply_text(
+                    "🎬 Kling режим не активирован!\n\n"
+                    "📌 Важно:\n"
+                    "Нажмите кнопку сверху «✳️ Сделать замену (KLING)»\n"
+                    
+                )
+
+            # ================= ОСТАЛЬНЫЕ РЕЖИМЫ =================
             if context.user_data.get("pending_video"):
                 context.user_data.pop("pending_video")
 
                 await query.message.reply_text(
                     "🎬 Теперь отправьте промпт или фото — генерация доступна"
                 )
+
         else:
             await query.message.reply_text("❌ Вы не подписаны на канал")
         return
