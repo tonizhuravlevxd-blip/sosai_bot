@@ -1079,6 +1079,35 @@ generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
 
+# ================= HANDLE IMAGE (REMIX) =================
+async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = update.effective_user.id
+
+    if context.user_data.get("mode") != "remix":
+        return
+
+    if not context.user_data.get("input_video_ready"):
+        await update.message.reply_text(
+            "⚠️ Сначала отправьте видео"
+        )
+        return
+
+    photo = update.message.photo[-1]
+
+    file = await context.bot.get_file(photo.file_id)
+    image_bytes = await file.download_as_bytearray()
+
+    if "input_images" not in context.user_data:
+        context.user_data["input_images"] = []
+
+    context.user_data["input_images"].append(image_bytes)
+
+    await update.message.reply_text(
+        "🖼 Фото добавлено как референс\n"
+        "Теперь отправьте текст ✏"
+    )
+
 # ================= HANDLE VIDEO =================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1220,10 +1249,13 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(
             "✅ Видео загружено\n\n"
-            "Теперь отправьте:\n"
-            "• ✏ Текст\n"
-            "• 🖼 Фото (опционально как @Image1)\n\n"
-            "Готовлю Kling AI Remix 🚀"
+            "📌 Что дальше:\n"
+            "1. Отправьте ✏ текст (что сделать с видео)\n"
+            "2. Можете добавить 🖼 фото (референс)\n\n"
+            "Пример:\n"
+            "👉 Замени авто на видео на авто из фото\n"
+            "👉 Сделай как TikTok тренд\n\n"
+            "🚀 Kling ждет ваш запрос"
         )
 
     except Exception as e:
