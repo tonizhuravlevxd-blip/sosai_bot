@@ -2557,13 +2557,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["input_video"] = None
 
         await query.message.reply_text(
-            "🔥 Режим Sora2 Remix\n\n"
+            "🧝🦸 Режим Kling Remix\n\n"
             "Отправьте:\n"
             "1. 🎥 Видео\n"
             "2. 🖼 Фото (опционально)\n"
             "3. ✏ Текст\n\n"
             "Пример:\n"
-            "Сделай стиль TikTok тренда, добавь неон и эффект glitch"
+            "Замени авто на видео на авто из фото"
+            "Видео автоматически подстроится под Kling,поэтому надо подождать 👇"
         )
         return
 
@@ -3139,15 +3140,15 @@ async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["cartoon_style"] = None  # ✅ сброс старого стиля мультфильма
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔥 Сделать тренд (Remix)", callback_data="video_remix")]
+        [InlineKeyboardButton("✳️ Сделать замену (KLING)", callback_data="video_remix")]
     ])
 
     await update.message.reply_text(
-        "🎬 Режим видео (Sora2)\n\n"
+        "🎬 Режим видео (Sora2) включен\n\n"
         "Обычная генерация:\n"
         "• текст\n"
         "• фото + текст\n\n"
-        "🔥 Или сделайте тренд замену:",
+        "🎎 Или сделайте тренд замену:",
         reply_markup=keyboard
     )
 
