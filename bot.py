@@ -2566,12 +2566,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # ===== ЕСЛИ ПОДПИСАН =====
-        context.user_data["sub_checked"] = True
-
         context.user_data.clear()
+
+        context.user_data["sub_checked"] = True
         context.user_data["mode"] = "remix"
         context.user_data["input_images"] = []
         context.user_data["input_video"] = None
+        context.user_data["input_video_ready"] = False
 
         await query.message.reply_text(
             "🧝🦸 Режим Kling Remix\n\n"
