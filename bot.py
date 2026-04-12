@@ -1411,15 +1411,8 @@ async def handle_generation_job(job):
                                 else:
                                     limit = PREMIUM_IMAGE_LIMIT
 
-                                result = await conn.fetchrow("""
-                                    UPDATE users
-                                    SET image_count = image_count + 1
-                                    WHERE user_id=$1 AND image_count < $2
-                                    RETURNING image_count
-                                """, user_id, limit)
-                                USER_CACHE.pop(user_id, None)
-
-                                if not result:
+                                # ✅ ТОЛЬКО ПРОВЕРКА (без списания)
+                                if user["image_count"] >= limit:
                                     await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                     return
 
@@ -1460,49 +1453,22 @@ async def handle_generation_job(job):
                                     f"paid={paid_video} video_count={video_count} premium={premium}"
                                 )
 
+                                # ===== ТОЛЬКО ПРОВЕРКА (БЕЗ СПИСАНИЯ) =====
+
                                 if paid_video > 0:
-                                    logging.info(f"💰 USING PAID VIDEO user={user_id}")
-
-                                    result = await conn.fetchrow("""
-                                        UPDATE users
-                                        SET paid_video = paid_video - 1
-                                        WHERE user_id=$1 AND paid_video > 0
-                                        RETURNING paid_video
-                                    """, user_id)
-                                    USER_CACHE.pop(user_id, None)
-
-                                    if not result:
-                                        logging.error(f"❌ FAILED TO USE PAID VIDEO user={user_id}")
-                                        await msg.reply_text("⚠️ Ошибка списания платного видео")
-                                        return
+                                    logging.info(f"💰 PAID VIDEO AVAILABLE user={user_id}")
 
                                 elif premium:
                                     logging.info(f"🍩 USING PREMIUM LIMIT user={user_id}")
 
-                                    result = await conn.fetchrow("""
-                                        UPDATE users
-                                        SET video_count = video_count + 1
-                                        WHERE user_id=$1 AND video_count < $2
-                                        RETURNING video_count
-                                    """, user_id, PREMIUM_VIDEO_LIMIT)
-                                    USER_CACHE.pop(user_id, None)
-
-                                    if not result:
+                                    if video_count >= PREMIUM_VIDEO_LIMIT:
                                         await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
                                         return
 
                                 else:
                                     logging.info(f"🆓 USING FREE LIMIT user={user_id}")
 
-                                    result = await conn.fetchrow("""
-                                        UPDATE users
-                                        SET video_count = video_count + 1
-                                        WHERE user_id=$1 AND video_count < $2
-                                        RETURNING video_count
-                                    """, user_id, FREE_VIDEO_LIMIT)
-                                    USER_CACHE.pop(user_id, None)
-
-                                    if not result:
+                                    if video_count >= FREE_VIDEO_LIMIT:
                                         keyboard = InlineKeyboardMarkup([
                                             [InlineKeyboardButton("💳 Купить 1 видео", callback_data="buy_video")],
                                             [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
@@ -1630,6 +1596,19 @@ async def handle_generation_job(job):
                 ])
 
                 await msg.reply_photo(photo=result, reply_markup=keyboard)
+
+                # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ГЕНЕРАЦИИ
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE users
+                        SET image_count = image_count + 1
+                        WHERE user_id=$1
+                        """,
+                        user_id
+                    )
+
+                USER_CACHE.pop(user_id, None)
                                 
                 async with db_pool.acquire() as conn:
 
@@ -1735,6 +1714,38 @@ async def handle_generation_job(job):
                 except:
                     result_file.seek(0)
                     await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
+
+                # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ОТПРАВКИ
+                async with db_pool.acquire() as conn:
+
+                    user = await conn.fetchrow(
+                        "SELECT paid_video, video_count FROM users WHERE user_id=$1",
+                        user_id
+                    )
+
+                    paid_video = user.get("paid_video") or 0
+                    video_count = user.get("video_count") or 0
+
+                    if paid_video > 0:
+                        await conn.execute(
+                            """
+                            UPDATE users
+                            SET paid_video = paid_video - 1
+                            WHERE user_id=$1
+                            """,
+                            user_id
+                        )
+                    else:
+                        await conn.execute(
+                            """
+                            UPDATE users
+                            SET video_count = video_count + 1
+                            WHERE user_id=$1
+                            """,
+                            user_id
+                        )
+
+                USER_CACHE.pop(user_id, None)
 
 
             # ================= REMIX =================
@@ -1971,6 +1982,22 @@ async def handle_generation_job(job):
                         chat_id=update.effective_chat.id,
                         document=result_file
                     )
+
+                           # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
+                async with db_pool.acquire() as conn:
+
+                    if paid_video > 0:
+                        await conn.execute(
+                            "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
+                            user_id
+                        )
+                    else:
+                        await conn.execute(
+                            "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                            user_id
+                        )
+
+                    USER_CACHE.pop(user_id, None)
                 
             # ================= MUSIC =================
             elif mode == "music":
