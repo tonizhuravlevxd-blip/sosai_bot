@@ -999,6 +999,22 @@ async def fal_video_remix(video_bytes, prompt, images=None):
         video_b64 = base64.b64encode(video_bytes).decode("utf-8")
         video_url = f"data:video/mp4;base64,{video_b64}"
 
+        # ================= FIX IMAGES (IMPORTANT) =================
+        safe_images = []
+
+        if images:
+            for img in images[:4]:
+
+                # если bytes → конвертим в base64
+                if isinstance(img, (bytes, bytearray)):
+                    img_b64 = base64.b64encode(img).decode("utf-8")
+                    safe_images.append(f"data:image/jpeg;base64,{img_b64}")
+
+                # если уже строка (url/base64) → оставляем
+                elif isinstance(img, str):
+                    safe_images.append(img)
+        
+
         # 🔥 2. REMIX REQUEST
         payload = {
             "prompt": prompt,
