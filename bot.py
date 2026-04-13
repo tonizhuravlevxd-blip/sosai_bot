@@ -2205,8 +2205,8 @@ async def handle_generation_job(job):
                 # ================= 🔓 UNLOCK =================
                 try:
                     unlock_user_generation(user_id)
-                except:
-                    pass
+                except Exception as e:
+                    logging.error(f"UNLOCK ERROR: {e}")
 
                 # ================= 🧹 USER DATA CLEAN =================
                 try:
@@ -2230,15 +2230,8 @@ async def handle_generation_job(job):
 
                 # ================= 🔐 LOCK CLEAN (АНТИ УТЕЧКА) =================
                 try:
-                    lock = user_locks.get(user_id)
-
-                    if lock:
-                        if lock.locked():
-                            try:
-                                lock.release()
-                            except:
-                                pass
-
+                    # ❗ ВАЖНО: только удаляем ссылку, unlock уже выше
+                    if user_id in user_locks:
                         user_locks.pop(user_id, None)
 
                 except Exception as e:
