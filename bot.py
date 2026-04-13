@@ -265,9 +265,6 @@ def check_global_spam(user_id):
     return True
 
 
-
-
-
 # ================= DATABASE =================
 
 async def init_db():
@@ -2061,12 +2058,6 @@ async def handle_generation_job(job):
                         )
                         return
 
-                    async with db_pool.acquire() as conn:
-                        await conn.execute("""
-                            UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1
-                        """, user_id)
-                        USER_CACHE.pop(user_id, None)
-
                 cached_audio_url = await get_cached_music(prompt)
                 chat_id = update.effective_chat.id
 
@@ -2088,9 +2079,28 @@ async def handle_generation_job(job):
 
                     try:
                         await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+
+                        # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
+                        if not premium:
+                            async with db_pool.acquire() as conn:
+                                await conn.execute(
+                                    "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                    user_id
+                                )
+                                USER_CACHE.pop(user_id, None)
+
                     except:
                         audio_file.seek(0)
                         await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
+                        # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА (fallback)
+                        if not premium:
+                            async with db_pool.acquire() as conn:
+                                await conn.execute(
+                                    "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                    user_id
+                                )
+                                USER_CACHE.pop(user_id, None)
 
                 else:
 
@@ -2141,13 +2151,31 @@ async def handle_generation_job(job):
 
                     try:
                         await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+
+                        # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
+                        if not premium:
+                            async with db_pool.acquire() as conn:
+                                await conn.execute(
+                                    "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                    user_id
+                                )
+                                USER_CACHE.pop(user_id, None)
+
                     except:
                         audio_file.seek(0)
                         await context.bot.send_document(chat_id=chat_id, document=audio_file)
 
+                        # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА (fallback)
+                        if not premium:
+                            async with db_pool.acquire() as conn:
+                                await conn.execute(
+                                    "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                    user_id
+                                )
+                                USER_CACHE.pop(user_id, None)
+
         except Exception as e:
             logging.error(f"❌ HANDLE ERROR: {e}")
-
         # ===== 🔥 УНИВЕРСАЛЬНЫЙ ОТВЕТ ПОЛЬЗОВАТЕЛЮ =====
             if msg:
                 try:
