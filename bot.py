@@ -2460,15 +2460,40 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await query.message.reply_text("✅ Подписка подтверждена!")
 
-            # ================= REMIX MODE =================
-            if context.user_data.get("mode") == "remix":
+            # ================= REMIX MODE (FIX) =================
+            if context.user_data.get("mode") == "remix" or context.user_data.get("pending_video"):
+
+                # 🔥 очищаем флаг ожидания
+                context.user_data.pop("pending_video", None)
+
+                # 🔥 ВАЖНО: активируем режим
+                context.user_data["mode"] = "remix"
+                context.user_data["input_images"] = []
+                context.user_data["input_video"] = None
+                context.user_data["input_video_ready"] = False
+
                 await query.message.reply_text(
-                    "🎬 Kling режим не активирован!\n\n"
-                    "📌 Важно:\n"
-                    "Нажмите кнопку сверху «✳️ Сделать замену (KLING)»\n"
-                    
+                    "🧝🦸 Режим Kling Remix активирован!\n\n"
+                    "Отправьте:\n"
+                    "1. 🎥 Видео\n"
+                    "2. 🖼 Фото (опционально)\n"
+                    "3. ✏ Текст\n\n"
+                    "Пример:\n"
+                    "Замени авто на видео на авто из фото"
                 )
                 return
+
+            # ================= ОСТАЛЬНЫЕ РЕЖИМЫ =================
+            if context.user_data.get("pending_video"):
+                context.user_data.pop("pending_video", None)
+
+                await query.message.reply_text(
+                    "🎬 Теперь отправьте промпт или фото — генерация доступна"
+                )
+
+        else:
+            await query.message.reply_text("❌ Вы не подписаны на канал")
+        return
 
             # ================= ОСТАЛЬНЫЕ РЕЖИМЫ =================
             if context.user_data.get("pending_video") and context.user_data.get("mode") != "remix":
