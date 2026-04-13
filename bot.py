@@ -765,7 +765,7 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
-async def fal_music_generate(prompt, duration=30, max_wait=180):
+async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
     Генерация музыки через FAL с прогресс-логированием.
 
