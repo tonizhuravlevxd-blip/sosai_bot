@@ -1809,7 +1809,7 @@ async def handle_generation_job(job):
                         "🥳 Осталось немного...",
                         "🦥 О смотри кого нашел...",
                         "(∩｀-´)⊃━☆ﾟ.*･｡ﾟ Ускоряю процесс...",
-                        "🍿⃢📺 Думаю уже финал...",
+                        "🍿 Думаю уже финал...",
                         "📦 Финальная сборка..."
                     ]
 
@@ -2390,7 +2390,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🍩 Пончик-статус Premium\n\n"
         "Что входит:\n"
-        "🐳 20 генераций изображений\n"
+        "🐢 20 генераций изображений\n"
         "🎬 5 видео / мультфильмов\n"
         "🎵 3 генераций музыки\n\n"
         "499 рублей через СПБ\n\n"
@@ -2499,11 +2499,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 context.user_data["input_video_ready"] = False
 
                 await query.message.reply_text(
-                    "🧝🦸 Режим Kling Remix активирован!\n\n"
-                    "Отправьте:\n"
-                    "1. 🎥 Видео\n"
-                    "2. 🖼 Фото (опционально)\n"
-                    "3. ✏ Текст"
+                    "🧝🦸 Режим Kling не активирован!\n\n"
+                    "☝ Нажмите кнопку ✳️ Сделать замену (KLING)\n"
+                    
                 )
                 return
 
@@ -2626,12 +2624,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(
             "🧝🦸 Режим Kling Remix\n\n"
             "Отправьте:\n"
-            "1. 🎥 Видео\n"
-            "2. 🖼 Фото (опционально)\n"
-            "3. ✏ Текст\n\n"
-            "Пример:\n"
-            "Замени авто на видео на авто из фото\n"
-            "Видео автоматически подстроится под Kling,поэтому надо подождать 👇"
+            "1. 🎥 Только Видео сначало\n"
+            
+            "Видео автоматически подстроится под Kling,поэтому надо подождать 👇\n"
         )
         return
 
