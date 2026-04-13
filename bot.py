@@ -1344,8 +1344,8 @@ SUPPORT_REPLY_MAP = {}
 ONLINE_USERS = {}
 ONLINE_TTL = 300
 active_generations = set()
-GLOBAL_RATE_LIMIT = asyncio.Semaphore(100)
-GLOBAL_SEMAPHORE = asyncio.Semaphore(100)
+GLOBAL_RATE_LIMIT = asyncio.Semaphore(300)
+GLOBAL_SEMAPHORE = asyncio.Semaphore(300)
 
 semaphore_image = asyncio.Semaphore(30)
 semaphore_video = asyncio.Semaphore(10)
@@ -2197,49 +2197,131 @@ async def handle_generation_job(job):
                     pass
 
         finally:
-            if user_id in active_generations:
-                active_generations.discard(user_id)
-
-            unlock_user_generation(user_id)
-
-            # 🔥 FIX: очистка состояния пользователя
             try:
-                if context and hasattr(context, "user_data"):
-                    context.user_data.pop("input_video", None)
-                    context.user_data.pop("input_images", None)
-            except:
-                pass
-                
-            if user_id in user_locks and not user_locks[user_id].locked():
-                user_locks.pop(user_id, None)
+                # ================= 🔥 ACTIVE GENERATIONS =================
+                if user_id in active_generations:
+                    active_generations.discard(user_id)
 
-            logging.info(f"🧹 CLEANUP user {user_id}")
+                # ================= 🔓 UNLOCK =================
+                try:
+                    unlock_user_generation(user_id)
+                except:
+                    pass
+
+                # ================= 🧹 USER DATA CLEAN =================
+                try:
+                    if context and hasattr(context, "user_data"):
+
+                        # 🔥 удаляем ТЯЖЕЛЫЕ объекты (самое важное)
+                        context.user_data.pop("input_video", None)
+                        context.user_data.pop("input_video_bytes", None)
+                        context.user_data.pop("input_images", None)
+
+                        # 🔥 чистим кэш генерации
+                        context.user_data.pop("last_images", None)
+                        context.user_data.pop("last_prompt", None)
+
+                        # 🔥 чистим временные флаги
+                        context.user_data.pop("pending_video", None)
+                        context.user_data.pop("input_video_ready", None)
+
+                except Exception as e:
+                    logging.error(f"USER_DATA CLEAN ERROR: {e}")
+
+                # ================= 🔐 LOCK CLEAN (АНТИ УТЕЧКА) =================
+                try:
+                    lock = user_locks.get(user_id)
+
+                    if lock:
+                        if lock.locked():
+                            try:
+                                lock.release()
+                            except:
+                                pass
+
+                        user_locks.pop(user_id, None)
+
+                except Exception as e:
+                    logging.error(f"LOCK CLEAN ERROR: {e}")
+
+                # ================= 🧠 GC HINT (для больших видео) =================
+                try:
+                    import gc
+                    gc.collect()
+                except:
+                    pass
+
+                logging.info(f"🧹 CLEANUP user {user_id}")
+
+            except Exception as e:
+                logging.error(f"FINAL CLEANUP ERROR: {e}")
 # ================== WORKERS ==================
 async def image_worker():
     while True:
-        job = await generation_queue_image.get()
         try:
-            await handle_generation_job(job)
-        finally:
-            generation_queue_image.task_done()
+            job = await generation_queue_image.get()
+
+            try:
+                await handle_generation_job(job)
+            except Exception as e:
+                logging.error(f"❌ IMAGE WORKER ERROR: {e}")
+
+            finally:
+                generation_queue_image.task_done()
+
+        except Exception as e:
+            logging.critical(f"💀 IMAGE WORKER CRASH: {e}")
+            await asyncio.sleep(1)
 
 
 async def video_worker():
     while True:
-        job = await generation_queue_video.get()
         try:
-            await handle_generation_job(job)
-        finally:
-            generation_queue_video.task_done()
+            job = await generation_queue_video.get()
+
+            try:
+                await handle_generation_job(job)
+            except Exception as e:
+                logging.error(f"❌ VIDEO WORKER ERROR: {e}")
+
+            finally:
+                generation_queue_video.task_done()
+
+        except Exception as e:
+            logging.critical(f"💀 VIDEO WORKER CRASH: {e}")
+            await asyncio.sleep(1)
 
 
 async def music_worker():
     while True:
-        job = await generation_queue_music.get()
         try:
-            await handle_generation_job(job)
-        finally:
-            generation_queue_music.task_done()
+            job = await generation_queue_music.get()
+
+            try:
+                await handle_generation_job(job)
+            except Exception as e:
+                logging.error(f"❌ MUSIC WORKER ERROR: {e}")
+
+            finally:
+                generation_queue_music.task_done()
+
+        except Exception as e:
+            logging.critical(f"💀 MUSIC WORKER CRASH: {e}")
+            await asyncio.sleep(1)
+
+async def worker_watchdog():
+
+    while True:
+        await asyncio.sleep(10)
+
+        if generation_queue_image.qsize() > 0:
+            logging.warning("⚠️ Проверка image workers")
+
+        if generation_queue_video.qsize() > 0:
+            logging.warning("⚠️ Проверка video workers")
+
+        if generation_queue_music.qsize() > 0:
+            logging.warning("⚠️ Проверка music workers")
 
 
 # ================= START =================
@@ -2405,28 +2487,93 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
+    payment = update.message.successful_payment
 
-    premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+    if not payment:
+        return
 
-    async with db_pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE users 
-            SET premium = 1,
-                premium_until = $1
-            WHERE user_id = $2
-            """,
-            premium_until, user_id
+    payload = payment.invoice_payload
+    currency = payment.currency  # ⭐ XTR = Stars, RUB = СПБ / YooKassa
+
+    try:
+
+        # ================= ⭐ TELEGRAM STARS =================
+        if currency == "XTR":
+
+            if payload == "premium_stars":
+
+                premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE users 
+                        SET premium = 1,
+                            premium_until = $1
+                        WHERE user_id = $2
+                        """,
+                        premium_until, user_id
+                    )
+
+                USER_CACHE.pop(user_id, None)
+
+                await update.message.reply_text(
+                    "⭐ Оплата через Stars прошла успешно!\n\n"
+                    "🍩 Premium активирован на 30 дней 🚀"
+                )
+                return
+
+        # ================= 💳 СПБ / ЮKASSA =================
+        else:
+
+            if payload == "premium_donut":
+
+                premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+
+                async with db_pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE users 
+                        SET premium = 1,
+                            premium_until = $1
+                        WHERE user_id = $2
+                        """,
+                        premium_until, user_id
+                    )
+
+                USER_CACHE.pop(user_id, None)
+
+                await update.message.reply_text(
+                    "💳 Оплата прошла успешно!\n\n"
+                    "🍩 Premium активирован на 30 дней 🚀"
+                )
+                return
+
+        # ================= ❌ НЕИЗВЕСТНЫЙ PAYLOAD =================
+        logging.warning(f"UNKNOWN PAYMENT: {payload} | {currency}")
+
+        await update.message.reply_text(
+            "⚠️ Платёж получен, но не распознан. Напишите в поддержку."
         )
-        USER_CACHE.pop(user_id, None)
 
-    await update.message.reply_text(
-        "🍩 Оплата прошла успешно!\n\nPremium активирован на 30 дней 🚀"
-    )
+    except Exception as e:
+
+        logging.error(f"PAYMENT ERROR: {e}")
+
+        try:
+            await update.message.reply_text(
+                "⚠️ Ошибка при активации. Напишите в поддержку."
+            )
+        except:
+            pass
 
 async def pre_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.pre_checkout_query
-    await query.answer(ok=True)
+
+    try:
+        await query.answer(ok=True)
+    except Exception as e:
+        logging.error(f"❌ PRECHECKOUT ERROR: {e}")
 
 # ================= IMPORTS =================
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -2519,17 +2666,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= Обработка кнопок =================
     if data == "buy_stars":
-        YOOKASSA_PROVIDER_TOKEN = os.environ.get("YOOKASSA_PROVIDER_TOKEN")
         await query.message.reply_invoice(
             title="🍩 Пончик Premium",
             description="30 дней Premium доступа",
-            payload="premium_donut",
-            provider_token=YOOKASSA_PROVIDER_TOKEN,
-            currency="RUB",
-            prices=[{"label": "Premium", "amount": 50000}],
-            need_name=True,
-            need_phone_number=True,
-            need_email=True,
+            payload="premium_stars",
+            provider_token="",  # ⭐ ОБЯЗАТЕЛЬНО ПУСТОЙ ДЛЯ TELEGRAM STARS
+            currency="XTR",  # ⭐ ВАЛЮТА TELEGRAM STARS
+            prices=[
+                LabeledPrice(label="Premium", amount=500)  # ⭐ 500 Stars
+            ],
+            need_name=False,
+            need_phone_number=False,
+            need_email=False,
             need_shipping_address=False,
             is_flexible=False
         )
@@ -3444,9 +3592,9 @@ async def post_init(app):
     generation_queue = asyncio.Queue(maxsize=10000)
 
     # ================= ОПТИМАЛЬНЫЕ ВОРКЕРЫ =================
-    IMAGE_WORKERS = 12
-    VIDEO_WORKERS = 4
-    MUSIC_WORKERS = 3
+    IMAGE_WORKERS = 20
+    VIDEO_WORKERS = 6
+    MUSIC_WORKERS = 4
 
     for _ in range(IMAGE_WORKERS):
         asyncio.create_task(image_worker())
@@ -3460,6 +3608,7 @@ async def post_init(app):
     # ================= ФОНОВЫЕ ЗАДАЧИ =================
     asyncio.create_task(user_cache_cleaner())
     asyncio.create_task(cache_cleaner())
+    asyncio.create_task(worker_watchdog())
 
     # ================= КОМАНДЫ =================
     await set_commands(app)
