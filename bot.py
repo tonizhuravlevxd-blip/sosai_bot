@@ -2460,13 +2460,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await query.message.reply_text("✅ Подписка подтверждена!")
 
-            # ================= REMIX MODE (FIX) =================
+            # ================= REMIX MODE =================
             if context.user_data.get("mode") == "remix" or context.user_data.get("pending_video"):
 
-                # 🔥 очищаем флаг ожидания
                 context.user_data.pop("pending_video", None)
 
-                # 🔥 ВАЖНО: активируем режим
                 context.user_data["mode"] = "remix"
                 context.user_data["input_images"] = []
                 context.user_data["input_video"] = None
@@ -2477,27 +2475,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "Отправьте:\n"
                     "1. 🎥 Видео\n"
                     "2. 🖼 Фото (опционально)\n"
-                    "3. ✏ Текст\n\n"
-                    "Пример:\n"
-                    "Замени авто на видео на авто из фото"
+                    "3. ✏ Текст"
                 )
                 return
 
             # ================= ОСТАЛЬНЫЕ РЕЖИМЫ =================
             if context.user_data.get("pending_video"):
                 context.user_data.pop("pending_video", None)
-
-                await query.message.reply_text(
-                    "🎬 Теперь отправьте промпт или фото — генерация доступна"
-                )
-
-        else:
-            await query.message.reply_text("❌ Вы не подписаны на канал")
-        return
-
-            # ================= ОСТАЛЬНЫЕ РЕЖИМЫ =================
-            if context.user_data.get("pending_video") and context.user_data.get("mode") != "remix":
-                context.user_data.pop("pending_video")
 
                 await query.message.reply_text(
                     "🎬 Теперь отправьте промпт или фото — генерация доступна"
