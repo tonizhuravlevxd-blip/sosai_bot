@@ -350,6 +350,10 @@ async def init_db():
         ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_count INTEGER DEFAULT 0
         """)
 
+        await conn.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'ru'
+        """)
+
         # 🔥 ИНДЕКСЫ (очень важно для нагрузки)
         await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at)
