@@ -3555,23 +3555,40 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("📢 Сделать пост", callback_data="admin_post")]
         ])
 # ===== ТЕКСТ ПРОФИЛЯ =====
+
+profile_title = await t(user_id, 'profile_title')
+profile_id = await t(user_id, 'profile_id')
+profile_username = await t(user_id, 'profile_username')
+
+images_left = await t(user_id, 'images_left')
+videos_left = await t(user_id, 'videos_left')
+music_left = await t(user_id, 'music_left')
+
+paid_video_t = await t(user_id, 'paid_video')
+paid_music_t = await t(user_id, 'paid_music')
+
+bonus_t = await t(user_id, 'bonus')
+referrals_t = await t(user_id, 'referrals')
+status_t = await t(user_id, 'status')
+
+
 profile_text = (
-    f"👤 {await t(user_id, 'profile_title')}\n\n"
+    f"👤 {profile_title}\n\n"
 
-    f"🆔 {await t(user_id, 'profile_id')}: {tg_user.id}\n"
-    f"👤 {await t(user_id, 'profile_username')}: @{tg_user.username}\n\n"
+    f"🆔 {profile_id}: {tg_user.id}\n"
+    f"👤 {profile_username}: @{tg_user.username}\n\n"
 
-    f"📸 {await t(user_id, 'images_left')}: {remaining_images}\n"
-    f"🎬 {await t(user_id, 'videos_left')}: {remaining_videos}\n"
-    f"🎵 {await t(user_id, 'music_left')}: {remaining_music}\n\n"
+    f"📸 {images_left}: {remaining_images}\n"
+    f"🎬 {videos_left}: {remaining_videos}\n"
+    f"🎵 {music_left}: {remaining_music}\n\n"
 
-    f"💳 {await t(user_id, 'paid_video')}: {paid_video}\n"
-    f"💳 {await t(user_id, 'paid_music')}: {paid_music}\n\n"
+    f"💳 {paid_video_t}: {paid_video}\n"
+    f"💳 {paid_music_t}: {paid_music}\n\n"
 
-    f"🎁 {await t(user_id, 'bonus')}: {bonus}\n"
-    f"👥 {await t(user_id, 'referrals')}: {user['referrals']}\n\n"
+    f"🎁 {bonus_t}: {bonus}\n"
+    f"👥 {referrals_t}: {user['referrals']}\n\n"
 
-    f"🍩 {await t(user_id, 'status')}: {premium_status}"
+    f"🍩 {status_t}: {premium_status}"
 )
 
 await update.message.reply_text(
