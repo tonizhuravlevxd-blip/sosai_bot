@@ -3624,7 +3624,11 @@ async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"🎁 Реферальная программа\n\n"
-        f"За активного пользователя вы получаете +1 генерацию.\n\n{link}"
+        f"<b>Кончились генерации?</b>\n"
+        f"<b>За каждого активного пользователя вы получаете +1 генерацию.</b>\n\n"
+        f"<b>Просто скопируй ссылку и отправь другу 👇</b>\n\n"
+        f"{link}",
+        parse_mode="HTML"
     )
 
 
