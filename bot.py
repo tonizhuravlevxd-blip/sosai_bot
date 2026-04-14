@@ -2746,7 +2746,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
         else:
-            await message.reply_text(await t(user_id, "not_subscribed"))
+            await query.message.reply_text(await t(user_id, "not_subscribed"))
         return
 
     # ================= Обработка кнопок =================
