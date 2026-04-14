@@ -2491,12 +2491,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    await update.message.reply_text(
-        "Наш бот дает вам возможность создать бесплатно свой мультфильм🦕\n"
-        "с помощью Sora2, генерации с помощью NanoBanana2🍌, свою музыку и другие крутые функции\n"
-        "╾━╤デ╦︻(•_- )Используйте МЕНЮ слева\n"
-        "🐧 Sosai bot готов к генерации."
-    )
+   await update.message.reply_text(
+       await t(update.effective_user.id, "start")
+   )
 
 # ================= FINISH =================
 
