@@ -2362,7 +2362,15 @@ async def music_worker():
             job = await generation_queue_music.get()
 
             try:
-                await handle_generation_job(job)
+                # 🔥 защита от зависания генерации
+                await asyncio.wait_for(
+                    handle_generation_job(job),
+                    timeout=420
+                )
+
+            except asyncio.TimeoutError:
+                logging.error("⏰ MUSIC TIMEOUT (job завис)")
+
             except Exception as e:
                 logging.error(f"❌ MUSIC WORKER ERROR: {e}")
 
@@ -2391,12 +2399,12 @@ async def worker_watchdog():
 # ================= START =================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ================= 🧹 RESET CONTEXT =================
+    try:
+        context.user_data.clear()
+    except:
+        pass
         
-    context.user_data.pop("chat_mode", None)
-    context.user_data.pop("system_prompt", None)
-    context.user_data.pop("chat_count", None)
-
-
     user = update.effective_user
 
     ref_by = None
@@ -3430,10 +3438,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "prompt": prompt,
         "size": context.user_data.get("size", "1024x1024"),
         "model": context.user_data.get("model", "banana2"),
-        "images": images,
+        "images": context.user_data.get("input_images", images),
         "video": context.user_data.get("input_video"),
         "video_ready": context.user_data.get("input_video_ready"),
-        "images": context.user_data.get("input_images", []),
         "user_id": user_id,
         "mode": mode,
         "status": status
