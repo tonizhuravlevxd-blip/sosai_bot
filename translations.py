@@ -2,13 +2,19 @@ TEXTS = {
 
     # ================= START =================
     "start": {
-        "ru": "Наш бот дает вам возможность создать бесплатно свой мультфильм🦕\n"
-              "с помощью Sora2, NanoBanana2🍌, музыку и другие функции\n"
-              "Используйте МЕНЮ слева\n🐧 Sosai bot готов к генерации.",
+        "ru": (
+            "Наш бот дает вам возможность создать бесплатно свой мультфильм🦕\n"
+            "с помощью Sora2, генерации с помощью NanoBanana2🍌, свою музыку и другие крутые функции\n"
+            "╾━╤デ╦︻(•_- )Используйте МЕНЮ слева\n"
+            "🐧 Sosai bot готов к генерации."
+        ),
 
-        "en": "Our bot lets you create cartoons for free 🦕\n"
-              "using Sora2, NanoBanana2 🍌, music and more features\n"
-              "Use the MENU on the left\n🐧 Sosai bot is ready."
+        "en": (
+            "Our bot lets you create cartoons for free 🦕\n"
+            "using Sora2, NanoBanana2 🍌, music and more features\n"
+            "╾━╤デ╦︻(•_- )Use the MENU on the left\n"
+            "🐧 Sosai bot is ready."
+        )
     },
 
     # ================= ERRORS =================
