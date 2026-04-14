@@ -3554,48 +3554,30 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")],
             [InlineKeyboardButton("📢 Сделать пост", callback_data="admin_post")]
         ])
-# ===== ТЕКСТ ПРОФИЛЯ =====
+    # ===== ТЕКСТ ПРОФИЛЯ =====
+    profile_text = (
+        f"👤 Профиль\n\n"
+        f"🆔 ID: {tg_user.id}\n"
+        f"👤 Username: @{tg_user.username}\n\n"
 
-profile_title = await t(user_id, 'profile_title')
-profile_id = await t(user_id, 'profile_id')
-profile_username = await t(user_id, 'profile_username')
+        f"📸 Изображения осталось: {remaining_images}\n"
+        f"🎬 Видео осталось: {remaining_videos}\n"
+        f"🎵 Музыка осталось: {remaining_music}\n\n"
 
-images_left = await t(user_id, 'images_left')
-videos_left = await t(user_id, 'videos_left')
-music_left = await t(user_id, 'music_left')
+        f"💳 Куплено видео: {paid_video}\n"
+        f"💳 Куплено музыки: {paid_music}\n\n"
 
-paid_video_t = await t(user_id, 'paid_video')
-paid_music_t = await t(user_id, 'paid_music')
+        f"🎁 Бонусы: {bonus}\n"
+        f"👥 Рефералов: {user['referrals']}\n\n"
 
-bonus_t = await t(user_id, 'bonus')
-referrals_t = await t(user_id, 'referrals')
-status_t = await t(user_id, 'status')
+        f"🍩 Статус: {premium_status}"
+    )
 
-
-profile_text = (
-    f"👤 {profile_title}\n\n"
-
-    f"🆔 {profile_id}: {tg_user.id}\n"
-    f"👤 {profile_username}: @{tg_user.username}\n\n"
-
-    f"📸 {images_left}: {remaining_images}\n"
-    f"🎬 {videos_left}: {remaining_videos}\n"
-    f"🎵 {music_left}: {remaining_music}\n\n"
-
-    f"💳 {paid_video_t}: {paid_video}\n"
-    f"💳 {paid_music_t}: {paid_music}\n\n"
-
-    f"🎁 {bonus_t}: {bonus}\n"
-    f"👥 {referrals_t}: {user['referrals']}\n\n"
-
-    f"🍩 {status_t}: {premium_status}"
-)
-
-await update.message.reply_text(
-    profile_text,
-    reply_markup=keyboard,
-    parse_mode=None
-)
+    await update.message.reply_text(
+        profile_text,
+        reply_markup=keyboard,
+        parse_mode=None
+    )
 
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
