@@ -2491,9 +2491,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-   await update.message.reply_text(
-       await t(update.effective_user.id, "start")
-   )
+    await update.message.reply_text(
+        await t(update.effective_user.id, "start")
+    )
 
 # ================= FINISH =================
 
