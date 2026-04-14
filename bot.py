@@ -27,22 +27,6 @@ async def t(user_id, key, **kwargs):
 
     return text.format(**kwargs)
 
-async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
-            InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
-        ]
-    ])
-
-    user_id = update.effective_user.id
-
-    await update.message.reply_text(
-        await t(user_id, "choose_language"),
-        reply_markup=keyboard
-    )
-
 
 import uuid
 
@@ -3051,6 +3035,22 @@ async def update_last_active(user_id):
             int(now), user_id
         )
 
+
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
+        ]
+    ])
+
+    user_id = update.effective_user.id
+
+    await update.message.reply_text(
+        await t(user_id, "choose_language"),
+        reply_markup=keyboard
+    )
 
 async def support_reply_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
