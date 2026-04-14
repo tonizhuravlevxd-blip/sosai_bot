@@ -795,6 +795,9 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
             text = await r.text()
             logging.info(f"🎵 FAL CREATE RESPONSE: {text}")
 
+            if r.status != 200:
+                raise Exception(f"FAL HTTP ERROR: {r.status} | {text}")
+
             try:
                 data = json.loads(text)
             except Exception:
@@ -806,8 +809,9 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         request_id = data["request_id"]
         logging.info(f"🎵 FAL REQUEST_ID: {request_id}")
 
-        status_url = data["status_url"]
-        result_url = data["response_url"]
+        # 🔥 FIX: fallback если нет url
+        status_url = data.get("status_url") or f"https://queue.fal.run/fal-ai/requests/{request_id}/status"
+        result_url = data.get("response_url") or f"https://queue.fal.run/fal-ai/requests/{request_id}"
 
         start_time = time.time()
         last_status = None
@@ -816,15 +820,30 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         while True:
             await asyncio.sleep(2)
 
-            async with session.get(status_url, headers=headers) as r:
-                try:
-                    status_data = await r.json()
-                except Exception as e:
-                    logging.error(f"Status parse error: {e}")
-                    continue
+            # 🔥 timeout check СРАЗУ
+            if time.time() - start_time > max_wait:
+                logging.error("❌ TIMEOUT WAITING STATUS")
+                raise Exception(f"Music generation timeout (> {max_wait}s)")
+
+            try:
+                async with session.get(status_url, headers=headers) as r:
+                    status_text = await r.text()
+
+                    if r.status != 200:
+                        logging.error(f"❌ STATUS HTTP ERROR: {r.status} | {status_text}")
+                        continue
+
+                    status_data = json.loads(status_text)
+
+            except Exception as e:
+                logging.error(f"Status request error: {e}")
+                continue
 
             status = status_data.get("status")
             logging.info(f"🎵 STATUS RAW: {status_data}")
+
+            if not status:
+                continue
 
             if status != last_status:
                 logging.info(f"🎵 Music generation status: {status} | prompt: {prompt}")
@@ -832,11 +851,17 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
             # ===== УСПЕХ =====
             if status == "COMPLETED":
-                async with session.get(result_url, headers=headers) as r:
-                    try:
-                        result = await r.json()
-                    except Exception:
-                        raise Exception("Failed to parse FAL music result")
+                try:
+                    async with session.get(result_url, headers=headers) as r:
+                        result_text = await r.text()
+
+                        if r.status != 200:
+                            raise Exception(f"Result HTTP error: {r.status}")
+
+                        result = json.loads(result_text)
+
+                except Exception as e:
+                    raise Exception(f"Failed to get result: {e}")
 
                 logging.info(f"🎵 FAL RAW RESULT: {result}")
 
@@ -881,12 +906,6 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
             if status == "FAILED":
                 logging.error(f"❌ FAL FAILED: {status_data}")
                 raise Exception(f"Fal music generation failed: {status_data}")
-
-            # ===== ТАЙМАУТЫ =====
-            if time.time() - start_time > max_wait:
-                logging.error(f"❌ TIMEOUT: {status_data}")
-                raise Exception(f"Music generation timeout (> {max_wait}s)")
-
 
 
 
