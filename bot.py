@@ -795,7 +795,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
             text = await r.text()
             logging.info(f"🎵 FAL CREATE RESPONSE: {text}")
 
-            if r.status != 200:
+            if r.status not in (200, 202):
                 raise Exception(f"FAL HTTP ERROR: {r.status} | {text}")
 
             try:
@@ -809,9 +809,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         request_id = data["request_id"]
         logging.info(f"🎵 FAL REQUEST_ID: {request_id}")
 
-        # 🔥 FIX: fallback если нет url
-        status_url = data.get("status_url") or f"https://queue.fal.run/fal-ai/requests/{request_id}/status"
-        result_url = data.get("response_url") or f"https://queue.fal.run/fal-ai/requests/{request_id}"
+        status_url = data.get("status_url")
+        result_url = data.get("response_url")
 
         start_time = time.time()
         last_status = None
@@ -820,7 +819,6 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         while True:
             await asyncio.sleep(2)
 
-            # 🔥 timeout check СРАЗУ
             if time.time() - start_time > max_wait:
                 logging.error("❌ TIMEOUT WAITING STATUS")
                 raise Exception(f"Music generation timeout (> {max_wait}s)")
@@ -829,7 +827,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                 async with session.get(status_url, headers=headers) as r:
                     status_text = await r.text()
 
-                    if r.status != 200:
+                    # 🔥 FIX: 202 — это нормально (IN_QUEUE / IN_PROGRESS)
+                    if r.status not in (200, 202):
                         logging.error(f"❌ STATUS HTTP ERROR: {r.status} | {status_text}")
                         continue
 
@@ -855,7 +854,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                     async with session.get(result_url, headers=headers) as r:
                         result_text = await r.text()
 
-                        if r.status != 200:
+                        if r.status not in (200, 202):
                             raise Exception(f"Result HTTP error: {r.status}")
 
                         result = json.loads(result_text)
