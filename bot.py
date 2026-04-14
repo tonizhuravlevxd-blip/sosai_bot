@@ -776,7 +776,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
     prompt = clean_prompt(prompt)
 
-    base_url = "https://queue.fal.run/Sonauto/v2/text-to-music"
+    base_url = "https://queue.fal.run/sonauto/v2/text-to-music"
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
