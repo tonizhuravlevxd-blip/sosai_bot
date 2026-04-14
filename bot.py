@@ -765,9 +765,18 @@ async def fal_generate(model, prompt, images=None):
 
         raise Exception("Fal generation timeout")
 
+
+import asyncio
+import aiohttp
+import time
+import json
+import logging
+
+
 async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
-    Smart music generator with fallback (Sonauto -> Ace-Step)
+    Parallel music generator (race mode):
+    Sonauto vs Ace-Step → first finished wins
     """
 
     prompt = clean_prompt(prompt)
@@ -798,156 +807,121 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         }
     ]
 
-    last_error = None
+    async def run_model(model):
+        """
+        Runs single model until completion
+        """
+        try:
+            async with aiohttp.ClientSession() as session:
 
-    for attempt in range(3):
+                # ===== CREATE JOB =====
+                async with session.post(
+                    model["url"],
+                    json=model["payload"],
+                    headers=headers
+                ) as r:
 
-        logging.info(f"🔁 SMART RETRY CYCLE {attempt+1}/3")
+                    text = await r.text()
 
-        for model in models:
+                    if r.status not in (200, 202):
+                        raise Exception(f"{model['name']} create failed: {r.status} {text}")
 
-            logging.info(f"🎵 TRY MODEL: {model['name']}")
+                    data = json.loads(text)
 
-            try:
-                async with aiohttp.ClientSession() as session:
+                status_url = data.get("status_url")
+                result_url = data.get("response_url")
 
-                    # ===== CREATE JOB =====
-                    async with session.post(
-                        model["url"],
-                        json=model["payload"],
-                        headers=headers
-                    ) as r:
+                if not status_url:
+                    raise Exception(f"{model['name']} no status_url")
 
-                        text = await r.text()
-                        logging.info(f"🎵 CREATE RESPONSE [{model['name']}]: {text}")
+                start_time = time.time()
 
-                        if r.status in (503, 502, 504):
-                            logging.warning(f"⚠️ OVERLOADED: {model['name']}")
+                while True:
+                    await asyncio.sleep(2)
+
+                    # timeout per model
+                    if time.time() - start_time > max_wait:
+                        raise Exception(f"{model['name']} timeout")
+
+                    # ===== STATUS =====
+                    async with session.get(status_url, headers=headers) as r:
+                        if r.status != 200:
                             continue
+                        status_data = json.loads(await r.text())
 
-                        if r.status not in (200, 202):
-                            logging.warning(f"❌ BAD RESPONSE {model['name']}: {r.status}")
-                            continue
+                    status = status_data.get("status")
 
-                        data = json.loads(text)
+                    logging.info(f"🎵 {model['name']} STATUS={status}")
 
-                    request_id = data.get("request_id")
-                    status_url = data.get("status_url")
-                    result_url = data.get("response_url")
+                    # ===== RESULT CHECK =====
+                    result = None
+                    if result_url:
+                        async with session.get(result_url, headers=headers) as r:
+                            if r.status == 200:
+                                try:
+                                    result = json.loads(await r.text())
+                                except:
+                                    pass
 
-                    if not request_id or not status_url:
-                        logging.warning(f"❌ INVALID RESPONSE {model['name']}")
-                        continue
+                    if result:
+                        status = "COMPLETED"
 
-                    start_time = time.time()
-                    last_status = None
-                    stuck_start = None
+                    if status == "COMPLETED" and result:
 
-                    # ================= POLL LOOP =================
-                    while True:
-                        await asyncio.sleep(2)
+                        audio_url = None
 
-                        if time.time() - start_time > max_wait:
-                            logging.warning(f"⛔ TIMEOUT {model['name']}")
-                            break
+                        audio = result.get("audio")
+                        if isinstance(audio, dict):
+                            audio_url = audio.get("url")
+                        elif isinstance(audio, list) and audio:
+                            audio_url = audio[0].get("url")
 
-                        try:
-                            async with session.get(status_url, headers=headers) as r:
-                                text = await r.text()
+                        audio_url = (
+                            audio_url
+                            or result.get("audio_url")
+                            or result.get("url")
+                        )
 
-                                if r.status in (503, 502, 504):
-                                    logging.warning(f"⚠️ STATUS OVERLOADED {model['name']}")
-                                    continue
+                        if audio_url:
+                            return {
+                                "model": model["name"],
+                                "url": audio_url
+                            }
 
-                                if r.status != 200:
-                                    continue
+                        raise Exception(f"{model['name']} no audio url")
 
-                                status_data = json.loads(text)
+                    if status == "FAILED":
+                        raise Exception(f"{model['name']} failed")
 
-                        except Exception as e:
-                            last_error = e
-                            continue
+        except Exception as e:
+            return {
+                "model": model["name"],
+                "error": str(e)
+            }
 
-                        status = status_data.get("status")
-                        queue_pos = status_data.get("queue_position")
+    # ================= PARALLEL EXECUTION =================
 
-                        if status != last_status:
-                            logging.info(f"🎵 {model['name']} STATUS={status} QUEUE={queue_pos}")
-                            last_status = status
+    tasks = [run_model(m) for m in models]
 
-                        # ================= STUCK DETECTION (FIXED) =================
+    done, pending = await asyncio.wait(
+        tasks,
+        return_when=asyncio.FIRST_COMPLETED,
+        timeout=max_wait
+    )
 
-                        if status == "IN_QUEUE":
+    # cancel losers immediately
+    for task in pending:
+        task.cancel()
 
-                            # ❌ queue_position=0 НЕ значит смерть
-                            # это просто "assigned to worker"
+    # get winner
+    for task in done:
+        result = task.result()
 
-                            if stuck_start is None:
-                                stuck_start = time.time()
+        if "url" in result:
+            logging.info(f"🎧 WINNER: {result['model']} -> {result['url']}")
+            return result["url"]
 
-                            # ⚠️ если 60+ секунд вообще не меняется статус
-                            if time.time() - stuck_start > 60:
-                                logging.warning(f"⛔ STUCK QUEUE {model['name']}")
-                                break
-
-                        else:
-                            stuck_start = None
-
-                        # ================= EARLY RESULT =================
-                        result = None
-
-                        if result_url:
-                            try:
-                                async with session.get(result_url, headers=headers) as r:
-                                    if r.status == 200:
-                                        result = json.loads(await r.text())
-                            except:
-                                pass
-
-                        if result:
-                            status = "COMPLETED"
-
-                        # ================= SUCCESS =================
-                        if status == "COMPLETED" and result:
-
-                            audio_url = None
-
-                            if "audio" in result:
-                                if isinstance(result["audio"], dict):
-                                    audio_url = result["audio"].get("url")
-                                elif isinstance(result["audio"], list) and result["audio"]:
-                                    audio_url = result["audio"][0].get("url")
-
-                            if not audio_url and "audios" in result:
-                                audio_url = result["audios"][0].get("url")
-
-                            if not audio_url and "audio_url" in result:
-                                audio_url = result["audio_url"]
-
-                            if not audio_url and "url" in result:
-                                audio_url = result["url"]
-
-                            if audio_url:
-                                logging.info(f"🎧 SUCCESS [{model['name']}]: {audio_url}")
-                                return audio_url
-
-                            logging.warning(f"❌ NO AUDIO URL {model['name']}")
-                            break
-
-                        # ================= FAILED =================
-                        if status == "FAILED":
-                            logging.warning(f"❌ FAILED MODEL {model['name']}")
-                            break
-
-            except Exception as e:
-                last_error = e
-                logging.error(f"❌ MODEL ERROR {model['name']}: {e}")
-                continue
-
-        logging.warning(f"🔁 RETRY CYCLE {attempt+1}/3 FAILED")
-
-    raise Exception(f"All models failed. Last error: {last_error}")
-
+    raise Exception(f"All models failed: {done}")
 
 
 # ================= FAL VIDEO GENERATOR =================
