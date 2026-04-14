@@ -3323,7 +3323,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if user_id in active_generations:
-        await message.reply_text("⏳ Ваша генерация уже выполняется")
+        await message.reply_text(await t(user_id, "already_generating"))
         return
 
     count = user_generation_count.get(user_id, 0)
