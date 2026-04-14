@@ -10,12 +10,38 @@ import json
 import io
 import traceback
 
+from translations import TEXTS
+
 from telegram.ext import PreCheckoutQueryHandler
 
 from yookassa import Configuration, Payment
 
 Configuration.account_id = os.getenv("YOOKASSA_SHOP_ID")
 Configuration.secret_key = os.getenv("YOOKASSA_SECRET_KEY")
+
+async def t(user_id, key, **kwargs):
+    user = await get_user(user_id)
+    lang = user.get("language", "ru")
+
+    text = TEXTS.get(key, {}).get(lang, key)
+
+    return text.format(**kwargs)
+
+async def language(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
+            InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")
+        ]
+    ])
+
+    user_id = update.effective_user.id
+
+    await update.message.reply_text(
+        await t(user_id, "choose_language"),
+        reply_markup=keyboard
+    )
 
 
 import uuid
@@ -2642,6 +2668,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     user_id = query.from_user.id
 
+        # ================= LANGUAGE =================
+    if data.startswith("lang_"):
+
+        lang = data.split("_")[1]
+
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET language=$1 WHERE user_id=$2",
+                lang, user_id
+            )
+
+        USER_CACHE.pop(user_id, None)
+
+        if lang == "ru":
+            text = "✅ Язык переключен на русский"
+        else:
+            text = "✅ Language switched to English"
+
+        await query.message.reply_text(text)
+        return
+
     # ================= SUPPORT REPLY =================
     if data.startswith("reply_"):
 
@@ -3195,7 +3242,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["last_mode_warn"] = now
 
-        await message.reply_text("↩ Пожалуйста, выберите режим в меню слева")
+        await message.reply_text(await t(user_id, "choose_mode"))
         return
 
     # ===== ADMIN REPLY SUPPORT =====
@@ -3589,6 +3636,7 @@ app = ApplicationBuilder().token(TG_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("account", account))
+app.add_handler(CommandHandler("language", language))
 app.add_handler(CommandHandler("premium", premium))    
 app.add_handler(CommandHandler("ref", ref))
 app.add_handler(CommandHandler("photo", photo))
