@@ -767,7 +767,7 @@ async def fal_generate(model, prompt, images=None):
 
 async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
-    Smart music generator with fallback (Sonauto -> Minimax)
+    Smart music generator with fallback (Sonauto -> Ace-Step)
     """
 
     prompt = clean_prompt(prompt)
@@ -812,14 +812,17 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                 async with aiohttp.ClientSession() as session:
 
                     # ===== CREATE JOB =====
-                    async with session.post(model["url"], json=model["payload"], headers=headers) as r:
-                        text = await r.text()
+                    async with session.post(
+                        model["url"],
+                        json=model["payload"],
+                        headers=headers
+                    ) as r:
 
+                        text = await r.text()
                         logging.info(f"🎵 CREATE RESPONSE [{model['name']}]: {text}")
 
-                        # 🔥 HARD FAIL CHECK
                         if r.status in (503, 502, 504):
-                            logging.warning(f"⚠️ OVERLOADED MODEL: {model['name']}")
+                            logging.warning(f"⚠️ OVERLOADED: {model['name']}")
                             continue
 
                         if r.status not in (200, 202):
@@ -837,15 +840,15 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                         continue
 
                     start_time = time.time()
-                    last_queue_pos = None
-                    stuck_timer = None
+                    last_status = None
+                    stuck_start = None
 
+                    # ================= POLL LOOP =================
                     while True:
                         await asyncio.sleep(2)
 
-                        # ===== HARD TIMEOUT =====
                         if time.time() - start_time > max_wait:
-                            logging.warning(f"⛔ TIMEOUT MODEL {model['name']}")
+                            logging.warning(f"⛔ TIMEOUT {model['name']}")
                             break
 
                         try:
@@ -854,54 +857,57 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
                                 if r.status in (503, 502, 504):
                                     logging.warning(f"⚠️ STATUS OVERLOADED {model['name']}")
-                                    break
+                                    continue
 
-                                if r.status not in (200, 202):
+                                if r.status != 200:
                                     continue
 
                                 status_data = json.loads(text)
 
                         except Exception as e:
                             last_error = e
-                            break
+                            continue
 
                         status = status_data.get("status")
                         queue_pos = status_data.get("queue_position")
 
-                        logging.info(f"🎵 {model['name']} STATUS={status} QUEUE={queue_pos}")
+                        if status != last_status:
+                            logging.info(f"🎵 {model['name']} STATUS={status} QUEUE={queue_pos}")
+                            last_status = status
 
-                        # ===== 🔥 STUCK QUEUE DETECTION =====
+                        # ================= STUCK DETECTION (FIXED) =================
+
                         if status == "IN_QUEUE":
 
-                            if queue_pos == last_queue_pos:
-                                if stuck_timer is None:
-                                    stuck_timer = time.time()
-                                elif time.time() - stuck_timer > 20:
-                                    logging.warning(f"⛔ STUCK QUEUE {model['name']}")
-                                    break
-                            else:
-                                stuck_timer = None
-                                last_queue_pos = queue_pos
+                            # ❌ queue_position=0 НЕ значит смерть
+                            # это просто "assigned to worker"
 
-                            # 🔥 если вообще не двигается и долго стоит
-                            if queue_pos == 0 and time.time() - start_time > 15:
-                                logging.warning(f"⛔ DEAD QUEUE {model['name']}")
+                            if stuck_start is None:
+                                stuck_start = time.time()
+
+                            # ⚠️ если 60+ секунд вообще не меняется статус
+                            if time.time() - stuck_start > 60:
+                                logging.warning(f"⛔ STUCK QUEUE {model['name']}")
                                 break
 
-                        # ===== EARLY RESULT CHECK =====
+                        else:
+                            stuck_start = None
+
+                        # ================= EARLY RESULT =================
                         result = None
-                        try:
-                            async with session.get(result_url, headers=headers) as r:
-                                if r.status in (200, 202):
-                                    text = await r.text()
-                                    result = json.loads(text)
-                        except:
-                            pass
+
+                        if result_url:
+                            try:
+                                async with session.get(result_url, headers=headers) as r:
+                                    if r.status == 200:
+                                        result = json.loads(await r.text())
+                            except:
+                                pass
 
                         if result:
                             status = "COMPLETED"
 
-                        # ===== SUCCESS =====
+                        # ================= SUCCESS =================
                         if status == "COMPLETED" and result:
 
                             audio_url = None
@@ -909,23 +915,17 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                             if "audio" in result:
                                 if isinstance(result["audio"], dict):
                                     audio_url = result["audio"].get("url")
-                                elif isinstance(result["audio"], list):
+                                elif isinstance(result["audio"], list) and result["audio"]:
                                     audio_url = result["audio"][0].get("url")
+
+                            if not audio_url and "audios" in result:
+                                audio_url = result["audios"][0].get("url")
 
                             if not audio_url and "audio_url" in result:
                                 audio_url = result["audio_url"]
 
                             if not audio_url and "url" in result:
                                 audio_url = result["url"]
-
-                            if not audio_url and "audios" in result:
-                                audio_url = result["audios"][0].get("url")
-
-                            if not audio_url and "output" in result:
-                                output = result["output"]
-                                if isinstance(output, dict):
-                                    if "audio" in output:
-                                        audio_url = output["audio"].get("url")
 
                             if audio_url:
                                 logging.info(f"🎧 SUCCESS [{model['name']}]: {audio_url}")
@@ -934,7 +934,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                             logging.warning(f"❌ NO AUDIO URL {model['name']}")
                             break
 
-                        # ===== FAILED =====
+                        # ================= FAILED =================
                         if status == "FAILED":
                             logging.warning(f"❌ FAILED MODEL {model['name']}")
                             break
