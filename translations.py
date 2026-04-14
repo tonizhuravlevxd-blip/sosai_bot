@@ -8,7 +8,6 @@ TEXTS = {
             "╾━╤デ╦︻(•_- )Используйте МЕНЮ слева\n"
             "🐧 Sosai bot готов к генерации."
         ),
-
         "en": (
             "Our bot lets you create cartoons for free 🦕\n"
             "using Sora2, NanoBanana2 🍌, music and more features\n"
@@ -17,11 +16,30 @@ TEXTS = {
         )
     },
 
-    # ================= sos =================
+    # ================= SOS =================
     "sos": {
-        "ru": "🆘 Напишите ваше сообщение,и я передам его в поддержку,они попытаются максимально быстро решить вашу проблему🦦.",
-        "en": "🆘 Write your message and I will forward it to support. They will try to solve your problem as quickly as possible 🦦."
-    },    
+        "ru": (
+            "🆘 Напишите ваше сообщение, и я передам его в поддержку. "
+            "Они постараются максимально быстро решить вашу проблему 🦦."
+        ),
+        "en": (
+            "🆘 Write your message and I will forward it to support. "
+            "They will try to solve your problem as quickly as possible 🦦."
+        )
+    },
+
+    # ================= PROFILE =================
+    "profile_title": {"ru": "Профиль", "en": "Profile"},
+    "profile_id": {"ru": "ID", "en": "ID"},
+    "profile_username": {"ru": "Username", "en": "Username"},
+    "images_left": {"ru": "Изображений осталось", "en": "Images left"},
+    "videos_left": {"ru": "Видео осталось", "en": "Videos left"},
+    "music_left": {"ru": "Музыки осталось", "en": "Music left"},
+    "paid_video": {"ru": "Куплено видео", "en": "Purchased video"},
+    "paid_music": {"ru": "Куплено музыки", "en": "Purchased music"},
+    "bonus": {"ru": "Бонусы", "en": "Bonuses"},
+    "referrals": {"ru": "Рефералов", "en": "Referrals"},
+    "status": {"ru": "Статус", "en": "Status"},
 
     # ================= ERRORS =================
     "error_generate": {
