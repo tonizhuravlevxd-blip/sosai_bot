@@ -776,14 +776,15 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
     prompt = clean_prompt(prompt)
 
-    base_url = "https://queue.fal.run/sonauto/v2/text-to-music"
+    base_url = "https://queue.fal.run/Sonauto/v2/text-to-music"
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
     }
     payload = {
         "prompt": prompt,
-        "duration": duration
+        "duration": duration,
+        "output_format": "mp3"
     }
 
     logging.info(f"🎵 FAL REQUEST: {payload}")
@@ -827,7 +828,6 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                 async with session.get(status_url, headers=headers) as r:
                     status_text = await r.text()
 
-                    # 🔥 FIX: 202 — это нормально (IN_QUEUE / IN_PROGRESS)
                     if r.status not in (200, 202):
                         logging.error(f"❌ STATUS HTTP ERROR: {r.status} | {status_text}")
                         continue
@@ -841,27 +841,29 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
             status = status_data.get("status")
             logging.info(f"🎵 STATUS RAW: {status_data}")
 
-            if not status:
-                continue
-
             if status != last_status:
-                logging.info(f"🎵 Music generation status: {status} | prompt: {prompt}")
+                logging.info(f"🎵 Music generation status: {status}")
                 last_status = status
 
-            # ===== УСПЕХ =====
-            if status == "COMPLETED":
-                try:
-                    async with session.get(result_url, headers=headers) as r:
+            # ===== 🔥 ПРОБУЕМ ДОСТАТЬ РЕЗУЛЬТАТ ДАЖЕ РАНЬШЕ =====
+            try:
+                async with session.get(result_url, headers=headers) as r:
+                    if r.status in (200, 202):
                         result_text = await r.text()
-
-                        if r.status not in (200, 202):
-                            raise Exception(f"Result HTTP error: {r.status}")
-
                         result = json.loads(result_text)
 
-                except Exception as e:
-                    raise Exception(f"Failed to get result: {e}")
+                        if "audio" in result or "audios" in result:
+                            logging.info("🎯 RESULT READY (early fetch)")
+                            status = "COMPLETED"
+                        else:
+                            result = None
+                    else:
+                        result = None
+            except:
+                result = None
 
+            # ===== УСПЕХ =====
+            if status == "COMPLETED" and result:
                 logging.info(f"🎵 FAL RAW RESULT: {result}")
 
                 audio_url = None
@@ -905,7 +907,6 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
             if status == "FAILED":
                 logging.error(f"❌ FAL FAILED: {status_data}")
                 raise Exception(f"Fal music generation failed: {status_data}")
-
 
 
 
