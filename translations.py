@@ -17,6 +17,12 @@ TEXTS = {
         )
     },
 
+    # ================= sos =================
+    "sos": {
+        "ru": "🆘 Напишите ваше сообщение,и я передам его в поддержку,они попытаются максимально быстро решить вашу проблему🦦.",
+        "en": "🆘 Write your message and I will forward it to support. They will try to solve your problem as quickly as possible 🦦."
+    },    
+
     # ================= ERRORS =================
     "error_generate": {
         "ru": "⚠️ Не удалось сгенерировать результат",
