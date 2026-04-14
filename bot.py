@@ -788,8 +788,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
             }
         },
         {
-            "name": "minimax-music",
-            "url": "https://queue.fal.run/fal-ai/minimax-music/v2.6",
+            "name": "ace-step",
+            "url": "https://queue.fal.run/fal-ai/ace-step/prompt-to-audio",
             "payload": {
                 "prompt": prompt,
                 "duration": duration,
