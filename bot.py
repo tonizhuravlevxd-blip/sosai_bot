@@ -2637,7 +2637,7 @@ async def pre_checkout(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.error(f"❌ PRECHECKOUT ERROR: {e}")
 
 # ================= IMPORTS =================
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice
 from telegram.ext import ContextTypes, MessageHandler, filters
 import logging
 
