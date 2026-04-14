@@ -901,7 +901,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
     # ================= PARALLEL EXECUTION =================
 
-    tasks = [run_model(m) for m in models]
+    tasks = [asyncio.create_task(run_model(m)) for m in models]
 
     done, pending = await asyncio.wait(
         tasks,
@@ -914,14 +914,21 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         task.cancel()
 
     # get winner
-    for task in done:
-        result = task.result()
+    results = []
 
-        if "url" in result:
+    for task in done:
+        try:
+            result = task.result()
+            results.append(result)
+        except Exception as e:
+            logging.error(f"❌ TASK ERROR: {e}")
+
+    for result in results:
+        if isinstance(result, dict) and "url" in result:
             logging.info(f"🎧 WINNER: {result['model']} -> {result['url']}")
             return result["url"]
 
-    raise Exception(f"All models failed: {done}")
+    raise Exception(f"All models failed: {results}")
 
 
 # ================= FAL VIDEO GENERATOR =================
