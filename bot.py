@@ -3202,6 +3202,68 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not message:
         return
 
+        # ===== SUPPORT =====
+    if context.user_data.get("support_mode"):
+
+        if not message:
+            return
+
+        user = update.effective_user
+        text = message.text
+
+        # 🔥 защита от пустого сообщения
+        if not text or not text.strip():
+            await message.reply_text("⚠️ Напишите сообщение для поддержки")
+            return
+
+        # 🔥 анти-спам (чтобы не отправляли 10 раз подряд)
+        now = time.time()
+        last = context.user_data.get("last_support_msg", 0)
+
+        if now - last < 5:
+            return
+
+        context.user_data["last_support_msg"] = now
+
+        msg = f"""
+🆘 <b>Новое обращение</b>
+
+👤 ID: <code>{user.id}</code>
+📛 @{user.username or "нет"}
+👀 {user.first_name}
+
+💬 {text}
+"""
+
+        sent = 0
+
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=msg,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("💬 Ответить", callback_data=f"reply_{user.id}")]
+                    ])
+                )
+                sent += 1
+
+            except Exception as e:
+                logging.error(f"❌ SUPPORT SEND ERROR to {admin_id}: {e}")
+
+        # 🔥 если никому не отправилось
+        if sent == 0:
+            await message.reply_text("⚠️ Ошибка отправки в поддержку. Попробуйте позже.")
+            return
+
+        await message.reply_text("✅ Сообщение отправлено в поддержку")
+
+        # 🔥 безопасно выключаем режим
+        context.user_data.pop("support_mode", None)
+
+        return
+
         # ===== ✅ ADMIN POST =====
     if user_id in ADMIN_IDS and context.user_data.get("admin_post_mode"):
 
@@ -3291,68 +3353,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await message.reply_text("❌ Ошибка отправки")
 
         ADMIN_REPLY_STATE.pop(user_id, None)
-        return
-
-    # ===== SUPPORT =====
-    if context.user_data.get("support_mode"):
-
-        if not message:
-            return
-
-        user = update.effective_user
-        text = message.text
-
-        # 🔥 защита от пустого сообщения
-        if not text or not text.strip():
-            await message.reply_text("⚠️ Напишите сообщение для поддержки")
-            return
-
-        # 🔥 анти-спам (чтобы не отправляли 10 раз подряд)
-        now = time.time()
-        last = context.user_data.get("last_support_msg", 0)
-
-        if now - last < 5:
-            return
-
-        context.user_data["last_support_msg"] = now
-
-        msg = f"""
-🆘 <b>Новое обращение</b>
-
-👤 ID: <code>{user.id}</code>
-📛 @{user.username or "нет"}
-👀 {user.first_name}
-
-💬 {text}
-"""
-
-        sent = 0
-
-        for admin_id in ADMIN_IDS:
-            try:
-                await context.bot.send_message(
-                    chat_id=admin_id,
-                    text=msg,
-                    parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("💬 Ответить", callback_data=f"reply_{user.id}")]
-                    ])
-                )
-                sent += 1
-
-            except Exception as e:
-                logging.error(f"❌ SUPPORT SEND ERROR to {admin_id}: {e}")
-
-        # 🔥 если никому не отправилось
-        if sent == 0:
-            await message.reply_text("⚠️ Ошибка отправки в поддержку. Попробуйте позже.")
-            return
-
-        await message.reply_text("✅ Сообщение отправлено в поддержку")
-
-        # 🔥 безопасно выключаем режим
-        context.user_data.pop("support_mode", None)
-
         return
 
     if user_id in active_generations:
