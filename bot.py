@@ -3264,6 +3264,46 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
+
+    # ===== ADMIN REPLY SUPPORT =====
+    if user_id in ADMIN_IDS:
+        if message.reply_to_message:
+
+            original_msg_id = message.reply_to_message.message_id
+            target_user_id = SUPPORT_REPLY_MAP.get(original_msg_id)
+
+            if target_user_id:
+                try:
+                    await context.bot.send_message(
+                        target_user_id,
+                        f"💬 Ответ поддержки:\n\n{message.text}"
+                    )
+
+                    await message.reply_text("✅ Ответ отправлен")
+                except:
+                    await message.reply_text("❌ Ошибка отправки")
+
+                return
+
+    # ===== ADMIN BUTTON REPLY =====
+    if user_id in ADMIN_IDS and ADMIN_REPLY_STATE.get(user_id):
+
+        target_user_id = ADMIN_REPLY_STATE.get(user_id)
+
+        try:
+            await context.bot.send_message(
+                target_user_id,
+                f"💬 Ответ поддержки:\n\n{message.text}"
+            )
+
+            await message.reply_text("✅ Ответ отправлен")
+
+        except:
+            await message.reply_text("❌ Ошибка отправки")
+
+        ADMIN_REPLY_STATE.pop(user_id, None)
+        return    
+
         # ===== ✅ ADMIN POST =====
     if user_id in ADMIN_IDS and context.user_data.get("admin_post_mode"):
 
@@ -3316,44 +3356,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.reply_text(await t(user_id, "choose_mode"))
         return
 
-    # ===== ADMIN REPLY SUPPORT =====
-    if user_id in ADMIN_IDS:
-        if message.reply_to_message:
-
-            original_msg_id = message.reply_to_message.message_id
-            target_user_id = SUPPORT_REPLY_MAP.get(original_msg_id)
-
-            if target_user_id:
-                try:
-                    await context.bot.send_message(
-                        target_user_id,
-                        f"💬 Ответ поддержки:\n\n{message.text}"
-                    )
-
-                    await message.reply_text("✅ Ответ отправлен")
-                except:
-                    await message.reply_text("❌ Ошибка отправки")
-
-                return
-
-    # ===== ADMIN BUTTON REPLY =====
-    if user_id in ADMIN_IDS and ADMIN_REPLY_STATE.get(user_id):
-
-        target_user_id = ADMIN_REPLY_STATE.get(user_id)
-
-        try:
-            await context.bot.send_message(
-                target_user_id,
-                f"💬 Ответ поддержки:\n\n{message.text}"
-            )
-
-            await message.reply_text("✅ Ответ отправлен")
-
-        except:
-            await message.reply_text("❌ Ошибка отправки")
-
-        ADMIN_REPLY_STATE.pop(user_id, None)
-        return
 
     if user_id in active_generations:
         await message.reply_text(await t(user_id, "already_generating"))
