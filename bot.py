@@ -772,11 +772,6 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
     prompt = clean_prompt(prompt)
 
-    def enhance_prompt(p):
-        return f"{p}. high quality production, studio recording, clear vocals, modern pop sound, professional mixing, catchy melody, radio ready"
-
-    prompt = enhance_prompt(prompt)
-
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
