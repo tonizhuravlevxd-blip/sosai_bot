@@ -3554,31 +3554,31 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("♻️ Обнулить лимиты", callback_data="reset_limits")],
             [InlineKeyboardButton("📢 Сделать пост", callback_data="admin_post")]
         ])
+# ===== ТЕКСТ ПРОФИЛЯ =====
+profile_text = (
+    f"👤 {await t(user_id, 'profile_title')}\n\n"
 
-    # ===== ТЕКСТ ПРОФИЛЯ =====
-    profile_text = (
-        f"👤 Профиль\n\n"
-        f"🆔 ID: {tg_user.id}\n"
-        f"👤 Username: @{tg_user.username}\n\n"
+    f"🆔 {await t(user_id, 'profile_id')}: {tg_user.id}\n"
+    f"👤 {await t(user_id, 'profile_username')}: @{tg_user.username}\n\n"
 
-        f"📸 Изображения осталось: {remaining_images}\n"
-        f"🎬 Видео осталось: {remaining_videos}\n"
-        f"🎵 Музыка осталось: {remaining_music}\n\n"
+    f"📸 {await t(user_id, 'images_left')}: {remaining_images}\n"
+    f"🎬 {await t(user_id, 'videos_left')}: {remaining_videos}\n"
+    f"🎵 {await t(user_id, 'music_left')}: {remaining_music}\n\n"
 
-        f"💳 Куплено видео: {paid_video}\n"
-        f"💳 Куплено музыки: {paid_music}\n\n"
+    f"💳 {await t(user_id, 'paid_video')}: {paid_video}\n"
+    f"💳 {await t(user_id, 'paid_music')}: {paid_music}\n\n"
 
-        f"🎁 Бонусы: {bonus}\n"
-        f"👥 Рефералов: {user['referrals']}\n\n"
+    f"🎁 {await t(user_id, 'bonus')}: {bonus}\n"
+    f"👥 {await t(user_id, 'referrals')}: {user['referrals']}\n\n"
 
-        f"🍩 Статус: {premium_status}"
-    )
+    f"🍩 {await t(user_id, 'status')}: {premium_status}"
+)
 
-    await update.message.reply_text(
-        profile_text,
-        reply_markup=keyboard,
-        parse_mode=None
-    )
+await update.message.reply_text(
+    profile_text,
+    reply_markup=keyboard,
+    parse_mode=None
+)
 
 async def ref(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
