@@ -767,14 +767,13 @@ async def fal_generate(model, prompt, images=None):
 
 async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
-    Smart music generator with fallback (Sonauto -> Ace-Step)
+    Smart music generator with fallback (Sonauto -> Minimax)
     """
 
     prompt = clean_prompt(prompt)
 
-    # ===== AI PROMPT BOOST (улучшение качества музыки) =====
     def enhance_prompt(p):
-        return f"{p}. high quality production, studio recording, clear vocals, modern pop sound, professional mixing"
+        return f"{p}. high quality production, studio recording, clear vocals, modern pop sound, professional mixing, catchy melody, radio ready"
 
     prompt = enhance_prompt(prompt)
 
@@ -783,7 +782,6 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         "Content-Type": "application/json"
     }
 
-    # ===== MODELS =====
     models = [
         {
             "name": "sonauto",
@@ -807,10 +805,13 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
     last_error = None
 
-    for attempt in range(3):  # 🔥 SMART RETRY
+    for attempt in range(3):
+
+        logging.info(f"🔁 SMART RETRY CYCLE {attempt+1}/3")
+
         for model in models:
 
-            logging.info(f"🎵 TRY MODEL: {model['name']} | attempt {attempt+1}")
+            logging.info(f"🎵 TRY MODEL: {model['name']}")
 
             try:
                 async with aiohttp.ClientSession() as session:
@@ -821,39 +822,44 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
                         logging.info(f"🎵 CREATE RESPONSE [{model['name']}]: {text}")
 
-                        if r.status in (503, 504):
-                            logging.warning(f"⚠️ MODEL OVERLOADED: {model['name']}")
+                        # 🔥 HARD FAIL CHECK
+                        if r.status in (503, 502, 504):
+                            logging.warning(f"⚠️ OVERLOADED MODEL: {model['name']}")
                             continue
 
                         if r.status not in (200, 202):
-                            raise Exception(f"{model['name']} HTTP ERROR: {r.status} | {text}")
+                            logging.warning(f"❌ BAD RESPONSE {model['name']}: {r.status}")
+                            continue
 
                         data = json.loads(text)
 
-                    if "request_id" not in data:
-                        raise Exception(f"{model['name']} bad response: {data}")
-
-                    request_id = data["request_id"]
+                    request_id = data.get("request_id")
                     status_url = data.get("status_url")
                     result_url = data.get("response_url")
 
-                    start_time = time.time()
-                    last_status = None
+                    if not request_id or not status_url:
+                        logging.warning(f"❌ INVALID RESPONSE {model['name']}")
+                        continue
 
-                    # ===== WAIT LOOP =====
+                    start_time = time.time()
+                    last_queue_pos = None
+                    stuck_timer = None
+
                     while True:
                         await asyncio.sleep(2)
 
-                        # ===== TIMEOUT =====
+                        # ===== HARD TIMEOUT =====
                         if time.time() - start_time > max_wait:
-                            raise Exception(f"{model['name']} timeout")
+                            logging.warning(f"⛔ TIMEOUT MODEL {model['name']}")
+                            break
 
                         try:
                             async with session.get(status_url, headers=headers) as r:
                                 text = await r.text()
 
-                                if r.status in (503, 502):
-                                    raise Exception("MODEL_OVERLOADED")
+                                if r.status in (503, 502, 504):
+                                    logging.warning(f"⚠️ STATUS OVERLOADED {model['name']}")
+                                    break
 
                                 if r.status not in (200, 202):
                                     continue
@@ -865,18 +871,29 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                             break
 
                         status = status_data.get("status")
+                        queue_pos = status_data.get("queue_position")
 
-                        if status != last_status:
-                            logging.info(f"🎵 {model['name']} STATUS: {status}")
-                            last_status = status
+                        logging.info(f"🎵 {model['name']} STATUS={status} QUEUE={queue_pos}")
 
-                        # ===== DETECT STUCK QUEUE =====
-                        if status == "IN_QUEUE" and status_data.get("queue_position", 0) == 0:
-                            if time.time() - start_time > 60:
-                                logging.warning("⚠️ STUCK QUEUE DETECTED")
+                        # ===== 🔥 STUCK QUEUE DETECTION =====
+                        if status == "IN_QUEUE":
+
+                            if queue_pos == last_queue_pos:
+                                if stuck_timer is None:
+                                    stuck_timer = time.time()
+                                elif time.time() - stuck_timer > 20:
+                                    logging.warning(f"⛔ STUCK QUEUE {model['name']}")
+                                    break
+                            else:
+                                stuck_timer = None
+                                last_queue_pos = queue_pos
+
+                            # 🔥 если вообще не двигается и долго стоит
+                            if queue_pos == 0 and time.time() - start_time > 15:
+                                logging.warning(f"⛔ DEAD QUEUE {model['name']}")
                                 break
 
-                        # ===== TRY GET RESULT EARLY =====
+                        # ===== EARLY RESULT CHECK =====
                         result = None
                         try:
                             async with session.get(result_url, headers=headers) as r:
@@ -919,19 +936,20 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                                 logging.info(f"🎧 SUCCESS [{model['name']}]: {audio_url}")
                                 return audio_url
 
-                            raise Exception("No audio URL found")
+                            logging.warning(f"❌ NO AUDIO URL {model['name']}")
+                            break
 
                         # ===== FAILED =====
                         if status == "FAILED":
-                            logging.warning(f"❌ FAILED MODEL: {model['name']}")
+                            logging.warning(f"❌ FAILED MODEL {model['name']}")
                             break
 
             except Exception as e:
                 last_error = e
-                logging.error(f"❌ MODEL ERROR [{model['name']}]: {e}")
+                logging.error(f"❌ MODEL ERROR {model['name']}: {e}")
                 continue
 
-        logging.warning(f"🔁 RETRY CYCLE {attempt+1}/3")
+        logging.warning(f"🔁 RETRY CYCLE {attempt+1}/3 FAILED")
 
     raise Exception(f"All models failed. Last error: {last_error}")
 
