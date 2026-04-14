@@ -3074,7 +3074,7 @@ async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["support_mode"] = True
 
     await update.message.reply_text(
-        "🆘 Напишите ваше сообщение,и я передам его в поддержку,они попытаются максимально быстро решить вашу проблему🦦."
+        await t(update.effective_user.id, "sos")
     )
 
 
