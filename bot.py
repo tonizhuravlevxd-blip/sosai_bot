@@ -767,146 +767,173 @@ async def fal_generate(model, prompt, images=None):
 
 async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
-    Генерация музыки через FAL с прогресс-логированием.
-
-    :param prompt: текстовый промпт
-    :param duration: длина трека в секундах
-    :param max_wait: максимальное время ожидания генерации (в секундах)
-    :return: URL с аудио
+    Smart music generator with fallback (Sonauto -> Ace-Step)
     """
+
     prompt = clean_prompt(prompt)
 
-    base_url = "https://queue.fal.run/sonauto/v2/text-to-music"
+    # ===== AI PROMPT BOOST (улучшение качества музыки) =====
+    def enhance_prompt(p):
+        return f"{p}. high quality production, studio recording, clear vocals, modern pop sound, professional mixing"
+
+    prompt = enhance_prompt(prompt)
+
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
     }
-    payload = {
-        "prompt": prompt,
-        "duration": duration,
-        "output_format": "mp3"
-    }
 
-    logging.info(f"🎵 FAL REQUEST: {payload}")
+    # ===== MODELS =====
+    models = [
+        {
+            "name": "sonauto",
+            "url": "https://queue.fal.run/sonauto/v2/text-to-music",
+            "payload": {
+                "prompt": prompt,
+                "duration": duration,
+                "output_format": "mp3"
+            }
+        },
+        {
+            "name": "minimax-music",
+            "url": "https://queue.fal.run/fal-ai/minimax-music/v2.6",
+            "payload": {
+                "prompt": prompt,
+                "duration": duration,
+                "output_format": "mp3"
+            }
+        }
+    ]
 
-    async with aiohttp.ClientSession() as session:
+    last_error = None
 
-        # ===== СОЗДАНИЕ ЗАДАЧИ =====
-        async with session.post(base_url, json=payload, headers=headers) as r:
-            text = await r.text()
-            logging.info(f"🎵 FAL CREATE RESPONSE: {text}")
+    for attempt in range(3):  # 🔥 SMART RETRY
+        for model in models:
 
-            if r.status not in (200, 202):
-                raise Exception(f"FAL HTTP ERROR: {r.status} | {text}")
-
-            try:
-                data = json.loads(text)
-            except Exception:
-                raise Exception(f"Fal bad response: {text}")
-
-        if "request_id" not in data:
-            raise Exception(f"Fal music error: {data}")
-
-        request_id = data["request_id"]
-        logging.info(f"🎵 FAL REQUEST_ID: {request_id}")
-
-        status_url = data.get("status_url")
-        result_url = data.get("response_url")
-
-        start_time = time.time()
-        last_status = None
-
-        # ===== ОЖИДАНИЕ =====
-        while True:
-            await asyncio.sleep(2)
-
-            if time.time() - start_time > max_wait:
-                logging.error("❌ TIMEOUT WAITING STATUS")
-                raise Exception(f"Music generation timeout (> {max_wait}s)")
+            logging.info(f"🎵 TRY MODEL: {model['name']} | attempt {attempt+1}")
 
             try:
-                async with session.get(status_url, headers=headers) as r:
-                    status_text = await r.text()
+                async with aiohttp.ClientSession() as session:
 
-                    if r.status not in (200, 202):
-                        logging.error(f"❌ STATUS HTTP ERROR: {r.status} | {status_text}")
-                        continue
+                    # ===== CREATE JOB =====
+                    async with session.post(model["url"], json=model["payload"], headers=headers) as r:
+                        text = await r.text()
 
-                    status_data = json.loads(status_text)
+                        logging.info(f"🎵 CREATE RESPONSE [{model['name']}]: {text}")
+
+                        if r.status in (503, 504):
+                            logging.warning(f"⚠️ MODEL OVERLOADED: {model['name']}")
+                            continue
+
+                        if r.status not in (200, 202):
+                            raise Exception(f"{model['name']} HTTP ERROR: {r.status} | {text}")
+
+                        data = json.loads(text)
+
+                    if "request_id" not in data:
+                        raise Exception(f"{model['name']} bad response: {data}")
+
+                    request_id = data["request_id"]
+                    status_url = data.get("status_url")
+                    result_url = data.get("response_url")
+
+                    start_time = time.time()
+                    last_status = None
+
+                    # ===== WAIT LOOP =====
+                    while True:
+                        await asyncio.sleep(2)
+
+                        # ===== TIMEOUT =====
+                        if time.time() - start_time > max_wait:
+                            raise Exception(f"{model['name']} timeout")
+
+                        try:
+                            async with session.get(status_url, headers=headers) as r:
+                                text = await r.text()
+
+                                if r.status in (503, 502):
+                                    raise Exception("MODEL_OVERLOADED")
+
+                                if r.status not in (200, 202):
+                                    continue
+
+                                status_data = json.loads(text)
+
+                        except Exception as e:
+                            last_error = e
+                            break
+
+                        status = status_data.get("status")
+
+                        if status != last_status:
+                            logging.info(f"🎵 {model['name']} STATUS: {status}")
+                            last_status = status
+
+                        # ===== DETECT STUCK QUEUE =====
+                        if status == "IN_QUEUE" and status_data.get("queue_position", 0) == 0:
+                            if time.time() - start_time > 60:
+                                logging.warning("⚠️ STUCK QUEUE DETECTED")
+                                break
+
+                        # ===== TRY GET RESULT EARLY =====
+                        result = None
+                        try:
+                            async with session.get(result_url, headers=headers) as r:
+                                if r.status in (200, 202):
+                                    text = await r.text()
+                                    result = json.loads(text)
+                        except:
+                            pass
+
+                        if result:
+                            status = "COMPLETED"
+
+                        # ===== SUCCESS =====
+                        if status == "COMPLETED" and result:
+
+                            audio_url = None
+
+                            if "audio" in result:
+                                if isinstance(result["audio"], dict):
+                                    audio_url = result["audio"].get("url")
+                                elif isinstance(result["audio"], list):
+                                    audio_url = result["audio"][0].get("url")
+
+                            if not audio_url and "audio_url" in result:
+                                audio_url = result["audio_url"]
+
+                            if not audio_url and "url" in result:
+                                audio_url = result["url"]
+
+                            if not audio_url and "audios" in result:
+                                audio_url = result["audios"][0].get("url")
+
+                            if not audio_url and "output" in result:
+                                output = result["output"]
+                                if isinstance(output, dict):
+                                    if "audio" in output:
+                                        audio_url = output["audio"].get("url")
+
+                            if audio_url:
+                                logging.info(f"🎧 SUCCESS [{model['name']}]: {audio_url}")
+                                return audio_url
+
+                            raise Exception("No audio URL found")
+
+                        # ===== FAILED =====
+                        if status == "FAILED":
+                            logging.warning(f"❌ FAILED MODEL: {model['name']}")
+                            break
 
             except Exception as e:
-                logging.error(f"Status request error: {e}")
+                last_error = e
+                logging.error(f"❌ MODEL ERROR [{model['name']}]: {e}")
                 continue
 
-            status = status_data.get("status")
-            logging.info(f"🎵 STATUS RAW: {status_data}")
+        logging.warning(f"🔁 RETRY CYCLE {attempt+1}/3")
 
-            if status != last_status:
-                logging.info(f"🎵 Music generation status: {status}")
-                last_status = status
-
-            # ===== 🔥 ПРОБУЕМ ДОСТАТЬ РЕЗУЛЬТАТ ДАЖЕ РАНЬШЕ =====
-            try:
-                async with session.get(result_url, headers=headers) as r:
-                    if r.status in (200, 202):
-                        result_text = await r.text()
-                        result = json.loads(result_text)
-
-                        if "audio" in result or "audios" in result:
-                            logging.info("🎯 RESULT READY (early fetch)")
-                            status = "COMPLETED"
-                        else:
-                            result = None
-                    else:
-                        result = None
-            except:
-                result = None
-
-            # ===== УСПЕХ =====
-            if status == "COMPLETED" and result:
-                logging.info(f"🎵 FAL RAW RESULT: {result}")
-
-                audio_url = None
-
-                if "audio" in result:
-                    if isinstance(result["audio"], dict):
-                        audio_url = result["audio"].get("url")
-                    elif isinstance(result["audio"], list) and result["audio"]:
-                        audio_url = result["audio"][0].get("url")
-
-                if not audio_url and "audios" in result:
-                    audio_url = result["audios"][0].get("url")
-
-                if not audio_url and "audio_url" in result:
-                    audio_url = result["audio_url"]
-
-                if not audio_url and "url" in result:
-                    audio_url = result["url"]
-
-                if not audio_url and "output" in result:
-                    output = result["output"]
-
-                    if isinstance(output, dict):
-                        if "audio" in output:
-                            if isinstance(output["audio"], dict):
-                                audio_url = output["audio"].get("url")
-                            elif isinstance(output["audio"], list) and output["audio"]:
-                                audio_url = output["audio"][0].get("url")
-
-                        elif "audios" in output:
-                            audio_url = output["audios"][0].get("url")
-
-                if not audio_url:
-                    logging.error(f"❌ NO AUDIO URL: {result}")
-                    raise Exception(f"Fal returned no audio | result={result}")
-
-                logging.info(f"🎧 FAL Audio URL: {audio_url}")
-                return audio_url
-
-            # ===== ОШИБКА =====
-            if status == "FAILED":
-                logging.error(f"❌ FAL FAILED: {status_data}")
-                raise Exception(f"Fal music generation failed: {status_data}")
+    raise Exception(f"All models failed. Last error: {last_error}")
 
 
 
