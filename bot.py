@@ -2746,7 +2746,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 )
 
         else:
-            await query.message.reply_text("❌ Вы не подписаны на канал")
+            await message.reply_text(await t(user_id, "not_subscribed"))
         return
 
     # ================= Обработка кнопок =================
