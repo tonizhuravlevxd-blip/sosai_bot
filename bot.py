@@ -775,8 +775,9 @@ import logging
 
 async def fal_music_generate(prompt, duration=30, max_wait=300):
     """
-    Parallel music generator (race mode):
-    Sonauto vs Ace-Step → first finished wins
+    Priority mode:
+    1. Sonauto (main, waits, monitors queue)
+    2. Ace-Step (fallback if stuck/slow)
     """
 
     prompt = clean_prompt(prompt)
@@ -786,41 +787,32 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         "Content-Type": "application/json"
     }
 
-    models = [
-        {
-            "name": "sonauto",
-            "url": "https://queue.fal.run/sonauto/v2/text-to-music",
-            "payload": {
-                "prompt": prompt,
-                "duration": duration,
-                "output_format": "mp3"
-            }
-        },
-        {
-            "name": "ace-step",
-            "url": "https://queue.fal.run/fal-ai/ace-step/prompt-to-audio",
-            "payload": {
-                "prompt": prompt,
-                "duration": duration,
-                "output_format": "mp3"
-            }
+    sonauto = {
+        "name": "sonauto",
+        "url": "https://queue.fal.run/sonauto/v2/text-to-music",
+        "payload": {
+            "prompt": prompt,
+            "duration": duration,
+            "output_format": "mp3"
         }
-    ]
+    }
 
-    async def run_model(model):
-        """
-        Runs single model until completion
-        """
+    ace = {
+        "name": "ace-step",
+        "url": "https://queue.fal.run/fal-ai/ace-step/prompt-to-audio",
+        "payload": {
+            "prompt": prompt,
+            "duration": duration,
+            "output_format": "mp3"
+        }
+    }
+
+    async def run_model(model, detect_stuck=False):
         try:
             async with aiohttp.ClientSession() as session:
 
                 # ===== CREATE JOB =====
-                async with session.post(
-                    model["url"],
-                    json=model["payload"],
-                    headers=headers
-                ) as r:
-
+                async with session.post(model["url"], json=model["payload"], headers=headers) as r:
                     text = await r.text()
 
                     if r.status not in (200, 202):
@@ -836,10 +828,13 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
                 start_time = time.time()
 
+                # для детекта "залипания"
+                last_position = None
+                last_change_time = time.time()
+
                 while True:
                     await asyncio.sleep(2)
 
-                    # timeout per model
                     if time.time() - start_time > max_wait:
                         raise Exception(f"{model['name']} timeout")
 
@@ -850,10 +845,21 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                         status_data = json.loads(await r.text())
 
                     status = status_data.get("status")
+                    queue_pos = status_data.get("queue_position")
 
-                    logging.info(f"🎵 {model['name']} STATUS={status}")
+                    logging.info(f"🎵 {model['name']} STATUS={status} POS={queue_pos}")
 
-                    # ===== RESULT CHECK =====
+                    # ===== DETECT STUCK =====
+                    if detect_stuck:
+                        if queue_pos is not None:
+                            if queue_pos == last_position:
+                                if time.time() - last_change_time > 20:
+                                    raise Exception("QUEUE_STUCK")
+                            else:
+                                last_position = queue_pos
+                                last_change_time = time.time()
+
+                    # ===== RESULT =====
                     result = None
                     if result_url:
                         async with session.get(result_url, headers=headers) as r:
@@ -868,19 +874,17 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
                     if status == "COMPLETED" and result:
 
-                        audio_url = None
-
                         audio = result.get("audio")
+
                         if isinstance(audio, dict):
                             audio_url = audio.get("url")
                         elif isinstance(audio, list) and audio:
                             audio_url = audio[0].get("url")
-
-                        audio_url = (
-                            audio_url
-                            or result.get("audio_url")
-                            or result.get("url")
-                        )
+                        else:
+                            audio_url = (
+                                result.get("audio_url")
+                                or result.get("url")
+                            )
 
                         if audio_url:
                             return {
@@ -899,36 +903,49 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                 "error": str(e)
             }
 
-    # ================= PARALLEL EXECUTION =================
+    # ================= PRIORITY FLOW =================
 
-    tasks = [asyncio.create_task(run_model(m)) for m in models]
+    # 🚀 1. запускаем Sona
+    sona_task = asyncio.create_task(run_model(sonauto, detect_stuck=True))
+
+    try:
+        # ⏳ даем ей шанс
+        done, pending = await asyncio.wait(
+            [sona_task],
+            timeout=25
+        )
+
+        if done:
+            result = list(done)[0].result()
+            if "url" in result:
+                logging.info(f"🎧 SONA WIN: {result['url']}")
+                return result["url"]
+
+    except Exception as e:
+        if "QUEUE_STUCK" not in str(e):
+            logging.warning(f"Sona issue: {e}")
+
+    # 🔄 2. fallback
+    logging.info("⚡ Switching to ACE fallback")
+
+    ace_task = asyncio.create_task(run_model(ace))
 
     done, pending = await asyncio.wait(
-        tasks,
-        return_when=asyncio.FIRST_COMPLETED,
-        timeout=max_wait
+        [sona_task, ace_task],
+        return_when=asyncio.FIRST_COMPLETED
     )
 
-    # cancel losers immediately
+    # ❌ отменяем оставшиеся
     for task in pending:
         task.cancel()
 
-    # get winner
-    results = []
-
     for task in done:
-        try:
-            result = task.result()
-            results.append(result)
-        except Exception as e:
-            logging.error(f"❌ TASK ERROR: {e}")
-
-    for result in results:
-        if isinstance(result, dict) and "url" in result:
+        result = task.result()
+        if "url" in result:
             logging.info(f"🎧 WINNER: {result['model']} -> {result['url']}")
             return result["url"]
 
-    raise Exception(f"All models failed: {results}")
+    raise Exception("All models failed")
 
 
 # ================= FAL VIDEO GENERATOR =================
