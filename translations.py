@@ -28,18 +28,6 @@ TEXTS = {
         )
     },
 
-    # ================= PROFILE =================
-    "profile_title": {"ru": "Профиль", "en": "Profile"},
-    "profile_id": {"ru": "ID", "en": "ID"},
-    "profile_username": {"ru": "Username", "en": "Username"},
-    "images_left": {"ru": "Изображений осталось", "en": "Images left"},
-    "videos_left": {"ru": "Видео осталось", "en": "Videos left"},
-    "music_left": {"ru": "Музыки осталось", "en": "Music left"},
-    "paid_video": {"ru": "Куплено видео", "en": "Purchased video"},
-    "paid_music": {"ru": "Куплено музыки", "en": "Purchased music"},
-    "bonus": {"ru": "Бонусы", "en": "Bonuses"},
-    "referrals": {"ru": "Рефералов", "en": "Referrals"},
-    "status": {"ru": "Статус", "en": "Status"},
 
     # ================= ERRORS =================
     "error_generate": {
