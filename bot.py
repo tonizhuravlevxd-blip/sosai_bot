@@ -311,6 +311,10 @@ async def init_db():
             paid_music INTEGER DEFAULT 0,
 
             -- 🔥 НОВОЕ
+            premium_images INTEGER DEFAULT 0,
+            premium_videos INTEGER DEFAULT 0,
+            premium_music INTEGER DEFAULT 0,
+
             created_at BIGINT DEFAULT 0,
             last_active BIGINT DEFAULT 0,
             ref_rewarded INTEGER DEFAULT 0
@@ -345,13 +349,26 @@ async def init_db():
         await conn.execute("""
         ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active BIGINT DEFAULT 0
         """)
-            
+
         await conn.execute("""
         ALTER TABLE users ADD COLUMN IF NOT EXISTS chat_count INTEGER DEFAULT 0
         """)
 
         await conn.execute("""
         ALTER TABLE users ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'ru'
+        """)
+
+        # 🔥 ДОБАВЛЯЕМ PREMIUM ЛИМИТЫ (SAFE)
+        await conn.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_images INTEGER DEFAULT 0
+        """)
+
+        await conn.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_videos INTEGER DEFAULT 0
+        """)
+
+        await conn.execute("""
+        ALTER TABLE users ADD COLUMN IF NOT EXISTS premium_music INTEGER DEFAULT 0
         """)
 
         # 🔥 ИНДЕКСЫ (очень важно для нагрузки)
@@ -370,7 +387,6 @@ async def init_db():
             created_at BIGINT
         )
         """)
-
 
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -2571,14 +2587,29 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             if payload == "premium_stars":
 
-                premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+                now = int(time.time())
+                add_time = 30 * 24 * 60 * 60
 
                 async with db_pool.acquire() as conn:
+
+                    user = await conn.fetchrow(
+                        "SELECT premium_until FROM users WHERE user_id=$1",
+                        user_id
+                    )
+
+                    if user and user["premium_until"] and user["premium_until"] > now:
+                        premium_until = user["premium_until"] + add_time
+                    else:
+                        premium_until = now + add_time
+
                     await conn.execute(
                         """
                         UPDATE users 
                         SET premium = 1,
-                            premium_until = $1
+                            premium_until = $1,
+                            premium_images = premium_images + 20,
+                            premium_videos = premium_videos + 5,
+                            premium_music = premium_music + 3
                         WHERE user_id = $2
                         """,
                         premium_until, user_id
@@ -2597,14 +2628,29 @@ async def successful_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
             if payload == "premium_donut":
 
-                premium_until = int(time.time()) + (30 * 24 * 60 * 60)
+                now = int(time.time())
+                add_time = 30 * 24 * 60 * 60
 
                 async with db_pool.acquire() as conn:
+
+                    user = await conn.fetchrow(
+                        "SELECT premium_until FROM users WHERE user_id=$1",
+                        user_id
+                    )
+
+                    if user and user["premium_until"] and user["premium_until"] > now:
+                        premium_until = user["premium_until"] + add_time
+                    else:
+                        premium_until = now + add_time
+
                     await conn.execute(
                         """
                         UPDATE users 
                         SET premium = 1,
-                            premium_until = $1
+                            premium_until = $1,
+                            premium_images = premium_images + 20,
+                            premium_videos = premium_videos + 5,
+                            premium_music = premium_music + 3
                         WHERE user_id = $2
                         """,
                         premium_until, user_id
@@ -3570,9 +3616,13 @@ async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ===== РАСЧЁТ ЛИМИТОВ =====
     if premium_active:
-        remaining_images = PREMIUM_IMAGE_LIMIT - used_images
-        remaining_videos = PREMIUM_VIDEO_LIMIT - used_videos
-        remaining_music = PREMIUM_MUSIC_LIMIT - used_music
+        premium_images = user.get("premium_images", 0)
+        premium_videos = user.get("premium_videos", 0)
+        premium_music = user.get("premium_music", 0)
+
+        remaining_images = premium_images - used_images
+        remaining_videos = premium_videos - used_videos
+        remaining_music = premium_music - used_music
     else:
         remaining_images = FREE_LIMIT + bonus - used_images
         remaining_videos = FREE_VIDEO_LIMIT - used_videos
