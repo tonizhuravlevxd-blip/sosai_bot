@@ -2329,9 +2329,6 @@ async def handle_generation_job(job):
                         context.user_data.pop("input_video_bytes", None)
                         context.user_data.pop("input_images", None)
 
-                        # 🔥 чистим кэш генерации
-                        context.user_data.pop("last_images", None)
-                        context.user_data.pop("last_prompt", None)
 
                         # 🔥 чистим временные флаги
                         context.user_data.pop("pending_video", None)
@@ -3017,6 +3014,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
         mode = context.user_data.get("mode", "image")
+
+        # 🔥 ДОБАВЛЕНО: защита от пустой задачи
+        if not prompt and not images:
+            await query.message.reply_text("⚠️ Нет данных для повторной генерации")
+            return
 
         if user_id in active_generations:
             await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
