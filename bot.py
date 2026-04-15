@@ -812,6 +812,13 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
     prompt = clean_prompt(prompt)
 
+    # 🔥 FIX: защита от короткого prompt (иначе 422)
+    if not prompt or len(prompt) < 15:
+        prompt = "Сделай популярную песню с вокалом, куплетами и припевом"
+
+    # 🔥 усиливаем prompt для стабильной генерации
+    prompt = prompt + ", full song with vocals, chorus, verses, high quality"
+
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
@@ -832,6 +839,13 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         "url": "https://queue.fal.run/fal-ai/minimax-music/v2.6",
         "payload": {
             "prompt": prompt,
+            "lyrics": f"""
+Куплет:
+{prompt}
+
+Припев:
+Это хит, запоминающийся мотив, красивая мелодия
+""",
             "duration": duration,
             "output_format": "mp3"
         }
