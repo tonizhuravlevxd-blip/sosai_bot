@@ -1710,9 +1710,20 @@ async def handle_generation_job(job):
                     upload_task.cancel()
                     animation_task.cancel()
 
+                    try:
+                        await upload_task
+                    except:
+                        pass
+
+                    try:
+                        await animation_task
+                    except:
+                        pass
+
                 try:
-                    await status.delete()
-                except:
+                    if status and getattr(status, "message_id", None):
+                        await status.delete()
+                except Exception:
                     pass
 
                 keyboard = InlineKeyboardMarkup([
