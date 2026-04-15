@@ -803,7 +803,7 @@ import json
 import logging
 
 
-async def fal_music_generate(prompt, duration=30, max_wait=300):
+async def fal_music_generate(prompt, duration=30, max_wait=300): 
     """
     Priority mode:
     1. Sonauto (main, waits, monitors queue)
@@ -812,20 +812,15 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
     prompt = clean_prompt(prompt)
 
-    # 🔥 Усиливаем промпт (но не ломаем пользовательский смысл)
-    enhanced_prompt = (
-        f"{prompt}\n"
-        "full song, vocals, chorus, verses, high quality, catchy melody"
-    )
+    # 🔥 FIX: защита от короткого prompt (иначе 422)
+    if not prompt or len(prompt) < 15:
+        prompt = "Сделай популярную песню с вокалом"
 
-    # 🔥 Генерируем lyrics на основе prompt (чтобы не было пусто)
-    lyrics = f"""
-Куплет:
-{prompt}
+    # 🔥 усиливаем prompt для стабильной генерации
+    enhanced_prompt = prompt + ", full song with vocals, high quality, catchy melody"
 
-Припев:
-{prompt} — это хит, запоминающийся мотив
-"""
+    # 🔥 lyrics = просто пользовательский текст + усиление (без куплетов)
+    lyrics = enhanced_prompt
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -847,7 +842,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         "url": "https://queue.fal.run/fal-ai/minimax-music/v2.6",
         "payload": {
             "prompt": enhanced_prompt,
-            "lyrics": lyrics,  # ✅ теперь не пустой
+            "lyrics": lyrics,
             "duration": duration,
             "output_format": "mp3"
         }
