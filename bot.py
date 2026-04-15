@@ -812,12 +812,20 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
     prompt = clean_prompt(prompt)
 
-    # 🔥 FIX: защита от короткого prompt (иначе 422)
-    if not prompt or len(prompt) < 15:
-        prompt = "Сделай популярную песню с вокалом, куплетами и припевом"
+    # 🔥 Усиливаем промпт (но не ломаем пользовательский смысл)
+    enhanced_prompt = (
+        f"{prompt}\n"
+        "full song, vocals, chorus, verses, high quality, catchy melody"
+    )
 
-    # 🔥 усиливаем prompt для стабильной генерации
-    prompt = prompt + ", full song with vocals, chorus, verses, high quality"
+    # 🔥 Генерируем lyrics на основе prompt (чтобы не было пусто)
+    lyrics = f"""
+Куплет:
+{prompt}
+
+Припев:
+{prompt} — это хит, запоминающийся мотив
+"""
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -828,7 +836,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         "name": "sonauto",
         "url": "https://queue.fal.run/sonauto/v2/text-to-music",
         "payload": {
-            "prompt": prompt,
+            "prompt": enhanced_prompt,
             "duration": duration,
             "output_format": "mp3"
         }
@@ -838,14 +846,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         "name": "ace-step",
         "url": "https://queue.fal.run/fal-ai/minimax-music/v2.6",
         "payload": {
-            "prompt": prompt,
-            "lyrics": f"""
-Куплет:
-{prompt}
-
-Припев:
-Это хит, запоминающийся мотив, красивая мелодия
-""",
+            "prompt": enhanced_prompt,
+            "lyrics": lyrics,  # ✅ теперь не пустой
             "duration": duration,
             "output_format": "mp3"
         }
