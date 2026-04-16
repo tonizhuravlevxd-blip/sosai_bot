@@ -1005,11 +1005,10 @@ async def fal_video_generate(prompt, images=None):
         "Content-Type": "application/json"
     }
 
-# 🔥 ДОБАВЛЕНО: Таймаут на видео
+    # 🔥 ДОБАВЛЕНО: Таймаут на видео
     timeout = aiohttp.ClientTimeout(total=600)
-    async with aiohttp.ClientSession(timeout=timeout) as session
-    
-    async with aiohttp.ClientSession() as session:
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
 
         image_urls = []
 
@@ -1028,6 +1027,7 @@ async def fal_video_generate(prompt, images=None):
             "duration": 4,
             "resolution": "720p"
         }
+
         logging.info(f"🎬 Video generation started for prompt: {prompt}")
 
         # если есть картинка — используем как стартовый кадр
