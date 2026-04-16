@@ -730,7 +730,10 @@ async def fal_generate(model, prompt, images=None):
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
     }
-
+    
+# 🔥 ДОБАВЛЕНО: Глобальный таймаут (например, 5 минут максимум на попытку)
+    timeout = aiohttp.ClientTimeout(total=300) 
+    async with aiohttp.ClientSession(timeout=timeout) as session:
     async with aiohttp.ClientSession() as session:
 
         image_urls = []
@@ -1007,6 +1010,10 @@ async def fal_video_generate(prompt, images=None):
         "Content-Type": "application/json"
     }
 
+# 🔥 ДОБАВЛЕНО: Таймаут на видео
+    timeout = aiohttp.ClientTimeout(total=600)
+    async with aiohttp.ClientSession(timeout=timeout) as session
+    
     async with aiohttp.ClientSession() as session:
 
         image_urls = []
