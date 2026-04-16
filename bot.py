@@ -730,22 +730,18 @@ async def fal_generate(model, prompt, images=None):
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
     }
-    
-# 🔥 ДОБАВЛЕНО: Глобальный таймаут (например, 5 минут максимум на попытку)
-    timeout = aiohttp.ClientTimeout(total=300) 
+
+    # 🔥 ДОБАВЛЕНО: Глобальный таймаут (например, 5 минут максимум на попытку)
+    timeout = aiohttp.ClientTimeout(total=300)
+
     async with aiohttp.ClientSession(timeout=timeout) as session:
-    async with aiohttp.ClientSession() as session:
 
         image_urls = []
 
         if images:
-
             for img in images:
-
                 img_base64 = base64.b64encode(img).decode()
-
                 data_uri = f"data:image/jpeg;base64,{img_base64}"
-
                 image_urls.append(data_uri)
 
         payload = {
@@ -754,7 +750,6 @@ async def fal_generate(model, prompt, images=None):
             "output_format": "png",
             "safety_tolerance": 5
         }
-
         if image_urls:
             payload["image_urls"] = image_urls
 
