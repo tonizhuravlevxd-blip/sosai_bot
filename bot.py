@@ -1666,7 +1666,6 @@ async def _handle_generation_inner(job):
                                     reply_markup=keyboard
                                 )
                                 return
-                                        
 
             model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
 
@@ -1777,66 +1776,66 @@ async def _handle_generation_inner(job):
                     except:
                         pass
 
-                try:
-                    if status and getattr(status, "message_id", None):
-                        await status.delete()
-                except Exception:
-                    pass
+                            try:
+                                if status and getattr(status, "message_id", None):
+                                    await status.delete()
+                            except Exception:
+                                pass
 
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-                        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
-                    ],
-                    [
-                        InlineKeyboardButton("❌ Закончить", callback_data="finish")
-                    ]
-                ])
+                            keyboard = InlineKeyboardMarkup([
+                                [
+                                    InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                                    InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
+                                ],
+                                [
+                                    InlineKeyboardButton("❌ Закончить", callback_data="finish")
+                                ]
+                            ])
 
-                await msg.reply_photo(photo=result, reply_markup=keyboard)
+                            await msg.reply_photo(photo=result, reply_markup=keyboard)
 
-                # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ГЕНЕРАЦИИ
-                async with db_pool.acquire() as conn:
-                    await conn.execute(
-                        """
-                        UPDATE users
-                        SET image_count = image_count + 1
-                        WHERE user_id=$1
-                        """,
-                        user_id
-                    )
+                            # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ГЕНЕРАЦИИ
+                            async with db_pool.acquire() as conn:
+                                await conn.execute(
+                                    """
+                                    UPDATE users
+                                    SET image_count = image_count + 1
+                                    WHERE user_id=$1
+                                    """,
+                                    user_id
+                                )
 
-                USER_CACHE.pop(user_id, None)
-                                
-                async with db_pool.acquire() as conn:
+                            USER_CACHE.pop(user_id, None)
 
-                    ref_data = await conn.fetchrow(
-                        "SELECT ref_by, ref_rewarded FROM users WHERE user_id=$1",
-                        user_id
-                    )
+                            async with db_pool.acquire() as conn:
 
-                    if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
+                                ref_data = await conn.fetchrow(
+                                    "SELECT ref_by, ref_rewarded FROM users WHERE user_id=$1",
+                                    user_id
+                                )
 
-                        await conn.execute(
-                            """
-                            UPDATE users
-                            SET ref_rewarded = 1
-                            WHERE user_id=$1
-                            """,
-                            user_id
-                        )
+                                if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
 
-                        await conn.execute(
-                            """
-                            UPDATE users
-                            SET bonus_images = bonus_images + 1
-                            WHERE user_id=$1
-                            """,
-                            ref_data["ref_by"]
-                        )
+                                    await conn.execute(
+                                        """
+                                        UPDATE users
+                                        SET ref_rewarded = 1
+                                        WHERE user_id=$1
+                                        """,
+                                        user_id
+                                    )
 
-                context.user_data["last_prompt"] = prompt
-                context.user_data["last_images"] = images_local
+                                    await conn.execute(
+                                        """
+                                        UPDATE users
+                                        SET bonus_images = bonus_images + 1
+                                        WHERE user_id=$1
+                                        """,
+                                        ref_data["ref_by"]
+                                    )
+
+                            context.user_data["last_prompt"] = prompt
+                            context.user_data["last_images"] = images_local
 
             # ================= VIDEO / CARTOON =================
             elif mode in ["video", "cartoon"]:
