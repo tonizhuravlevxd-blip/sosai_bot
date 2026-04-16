@@ -1480,7 +1480,7 @@ async def handle_generation_job(job):
         logging.warning(f"⚠ ПУСТАЯ ЗАДАЧА user={user_id} mode={mode}")
         return
 
-    # ===== 🔥 НОВЫЙ LOCK ВМЕСТО active_generations =====
+    # ===== 🔥 LOCK =====
     lock = user_locks.setdefault(user_id, asyncio.Lock())
 
     if lock.locked():
@@ -1490,132 +1490,187 @@ async def handle_generation_job(job):
 
     async with lock:
         try:
-            # ===== СЕМАФОРЫ =====
-            sem = semaphore_image
-            if mode in ["video", "cartoon", "remix"]:
-                sem = semaphore_video
-            elif mode == "music":
-                sem = semaphore_music
 
-            async with GLOBAL_RATE_LIMIT:
-                async with GLOBAL_SEMAPHORE:
-                    async with sem:
+            # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ НА ВСЮ ЗАДАЧУ =====
+            await asyncio.wait_for(
+                _handle_generation_inner(job),
+                timeout=600  # 10 минут максимум
+            )
 
-                        # ===== 🔥 АТОМАРНЫЕ ЛИМИТЫ =====
-                        async with db_pool.acquire() as conn:
+        except asyncio.TimeoutError:
+            logging.error(f"⏰ TIMEOUT user={user_id} mode={mode}")
 
-                            user = await conn.fetchrow(
-                                "SELECT * FROM users WHERE user_id=$1",
-                                user_id
-                            )
+            try:
+                if status:
+                    await status.edit_text("⏰ Генерация заняла слишком много времени и была остановлена")
+            except:
+                pass
 
-                            if not user:
-                                return
+        except Exception as e:
+            logging.error(f"❌ HANDLE ERROR: {e}")
 
-                            logging.info(f"USER DATA: {dict(user)}")
+            try:
+                if msg:
+                    await msg.reply_text("⚠️ Ошибка генерации. Попробуйте позже.")
+            except:
+                pass
 
-                            await reset_week_if_needed(user)
-                            premium = is_premium(user)
+        finally:
+            # 🔥 ГАРАНТИЯ РАЗЛОКА
+            try:
+                unlock_user_generation(user_id)
+            except:
+                pass
 
-                            # ===== IMAGE =====
-                            if mode == "image":
+            active_generations.discard(user_id)
 
-                                if not premium:
-                                    free_limit = 2
 
-                                    if user["image_count"] >= free_limit:
+# ================= ВНУТРЕННЯЯ ЛОГИКА =================
 
-                                        # ✅ сначала проверяем, нажал ли пользователь кнопку
-                                        if not context.user_data.get("sub_checked"):
+async def _handle_generation_inner(job):
 
-                                            subscribed = await is_user_subscribed(context.bot, user_id)
+    update = job["update"]
+    context = job["context"]
+    prompt = job.get("prompt")
+    size = job.get("size", "1024x1024")
+    model = job.get("model", "banana2")
+    images = job.get("images", [])
+    user_id = job["user_id"]
+    status = job.get("status")
+    mode = job.get("mode", "image")
 
-                                            if not subscribed:
-                                                await msg.reply_text(
-                                                    "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
-                                                    "Подпишитесь на канал и нажмите проверить 👇",
-                                                    reply_markup=get_subscribe_keyboard()
-                                                )
-                                                return
+    msg = getattr(update, "message", None)
+    if not msg and getattr(update, "callback_query", None):
+        msg = update.callback_query.message
 
-                                            # ✅ если реально подписан — сохраняем
-                                            context.user_data["sub_checked"] = True
+    # ===== СЕМАФОРЫ =====
+    sem = semaphore_image
+    if mode in ["video", "cartoon", "remix"]:
+        sem = semaphore_video
+    elif mode == "music":
+        sem = semaphore_music
 
-                                        # ✅ даём расширенный лимит
-                                        limit = FREE_LIMIT + user.get("bonus_images", 0)
-                                    else:
-                                        limit = free_limit
-                                else:
-                                    limit = PREMIUM_IMAGE_LIMIT
+    async with GLOBAL_RATE_LIMIT:
+        async with GLOBAL_SEMAPHORE:
+            async with sem:
 
-                                # ✅ ТОЛЬКО ПРОВЕРКА (без списания)
-                                if user["image_count"] >= limit:
-                                    await msg.reply_text("⚠️ Лимит изображений исчерпан")
-                                    return
+                # ===== 🔥 DB =====
+                async with db_pool.acquire() as conn:
 
-                            # ================= VIDEO / CARTOON =================
-                            elif mode in ["video", "cartoon", "remix"]:
+                    user = await conn.fetchrow(
+                        "SELECT * FROM users WHERE user_id=$1",
+                        user_id
+                    )
 
-                                if not premium:
+                    if not user:
+                        return
+
+                    logging.info(f"USER DATA: {dict(user)}")
+
+                    await reset_week_if_needed(user)
+                    premium = is_premium(user)
+
+                    # ===== IMAGE =====
+                    if mode == "image":
+
+                        if not premium:
+                            free_limit = 2
+
+                            if user["image_count"] >= free_limit:
+
+                                if not context.user_data.get("sub_checked"):
+
                                     subscribed = await is_user_subscribed(context.bot, user_id)
 
-                                    # ===== ЖЁСТКАЯ БЛОКИРОВКА ДО ПРОВЕРКИ =====
-                                    if not context.user_data.get("sub_checked"):
-
-                                        context.user_data["pending_video"] = True
-
+                                    if not subscribed:
                                         await msg.reply_text(
-                                            "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
-                                            "Даже если вы подписаны — нажмите кнопку для проверки",
+                                            "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
+                                            "Подпишитесь на канал и нажмите проверить 👇",
                                             reply_markup=get_subscribe_keyboard()
                                         )
                                         return
 
-                                logging.info(f"🎬 START VIDEO FLOW user={user_id}")
+                                    context.user_data["sub_checked"] = True
 
-                                user = await conn.fetchrow(
-                                    "SELECT * FROM users WHERE user_id=$1",
-                                    user_id
+                                limit = FREE_LIMIT + user.get("bonus_images", 0)
+                            else:
+                                limit = free_limit
+                        else:
+                            limit = PREMIUM_IMAGE_LIMIT
+
+                        if user["image_count"] >= limit:
+                            await msg.reply_text("⚠️ Лимит изображений исчерпан")
+                            return
+
+                        # ===== 🔥 ТВОЯ ГЕНЕРАЦИЯ =====
+                        result = await asyncio.wait_for(
+                            fal_image_generate(prompt, images),
+                            timeout=300
+                        )
+
+                    # ================= VIDEO / CARTOON =================
+                    elif mode in ["video", "cartoon", "remix"]:
+
+                        if not premium:
+                            subscribed = await is_user_subscribed(context.bot, user_id)
+
+                            # ===== ЖЁСТКАЯ БЛОКИРОВКА ДО ПРОВЕРКИ =====
+                            if not context.user_data.get("sub_checked"):
+
+                                context.user_data["pending_video"] = True
+
+                                await msg.reply_text(
+                                    "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
+                                    "Даже если вы подписаны — нажмите кнопку для проверки",
+                                    reply_markup=get_subscribe_keyboard()
                                 )
+                                return
 
-                                premium = is_premium(user)
+                        logging.info(f"🎬 START VIDEO FLOW user={user_id}")
 
-                                logging.info(f"USER BEFORE CHECK: {dict(user)}")
+                        user = await conn.fetchrow(
+                            "SELECT * FROM users WHERE user_id=$1",
+                            user_id
+                        )
 
-                                paid_video = user.get("paid_video") or 0
-                                video_count = user.get("video_count") or 0
+                        premium = is_premium(user)
 
-                                logging.info(
-                                    f"🎯 DECISION user={user_id} "
-                                    f"paid={paid_video} video_count={video_count} premium={premium}"
+                        logging.info(f"USER BEFORE CHECK: {dict(user)}")
+
+                        paid_video = user.get("paid_video") or 0
+                        video_count = user.get("video_count") or 0
+
+                        logging.info(
+                            f"🎯 DECISION user={user_id} "
+                            f"paid={paid_video} video_count={video_count} premium={premium}"
+                        )
+
+                        # ===== ТОЛЬКО ПРОВЕРКА (БЕЗ СПИСАНИЯ) =====
+
+                        if paid_video > 0:
+                            logging.info(f"💰 PAID VIDEO AVAILABLE user={user_id}")
+
+                        elif premium:
+                            logging.info(f"🍩 USING PREMIUM LIMIT user={user_id}")
+
+                            if video_count >= PREMIUM_VIDEO_LIMIT:
+                                await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
+                                return
+
+                        else:
+                            logging.info(f"🆓 USING FREE LIMIT user={user_id}")
+
+                            if video_count >= FREE_VIDEO_LIMIT:
+                                keyboard = InlineKeyboardMarkup([
+                                    [InlineKeyboardButton("💳 Купить 1 видео", callback_data="buy_video")],
+                                    [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                ])
+
+                                await msg.reply_text(
+                                    "🎬 Лимит видео исчерпан",
+                                    reply_markup=keyboard
                                 )
-
-                                # ===== ТОЛЬКО ПРОВЕРКА (БЕЗ СПИСАНИЯ) =====
-
-                                if paid_video > 0:
-                                    logging.info(f"💰 PAID VIDEO AVAILABLE user={user_id}")
-
-                                elif premium:
-                                    logging.info(f"🍩 USING PREMIUM LIMIT user={user_id}")
-
-                                    if video_count >= PREMIUM_VIDEO_LIMIT:
-                                        await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
-                                        return
-
-                                else:
-                                    logging.info(f"🆓 USING FREE LIMIT user={user_id}")
-
-                                    if video_count >= FREE_VIDEO_LIMIT:
-                                        keyboard = InlineKeyboardMarkup([
-                                            [InlineKeyboardButton("💳 Купить 1 видео", callback_data="buy_video")],
-                                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                        ])
-
-                                        await msg.reply_text(
-                                            "🎬 Лимит видео исчерпан",
-                                            reply_markup=keyboard
-                                        )
-                                        return
+                                return
                                         
 
             model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
