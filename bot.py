@@ -2364,48 +2364,48 @@ async def _handle_generation_inner(job):
                         except:
                             pass
 
-finally:
-    try:
+                finally:
+                    try:
 
-        # ================= 🔥 LOCK HEARTBEAT =================
-        try:
-            lock = user_locks.get(user_id)
-            if lock:
-                lock.last_used = time.time()
-        except Exception as e:
-            logging.error(f"LOCK HEARTBEAT ERROR: {e}")
+                        # ================= 🧹 USER DATA CLEAN =================
+                        try:
+                            if context and hasattr(context, "user_data"):
 
-        # ================= 🧹 USER DATA CLEAN =================
-        try:
-            if context and hasattr(context, "user_data"):
+                                # 🔥 удаляем ТЯЖЕЛЫЕ объекты
+                                context.user_data.pop("input_video", None)
+                                context.user_data.pop("input_video_bytes", None)
+                                context.user_data.pop("input_images", None)
 
-                # 🔥 удаляем ТЯЖЕЛЫЕ объекты
-                context.user_data.pop("input_video", None)
-                context.user_data.pop("input_video_bytes", None)
-                context.user_data.pop("input_images", None)
+                                # 🔥 чистим кэш генерации
+                                context.user_data.pop("last_images", None)
+                                context.user_data.pop("last_prompt", None)
 
-                # 🔥 чистим кэш генерации
-                context.user_data.pop("last_images", None)
-                context.user_data.pop("last_prompt", None)
+                                # 🔥 чистим временные флаги
+                                context.user_data.pop("pending_video", None)
+                                context.user_data.pop("input_video_ready", None)
 
-                # 🔥 чистим временные флаги
-                context.user_data.pop("pending_video", None)
-                context.user_data.pop("input_video_ready", None)
+                        except Exception as e:
+                            logging.error(f"USER_DATA CLEAN ERROR: {e}")
 
-        except Exception as e:
-            logging.error(f"USER_DATA CLEAN ERROR: {e}")
+                        # ================= 🧠 GC =================
+                        try:
+                            import gc
+                            gc.collect()
+                        except:
+                            pass
 
-        # ================= 🧠 GC =================
-        try:
-            import gc
-            gc.collect()
-        except:
-            pass
+                        # ================= 🔥 UPDATE LOCK ACTIVITY =================
+                        try:
+                            lock = user_locks.get(user_id)
+                            if lock:
+                                lock.last_used = time.time()
+                        except Exception as e:
+                            logging.error(f"LOCK UPDATE ERROR: {e}")
 
-        logging.info(f"🧹 CLEANUP user {user_id}")
+                        logging.info(f"🧹 CLEANUP user {user_id}")
 
-    except Exception as e:
-        logging.error(f"FINAL CLEANUP ERROR: {e}")
+                    except Exception as e:
+                        logging.error(f"FINAL CLEANUP ERROR: {e}")
 # ================== WORKERS ==================
 async def image_worker():
     while True:
