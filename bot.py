@@ -2064,7 +2064,6 @@ async def _handle_generation_inner(job):
                         video_url = None
 
                         try:
-
                             # ================= REQUEST =================
                             video_b64 = base64.b64encode(video_bytes).decode("utf-8")
                             video_url = f"data:video/mp4;base64,{video_b64}"
@@ -2096,102 +2095,102 @@ async def _handle_generation_inner(job):
                                     if not request_id:
                                         raise Exception(f"No request_id: {data}")
 
-                        # ================= POLL =================
-                        status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
-                        result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
+                            # ================= POLL =================
+                            status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
+                            result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
 
-                        async with aiohttp.ClientSession() as session:
+                            async with aiohttp.ClientSession() as session:
 
-                            for _ in range(300):
+                                for _ in range(300):
 
-                                async with session.get(status_url) as s:
+                                    async with session.get(status_url) as s:
 
-                                    status_json = await s.json()
-                                    state = status_json.get("status")
+                                        status_json = await s.json()
+                                        state = status_json.get("status")
 
-                                    if state == "COMPLETED":
+                                        if state == "COMPLETED":
 
-                                        async with session.get(result_url) as r:
-                                            result = await r.json()
+                                            async with session.get(result_url) as r:
+                                                result = await r.json()
 
-                                            video_file_url = result.get("video", {}).get("url")
+                                                video_file_url = result.get("video", {}).get("url")
 
-                                            if not video_file_url:
-                                                raise Exception(f"Bad result: {result}")
+                                                if not video_file_url:
+                                                    raise Exception(f"Bad result: {result}")
 
-                                            async with session.get(video_file_url) as v:
-                                                result_bytes = await v.read()
+                                                async with session.get(video_file_url) as v:
+                                                    result_bytes = await v.read()
 
-                                        break
+                                            break
 
-                                    if state == "FAILED":
-                                        raise Exception(f"FAL failed: {status_json}")
+                                        if state == "FAILED":
+                                            raise Exception(f"FAL failed: {status_json}")
 
-                                await asyncio.sleep(2)
+                                    await asyncio.sleep(2)
 
-                    except Exception as e:
+                        except Exception as e:
 
-                        err = traceback.format_exc()
+                            err = traceback.format_exc()
+
+                            try:
+                                await safe_edit(status, f"⚠️ Ошибка remix:\n{e}")
+                            except:
+                                pass
+
+                            print("❌ REMIX ERROR:", err)
+                            return
+
+                        finally:
+                            progress_task.cancel()
+                            try:
+                                await progress_task
+                            except:
+                                pass
 
                         try:
-                            await safe_edit(status, f"⚠️ Ошибка remix:\n{e}")
+                            if status:
+                                await status.delete()
                         except:
                             pass
 
-                        print("❌ REMIX ERROR:", err)
-                        return
+                        if not result_bytes:
+                            if msg:
+                                await msg.reply_text("⚠️ FAL не вернул видео")
+                            return
 
-                    finally:
-                        progress_task.cancel()
-                        try:
-                            await progress_task
-                        except:
-                            pass
-
-                    try:
-                        if status:
-                            await status.delete()
-                    except:
-                        pass
-
-                    if not result_bytes:
-                        if msg:
-                            await msg.reply_text("⚠️ FAL не вернул видео")
-                        return
-
-                    result_file = io.BytesIO(result_bytes)
-                    result_file.name = "remix.mp4"
-                    result_file.seek(0)
-
-                    try:
-                        await context.bot.send_video(
-                            chat_id=update.effective_chat.id,
-                            video=result_file,
-                            supports_streaming=True,
-                            filename="video.mp4"
-                        )
-                    except:
+                        result_file = io.BytesIO(result_bytes)
+                        result_file.name = "remix.mp4"
                         result_file.seek(0)
-                        await context.bot.send_document(
-                            chat_id=update.effective_chat.id,
-                            document=result_file
-                        )
 
-                    # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
-                    async with db_pool.acquire() as conn:
-
-                        if paid_video > 0:
-                            await conn.execute(
-                                "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
-                                user_id
+                        try:
+                            await context.bot.send_video(
+                                chat_id=update.effective_chat.id,
+                                video=result_file,
+                                supports_streaming=True,
+                                filename="video.mp4"
                             )
-                        else:
-                            await conn.execute(
-                                "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
-                                user_id
+                        except:
+                            result_file.seek(0)
+                            await context.bot.send_document(
+                                chat_id=update.effective_chat.id,
+                                document=result_file
                             )
 
-                    USER_CACHE.pop(user_id, None)
+                        # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
+                        async with db_pool.acquire() as conn:
+
+                            if paid_video > 0:
+                                await conn.execute(
+                                    "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
+                                    user_id
+                                )
+                            else:
+                                await conn.execute(
+                                    "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                                    user_id
+                                )
+
+                        USER_CACHE.pop(user_id, None)
                 
                     # ================= MUSIC =================
                     elif mode == "music":
