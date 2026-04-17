@@ -2324,6 +2324,7 @@ async def _handle_generation_inner(job):
                                             user_id
                                         )
                                         USER_CACHE.pop(user_id, None)
+
                 except Exception as e:
                     logging.error(f"❌ HANDLE ERROR: {e}")
 
