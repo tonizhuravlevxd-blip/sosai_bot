@@ -1165,10 +1165,14 @@ user_locks = {}
 
 
 def get_user_lock(user_id):
-    if user_id not in user_locks:
-        user_locks[user_id] = asyncio.Lock()
-    return user_locks[user_id]
+    lock = user_locks.get(user_id)
 
+    if lock is None:
+        lock = asyncio.Lock()
+        lock.last_used = time.time()
+        user_locks[user_id] = lock
+
+    return lock
 # ================= HANDLE IMAGE (REMIX) =================
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -2518,8 +2522,16 @@ async def worker_watchdog():
             for user_id, lock in list(user_locks.items()):
                 try:
 
-                    # ===== LOCK STATUS =====
-                    if lock.locked():
+                    # ================= 🔥 SAFE LOCK CHECK =================
+                    is_locked = False
+                    try:
+                        is_locked = lock.locked()
+                    except:
+                        # если lock сломан — считаем его мусором
+                        user_locks.pop(user_id, None)
+                        continue
+
+                    if is_locked:
                         stuck_users += 1
 
                     # ================= 🧹 TTL CLEAN =================
@@ -2527,10 +2539,17 @@ async def worker_watchdog():
 
                     # 🔥 если нет активности — чистим
                     if last_used is not None:
-                        if (now - last_used) > LOCK_TTL:
+
+                        # ⚠️ защита от NaN/битых значений
+                        try:
+                            age = now - last_used
+                        except:
+                            age = 0
+
+                        if age > LOCK_TTL:
 
                             # важно: не трогаем активный lock
-                            if not lock.locked():
+                            if not is_locked:
                                 logging.warning(f"🧹 CLEAN OLD LOCK user={user_id}")
                                 user_locks.pop(user_id, None)
 
@@ -2546,7 +2565,7 @@ async def worker_watchdog():
                     "💀 Очередь есть, но задачи не распределяются — воркеры могут быть мертвы"
                 )
 
-            # ================= 🧹 ЧИСТКА CACHE =================
+            # ================= 🧹 ЖЁСТКАЯ ЧИСТКА =================
             if len(user_locks) > 10000:
                 logging.warning(f"🧹 Очистка user_locks ({len(user_locks)})")
                 user_locks.clear()
