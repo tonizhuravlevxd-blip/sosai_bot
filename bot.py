@@ -1468,12 +1468,14 @@ async def handle_generation_job(job):
 
     # ================= 🔥 LOCK =================
     lock = user_locks.setdefault(user_id, asyncio.Lock())
+    now = time.time()
 
     # 🔥 TTL marker для watchdog
-    lock.last_used = time.time()
+    if not hasattr(lock, "last_used"):
+        lock.last_used = now
 
-    # если уже занято — выходим
-    if lock.locked():
+    # ================= 🔥 ANTI DOUBLE RUN (SAFE TTL CHECK) =================
+    if lock.locked() and (now - getattr(lock, "last_used", 0) < 30):
         if msg:
             await msg.reply_text("⏳ Генерация уже выполняется.")
         return
@@ -1481,7 +1483,7 @@ async def handle_generation_job(job):
     async with lock:
         try:
 
-            # 🔥 heartbeat (важно для watchdog)
+            # 🔥 heartbeat
             lock.last_used = time.time()
 
             # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ =====
@@ -1495,7 +1497,9 @@ async def handle_generation_job(job):
 
             try:
                 if status:
-                    await status.edit_text("⏰ Генерация заняла слишком много времени и была остановлена")
+                    await status.edit_text(
+                        "⏰ Генерация заняла слишком много времени и была остановлена"
+                    )
             except:
                 pass
 
@@ -2394,13 +2398,16 @@ async def _handle_generation_inner(job):
                         except:
                             pass
 
-                        # ================= 🔥 UPDATE LOCK ACTIVITY =================
+                        # ================= 🔥 LOCK HEARTBEAT =================
                         try:
                             lock = user_locks.get(user_id)
+
                             if lock:
+                                # 🔥 обновляем время активности (для watchdog TTL)
                                 lock.last_used = time.time()
+
                         except Exception as e:
-                            logging.error(f"LOCK UPDATE ERROR: {e}")
+                            logging.error(f"LOCK HEARTBEAT ERROR: {e}")
 
                         logging.info(f"🧹 CLEANUP user {user_id}")
 
