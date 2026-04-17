@@ -2480,19 +2480,38 @@ async def worker_watchdog():
 
         now = time.time()
 
-        # ================= 🔓 РАЗБЛОКИРОВКА ЗАВИСШИХ ЮЗЕРОВ =================
+        # ================= 🔍 ОПРЕДЕЛЯЕМ ТИП =================
+        is_dict = isinstance(active_generations, dict)
+        is_set = isinstance(active_generations, set)
+
+        if not is_dict and not is_set:
+            logging.error(f"💀 active_generations сломан: {type(active_generations)}")
+            continue
+
+        # ================= 🔓 РАЗБЛОКИРОВКА =================
         unlocked = 0
 
-        for user_id, start_time in list(active_generations.items()):
-            if now - start_time > MAX_JOB_TIME:
-                logging.warning(f"🚨 FORCE UNLOCK user={user_id} (>{MAX_JOB_TIME}s)")
-                unlock_user_generation(user_id)
-                unlocked += 1
+        try:
+            if is_dict:
+                # ✅ нормальный режим (с таймингами)
+                for user_id, start_time in list(active_generations.items()):
+                    if now - start_time > MAX_JOB_TIME:
+                        logging.warning(f"🚨 FORCE UNLOCK user={user_id} (>{MAX_JOB_TIME}s)")
+                        unlock_user_generation(user_id)
+                        unlocked += 1
+
+            elif is_set:
+                # ⚠️ fallback режим (нет времени)
+                if active_generations:
+                    logging.error("⚠️ active_generations = set → нет таймингов, watchdog ограничен")
+
+        except Exception as e:
+            logging.error(f"❌ WATCHDOG ERROR: {e}")
 
         if unlocked:
             logging.warning(f"🔓 Разблокировано пользователей: {unlocked}")
 
-        # ================= 📊 МОНИТОРИНГ ОЧЕРЕДЕЙ =================
+        # ================= 📊 ОЧЕРЕДИ =================
         img_q = generation_queue_image.qsize()
         vid_q = generation_queue_video.qsize()
         mus_q = generation_queue_music.qsize()
@@ -2507,15 +2526,18 @@ async def worker_watchdog():
         if total > MAX_QUEUE_WARN:
             logging.warning(f"🔥 СЕРВЕР ПЕРЕГРУЖЕН: {total} задач в очереди")
 
-        # ================= 💀 ЗАСТРЯВШАЯ ОЧЕРЕДЬ =================
-        # если очередь есть, а активных генераций нет — значит воркеры умерли
-        if total > 0 and not active_generations:
-            logging.error("💀 Очередь есть, но нет активных генераций — воркеры зависли?")
+        # ================= 💀 ВОРКЕРЫ УМЕРЛИ =================
+        if total > 0:
+            if is_dict and not active_generations:
+                logging.error("💀 Очередь есть, но нет активных генераций — воркеры умерли?")
+            elif is_set and len(active_generations) == 0:
+                logging.error("💀 Очередь есть, но set пуст — воркеры умерли?")
 
-        # ================= 🧹 ЗАЩИТА ОТ МУСОРА =================
-        # иногда active_generations может разрастись (на всякий случай)
-        if len(active_generations) > 10000:
-            logging.error("💀 Слишком много active_generations — чистим")
+        # ================= 🧹 ЧИСТКА =================
+        size = len(active_generations)
+
+        if size > 10000:
+            logging.error(f"💀 Слишком много active_generations ({size}) — чистим")
             active_generations.clear()
 
 
