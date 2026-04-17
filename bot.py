@@ -172,16 +172,22 @@ def check_user_generation_limit(user_id):
 
 
 def lock_user_generation(user_id):
-    count = user_generation_count.get(user_id, 0)
-    user_generation_count[user_id] = count + 1
+    # увеличиваем счётчик
+    count = user_generation_count.get(user_id, 0) + 1
+    user_generation_count[user_id] = count
+
+    # если это первая задача — фиксируем время
+    if count == 1:
+        active_generations[user_id] = time.time()
     
 def unlock_user_generation(user_id):
     count = user_generation_count.get(user_id, 0)
 
     if count <= 1:
         user_generation_count.pop(user_id, None)
+        active_generations.pop(user_id, None)  # 🔥 важно
     else:
-        user_generation_count[user_id] = count - 1    
+        user_generation_count[user_id] = count - 1
     
 
 
@@ -2411,6 +2417,7 @@ async def image_worker():
                 logging.error(f"❌ IMAGE WORKER ERROR: {e}")
 
             finally:
+                unlock_user_generation(user_id)
                 generation_queue_image.task_done()
 
         except Exception as e:
@@ -2429,6 +2436,7 @@ async def video_worker():
                 logging.error(f"❌ VIDEO WORKER ERROR: {e}")
 
             finally:
+                unlock_user_generation(user_id)
                 generation_queue_video.task_done()
 
         except Exception as e:
@@ -2455,6 +2463,7 @@ async def music_worker():
                 logging.error(f"❌ MUSIC WORKER ERROR: {e}")
 
             finally:
+                unlock_user_generation(user_id)
                 generation_queue_music.task_done()
 
         except Exception as e:
@@ -2462,18 +2471,52 @@ async def music_worker():
             await asyncio.sleep(1)
 
 async def worker_watchdog():
+    CHECK_INTERVAL = 15          # как часто проверяем
+    MAX_JOB_TIME = 180           # 3 минуты максимум на генерацию
+    MAX_QUEUE_WARN = 200         # предупреждение по очереди
 
     while True:
-        await asyncio.sleep(10)
+        await asyncio.sleep(CHECK_INTERVAL)
 
-        if generation_queue_image.qsize() > 0:
-            logging.warning("⚠️ Проверка image workers")
+        now = time.time()
 
-        if generation_queue_video.qsize() > 0:
-            logging.warning("⚠️ Проверка video workers")
+        # ================= 🔓 РАЗБЛОКИРОВКА ЗАВИСШИХ ЮЗЕРОВ =================
+        unlocked = 0
 
-        if generation_queue_music.qsize() > 0:
-            logging.warning("⚠️ Проверка music workers")
+        for user_id, start_time in list(active_generations.items()):
+            if now - start_time > MAX_JOB_TIME:
+                logging.warning(f"🚨 FORCE UNLOCK user={user_id} (>{MAX_JOB_TIME}s)")
+                unlock_user_generation(user_id)
+                unlocked += 1
+
+        if unlocked:
+            logging.warning(f"🔓 Разблокировано пользователей: {unlocked}")
+
+        # ================= 📊 МОНИТОРИНГ ОЧЕРЕДЕЙ =================
+        img_q = generation_queue_image.qsize()
+        vid_q = generation_queue_video.qsize()
+        mus_q = generation_queue_music.qsize()
+        total = img_q + vid_q + mus_q
+
+        if total > 0:
+            logging.info(
+                f"📊 Очередь | IMG: {img_q} | VID: {vid_q} | MUS: {mus_q} | TOTAL: {total}"
+            )
+
+        # ================= 🚨 ПЕРЕГРУЗКА =================
+        if total > MAX_QUEUE_WARN:
+            logging.warning(f"🔥 СЕРВЕР ПЕРЕГРУЖЕН: {total} задач в очереди")
+
+        # ================= 💀 ЗАСТРЯВШАЯ ОЧЕРЕДЬ =================
+        # если очередь есть, а активных генераций нет — значит воркеры умерли
+        if total > 0 and not active_generations:
+            logging.error("💀 Очередь есть, но нет активных генераций — воркеры зависли?")
+
+        # ================= 🧹 ЗАЩИТА ОТ МУСОРА =================
+        # иногда active_generations может разрастись (на всякий случай)
+        if len(active_generations) > 10000:
+            logging.error("💀 Слишком много active_generations — чистим")
+            active_generations.clear()
 
 
 # ================= START =================
