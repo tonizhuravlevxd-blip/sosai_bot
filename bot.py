@@ -1565,107 +1565,106 @@ async def _handle_generation_inner(job):
                     await reset_week_if_needed(user)
                     premium = is_premium(user)
 
-                    # ===== IMAGE =====
-                    if mode == "image":
+                            # ===== IMAGE =====
+                            if mode == "image":
 
-                        if not premium:
-                            free_limit = 2
+                                if not premium:
+                                    free_limit = 2
 
-                            if user["image_count"] >= free_limit:
+                                    if user["image_count"] >= free_limit:
 
-                                if not context.user_data.get("sub_checked"):
+                                        # ✅ сначала проверяем, нажал ли пользователь кнопку
+                                        if not context.user_data.get("sub_checked"):
 
+                                            subscribed = await is_user_subscribed(context.bot, user_id)
+
+                                            if not subscribed:
+                                                await msg.reply_text(
+                                                    "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
+                                                    "Подпишитесь на канал и нажмите проверить 👇",
+                                                    reply_markup=get_subscribe_keyboard()
+                                                )
+                                                return
+
+                                            # ✅ если реально подписан — сохраняем
+                                            context.user_data["sub_checked"] = True
+
+                                        # ✅ даём расширенный лимит
+                                        limit = FREE_LIMIT + user.get("bonus_images", 0)
+                                    else:
+                                        limit = free_limit
+                                else:
+                                    limit = PREMIUM_IMAGE_LIMIT
+
+                                # ✅ ТОЛЬКО ПРОВЕРКА (без списания)
+                                if user["image_count"] >= limit:
+                                    await msg.reply_text("⚠️ Лимит изображений исчерпан")
+                                    return
+
+                            # ================= VIDEO / CARTOON =================
+                            elif mode in ["video", "cartoon", "remix"]:
+
+                                if not premium:
                                     subscribed = await is_user_subscribed(context.bot, user_id)
 
-                                    if not subscribed:
+                                    # ===== ЖЁСТКАЯ БЛОКИРОВКА ДО ПРОВЕРКИ =====
+                                    if not context.user_data.get("sub_checked"):
+
+                                        context.user_data["pending_video"] = True
+
                                         await msg.reply_text(
-                                            "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
-                                            "Подпишитесь на канал и нажмите проверить 👇",
+                                            "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
+                                            "Даже если вы подписаны — нажмите кнопку для проверки",
                                             reply_markup=get_subscribe_keyboard()
                                         )
                                         return
 
-                                    context.user_data["sub_checked"] = True
+                                logging.info(f"🎬 START VIDEO FLOW user={user_id}")
 
-                                limit = FREE_LIMIT + user.get("bonus_images", 0)
-                            else:
-                                limit = free_limit
-                        else:
-                            limit = PREMIUM_IMAGE_LIMIT
-
-                        if user["image_count"] >= limit:
-                            await msg.reply_text("⚠️ Лимит изображений исчерпан")
-                            return
-
-                        # ===== 🔥 ТВОЯ ГЕНЕРАЦИЯ =====
-                        result = await asyncio.wait_for(
-                            fal_image_generate(prompt, images),
-                            timeout=300
-                        )
-
-                    # ================= VIDEO / CARTOON =================
-                    elif mode in ["video", "cartoon", "remix"]:
-
-                        if not premium:
-                            subscribed = await is_user_subscribed(context.bot, user_id)
-
-                            # ===== ЖЁСТКАЯ БЛОКИРОВКА ДО ПРОВЕРКИ =====
-                            if not context.user_data.get("sub_checked"):
-
-                                context.user_data["pending_video"] = True
-
-                                await msg.reply_text(
-                                    "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
-                                    "Даже если вы подписаны — нажмите кнопку для проверки",
-                                    reply_markup=get_subscribe_keyboard()
+                                user = await conn.fetchrow(
+                                    "SELECT * FROM users WHERE user_id=$1",
+                                    user_id
                                 )
-                                return
 
-                        logging.info(f"🎬 START VIDEO FLOW user={user_id}")
+                                premium = is_premium(user)
 
-                        user = await conn.fetchrow(
-                            "SELECT * FROM users WHERE user_id=$1",
-                            user_id
-                        )
+                                logging.info(f"USER BEFORE CHECK: {dict(user)}")
 
-                        premium = is_premium(user)
+                                paid_video = user.get("paid_video") or 0
+                                video_count = user.get("video_count") or 0
 
-                        logging.info(f"USER BEFORE CHECK: {dict(user)}")
-
-                        paid_video = user.get("paid_video") or 0
-                        video_count = user.get("video_count") or 0
-
-                        logging.info(
-                            f"🎯 DECISION user={user_id} "
-                            f"paid={paid_video} video_count={video_count} premium={premium}"
-                        )
-
-                        # ===== ТОЛЬКО ПРОВЕРКА (БЕЗ СПИСАНИЯ) =====
-
-                        if paid_video > 0:
-                            logging.info(f"💰 PAID VIDEO AVAILABLE user={user_id}")
-
-                        elif premium:
-                            logging.info(f"🍩 USING PREMIUM LIMIT user={user_id}")
-
-                            if video_count >= PREMIUM_VIDEO_LIMIT:
-                                await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
-                                return
-
-                        else:
-                            logging.info(f"🆓 USING FREE LIMIT user={user_id}")
-
-                            if video_count >= FREE_VIDEO_LIMIT:
-                                keyboard = InlineKeyboardMarkup([
-                                    [InlineKeyboardButton("💳 Купить 1 видео", callback_data="buy_video")],
-                                    [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                ])
-
-                                await msg.reply_text(
-                                    "🎬 Лимит видео исчерпан",
-                                    reply_markup=keyboard
+                                logging.info(
+                                    f"🎯 DECISION user={user_id} "
+                                    f"paid={paid_video} video_count={video_count} premium={premium}"
                                 )
-                                return
+
+                                # ===== ТОЛЬКО ПРОВЕРКА (БЕЗ СПИСАНИЯ) =====
+
+                                if paid_video > 0:
+                                    logging.info(f"💰 PAID VIDEO AVAILABLE user={user_id}")
+
+                                elif premium:
+                                    logging.info(f"🍩 USING PREMIUM LIMIT user={user_id}")
+
+                                    if video_count >= PREMIUM_VIDEO_LIMIT:
+                                        await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
+                                        return
+
+                                else:
+                                    logging.info(f"🆓 USING FREE LIMIT user={user_id}")
+
+                                    if video_count >= FREE_VIDEO_LIMIT:
+                                        keyboard = InlineKeyboardMarkup([
+                                            [InlineKeyboardButton("💳 Купить 1 видео", callback_data="buy_video")],
+                                            [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                        ])
+
+                                        await msg.reply_text(
+                                            "🎬 Лимит видео исчерпан",
+                                            reply_markup=keyboard
+                                        )
+                                        return
+                                        
 
             model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
 
@@ -1762,25 +1761,13 @@ async def _handle_generation_inner(job):
                             if attempt == 1:
                                 raise e
                             await asyncio.sleep(1)
-
                 finally:
                     upload_task.cancel()
                     animation_task.cancel()
 
-                    try:
-                        await upload_task
-                    except:
-                        pass
-
-                    try:
-                        await animation_task
-                    except:
-                        pass
-
                 try:
-                    if status and getattr(status, "message_id", None):
-                        await status.delete()
-                except Exception:
+                    await status.delete()
+                except:
                     pass
 
                 keyboard = InlineKeyboardMarkup([
@@ -1807,7 +1794,7 @@ async def _handle_generation_inner(job):
                     )
 
                 USER_CACHE.pop(user_id, None)
-
+                                
                 async with db_pool.acquire() as conn:
 
                     ref_data = await conn.fetchrow(
@@ -1898,44 +1885,20 @@ async def _handle_generation_inner(job):
                 finally:
                     progress_task.cancel()
 
-                    try:
-                        await progress_task
-                    except:
-                        pass
-
                 try:
-                    if status and getattr(status, "message_id", None):
-                        await status.delete()
-                except Exception:
+                    await status.delete()
+                except:
                     pass
-
-                keyboard = InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-                        InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
-                    ],
-                    [
-                        InlineKeyboardButton("❌ Закончить", callback_data="finish")
-                    ]
-                ])
 
                 result_file = io.BytesIO(result_bytes)
                 result_file.name = "video.mp4"
                 result_file.seek(0)
 
                 try:
-                    await context.bot.send_video(
-                        chat_id=update.effective_chat.id,
-                        video=result_file,
-                        reply_markup=keyboard
-                    )
+                    await context.bot.send_video(chat_id=update.effective_chat.id, video=result_file)
                 except:
                     result_file.seek(0)
-                    await context.bot.send_document(
-                        chat_id=update.effective_chat.id,
-                        document=result_file,
-                        reply_markup=keyboard
-                    )
+                    await context.bot.send_document(chat_id=update.effective_chat.id, document=result_file)
 
                 # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ОТПРАВКИ
                 async with db_pool.acquire() as conn:
@@ -1969,13 +1932,14 @@ async def _handle_generation_inner(job):
 
                 USER_CACHE.pop(user_id, None)
 
+
             # ================= REMIX =================
-            elif mode == "remix":
+            if mode == "remix":
 
                 import random
                 import tempfile
                 import subprocess
-
+                                             
                 async def progress_updater():
                     steps = [
                         "👨🏻‍🏫 Анализ видео...",
@@ -2024,6 +1988,7 @@ async def _handle_generation_inner(job):
 
                     except asyncio.CancelledError:
                         pass
+
 
                 video_bytes = job.get("video")
                 images = job.get("images", [])
@@ -2074,12 +2039,15 @@ async def _handle_generation_inner(job):
                 except Exception as e:
                     print("⚠️ RESIZE ERROR:", e)
 
+                # 🔥 Kling limit
                 if len(images) > 4:
                     images = images[:4]
 
+                # 🔥 prompt fix
                 if images and "@Image" not in prompt:
                     prompt = prompt + " Use @Image1 for style reference"
 
+                # 🔥 FIX: convert images bytes -> base64 urls
                 image_urls = []
 
                 if images:
@@ -2097,6 +2065,7 @@ async def _handle_generation_inner(job):
 
                 try:
 
+                    # ================= REQUEST =================
                     video_b64 = base64.b64encode(video_bytes).decode("utf-8")
                     video_url = f"data:video/mp4;base64,{video_b64}"
 
@@ -2127,6 +2096,8 @@ async def _handle_generation_inner(job):
                             if not request_id:
                                 raise Exception(f"No request_id: {data}")
 
+
+                    # ================= POLL =================
                     status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
                     result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
 
@@ -2178,16 +2149,19 @@ async def _handle_generation_inner(job):
                     except:
                         pass
 
+
                 try:
                     if status:
                         await status.delete()
                 except:
                     pass
 
+
                 if not result_bytes:
                     if msg:
                         await msg.reply_text("⚠️ FAL не вернул видео")
                     return
+
 
                 result_file = io.BytesIO(result_bytes)
                 result_file.name = "remix.mp4"
@@ -2207,6 +2181,7 @@ async def _handle_generation_inner(job):
                         document=result_file
                     )
 
+                           # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
                 async with db_pool.acquire() as conn:
 
                     if paid_video > 0:
@@ -2224,7 +2199,6 @@ async def _handle_generation_inner(job):
                 
             # ================= MUSIC =================
             elif mode == "music":
-                
                 premium = is_premium(user)
 
                 if not premium:
@@ -2244,7 +2218,6 @@ async def _handle_generation_inner(job):
                 chat_id = update.effective_chat.id
 
                 if cached_audio_url:
-                    
                     try:
                         if status:
                             await status.delete()
@@ -2290,20 +2263,17 @@ async def _handle_generation_inner(job):
                     async def progress_updater():
                         pct = 0
                         last_text = ""
-
                         try:
                             while True:
                                 await asyncio.sleep(3)
                                 pct = min(pct + 2, 100)
                                 new_text = f"🎵 Генерация музыки... {pct}%"
-
                                 if new_text != last_text:
                                     try:
                                         await safe_edit(status, new_text)
                                         last_text = new_text
                                     except:
                                         pass
-
                         except asyncio.CancelledError:
                             pass
 
@@ -2362,8 +2332,7 @@ async def _handle_generation_inner(job):
 
         except Exception as e:
             logging.error(f"❌ HANDLE ERROR: {e}")
-
-            # ===== 🔥 УНИВЕРСАЛЬНЫЙ ОТВЕТ ПОЛЬЗОВАТЕЛЮ =====
+        # ===== 🔥 УНИВЕРСАЛЬНЫЙ ОТВЕТ ПОЛЬЗОВАТЕЛЮ =====
             if msg:
                 try:
                     await msg.reply_text(
@@ -2403,6 +2372,10 @@ async def _handle_generation_inner(job):
                         context.user_data.pop("input_video", None)
                         context.user_data.pop("input_video_bytes", None)
                         context.user_data.pop("input_images", None)
+
+                        # 🔥 чистим кэш генерации
+                        context.user_data.pop("last_images", None)
+                        context.user_data.pop("last_prompt", None)
 
                         # 🔥 чистим временные флаги
                         context.user_data.pop("pending_video", None)
