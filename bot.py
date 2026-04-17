@@ -1548,782 +1548,782 @@ async def _handle_generation_inner(job):
     async with GLOBAL_RATE_LIMIT:
         async with GLOBAL_SEMAPHORE:
             async with sem:
-
-                # ===== 🔥 DB =====
-                async with db_pool.acquire() as conn:
-
-                    user = await conn.fetchrow(
-                        "SELECT * FROM users WHERE user_id=$1",
-                        user_id
-                    )
-
-                    if not user:
-                        return
-
-                    logging.info(f"USER DATA: {dict(user)}")
-
-                    await reset_week_if_needed(user)
-                    premium = is_premium(user)
-
-                    # ===== IMAGE =====
-                    if mode == "image":
-
-                        if not premium:
-                            free_limit = 2
-
-                            if user["image_count"] >= free_limit:
-
-                                if not context.user_data.get("sub_checked"):
-
-                                    subscribed = await is_user_subscribed(context.bot, user_id)
-
-                                    if not subscribed:
-                                        await msg.reply_text(
-                                            "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
-                                            "Подпишитесь на канал и нажмите проверить 👇",
-                                            reply_markup=get_subscribe_keyboard()
-                                        )
-                                        return
-
-                                    context.user_data["sub_checked"] = True
-
-                                limit = FREE_LIMIT + user.get("bonus_images", 0)
-                            else:
-                                limit = free_limit
-                        else:
-                            limit = PREMIUM_IMAGE_LIMIT
-
-                        if user["image_count"] >= limit:
-                            await msg.reply_text("⚠️ Лимит изображений исчерпан")
-                            return
-
-                    # ================= VIDEO / CARTOON =================
-                    elif mode in ["video", "cartoon", "remix"]:
-
-                        if not premium:
-                            subscribed = await is_user_subscribed(context.bot, user_id)
-
-                            # ===== ЖЁСТКАЯ БЛОКИРОВКА ДО ПРОВЕРКИ =====
-                            if not context.user_data.get("sub_checked"):
-
-                                context.user_data["pending_video"] = True
-
-                                await msg.reply_text(
-                                    "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
-                                    "Даже если вы подписаны — нажмите кнопку для проверки",
-                                    reply_markup=get_subscribe_keyboard()
-                                )
-                                return
-
-                        logging.info(f"🎬 START VIDEO FLOW user={user_id}")
+                try:
+                    # ===== 🔥 DB =====
+                    async with db_pool.acquire() as conn:
 
                         user = await conn.fetchrow(
                             "SELECT * FROM users WHERE user_id=$1",
                             user_id
                         )
 
+                        if not user:
+                            return
+
+                        logging.info(f"USER DATA: {dict(user)}")
+
+                        await reset_week_if_needed(user)
                         premium = is_premium(user)
 
-                        logging.info(f"USER BEFORE CHECK: {dict(user)}")
+                        # ===== IMAGE =====
+                        if mode == "image":
 
-                        paid_video = user.get("paid_video") or 0
-                        video_count = user.get("video_count") or 0
+                            if not premium:
+                                free_limit = 2
 
-                        logging.info(
-                            f"🎯 DECISION user={user_id} "
-                            f"paid={paid_video} video_count={video_count} premium={premium}"
-                        )
+                                if user["image_count"] >= free_limit:
 
-                        # ===== ТОЛЬКО ПРОВЕРКА (БЕЗ СПИСАНИЯ) =====
+                                    if not context.user_data.get("sub_checked"):
 
-                        if paid_video > 0:
-                            logging.info(f"💰 PAID VIDEO AVAILABLE user={user_id}")
+                                        subscribed = await is_user_subscribed(context.bot, user_id)
 
-                        elif premium:
-                            logging.info(f"🍩 USING PREMIUM LIMIT user={user_id}")
+                                        if not subscribed:
+                                            await msg.reply_text(
+                                                "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
+                                                "Подпишитесь на канал и нажмите проверить 👇",
+                                                reply_markup=get_subscribe_keyboard()
+                                            )
+                                            return
 
-                            if video_count >= PREMIUM_VIDEO_LIMIT:
-                                await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
+                                        context.user_data["sub_checked"] = True
+
+                                    limit = FREE_LIMIT + user.get("bonus_images", 0)
+                                else:
+                                    limit = free_limit
+                            else:
+                                limit = PREMIUM_IMAGE_LIMIT
+
+                            if user["image_count"] >= limit:
+                                await msg.reply_text("⚠️ Лимит изображений исчерпан")
                                 return
 
-                        else:
-                            logging.info(f"🆓 USING FREE LIMIT user={user_id}")
+                        # ================= VIDEO / CARTOON =================
+                        elif mode in ["video", "cartoon", "remix"]:
 
-                            if video_count >= FREE_VIDEO_LIMIT:
-                                keyboard = InlineKeyboardMarkup([
-                                    [InlineKeyboardButton("💳 Купить 1 видео", callback_data="buy_video")],
-                                    [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                ])
+                            if not premium:
+                                subscribed = await is_user_subscribed(context.bot, user_id)
 
-                                await msg.reply_text(
-                                    "🎬 Лимит видео исчерпан",
-                                    reply_markup=keyboard
-                                )
-                                return
-                                        
+                                # ===== ЖЁСТКАЯ БЛОКИРОВКА ДО ПРОВЕРКИ =====
+                                if not context.user_data.get("sub_checked"):
 
-                    model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
+                                    context.user_data["pending_video"] = True
 
-                    text_map = {
-                        "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
-                        "video": "<pre>🎬 Генерация видео... 0%</pre>",
-                        "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
-                        "remix": "<pre>🔥 Создание тренда (Remix)... 0%</pre>",
-                        "music": "<pre>🎵 Генерация музыки... 0%</pre>"
-                    }
-
-                    if status:
-                        try:
-                            await status.edit_text(
-                                text_map.get(mode, "⏳ Генерация..."),
-                                reply_markup=cancel_button,
-                                parse_mode="HTML"
-                            )
-                        except:
-                            pass
-                    else:
-                        status = await msg.reply_text(
-                            text_map.get(mode, "⏳ Генерация..."),
-                            reply_markup=cancel_button,
-                            parse_mode="HTML"
-                        )
-
-                    images_local = images[:MAX_INPUT_IMAGES]
-
-                    style = ""
-                    if model == "banana1":
-                        style = "cinematic lighting ultra realistic 8k"
-                    elif model == "banana2":
-                        style = "hyper detailed masterpiece artstation quality"
-
-                    cartoon_style = context.user_data.get("cartoon_style")
-
-                    if prompt:
-                        if mode == "image" and style:
-                            prompt = f"{style} {prompt}"
-                        elif mode in ["cartoon", "video", "remix"] and cartoon_style:
-                            prompt = f"{cartoon_style}, {prompt}"
-
-                    if prompt:
-                        prompt = clean_prompt(prompt)
-
-                    cache_key = f"{prompt}_{model}_{size}" if prompt else None
-                    cached = generation_cache.get(cache_key) if cache_key else None
-
-                    if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
-                        try:
-                            if status:
-                                await status.delete()
-                        except:
-                            pass
-                        await msg.reply_photo(photo=cached["image"])
-                        return
-                    # ================= IMAGE =================
-                    if mode == "image":
-
-                        async def dots_animation():
-                            dots_list = ["", ".", "..", "..."]
-                            i = 0
-
-                            try:
-                                while True:
-                                    dots = dots_list[i % len(dots_list)]
-                                    text = f"<pre>🦕 Пожалуйста ожидайте,шедевр создает {model_name}{dots}</pre>"
-                                    try:
-                                        await safe_edit(status, text, parse_mode="HTML")
-                                    except:
-                                        pass
-                                    i += 1
-                                    await asyncio.sleep(1.5)
-                            except asyncio.CancelledError:
-                                pass
-
-                        animation_task = asyncio.create_task(dots_animation())
-
-                        upload_task = asyncio.create_task(
-                            fake_photo_upload(context.bot, update.effective_chat.id)
-                        )
-
-                        try:
-                            for attempt in range(2):
-                                try:
-                                    result = await asyncio.wait_for(
-                                        fal_generate(model, prompt, images_local),
-                                        timeout=300
+                                    await msg.reply_text(
+                                        "📢 Перед бесплатной генерацией нужно подтвердить подписку 👇\n\n"
+                                        "Даже если вы подписаны — нажмите кнопку для проверки",
+                                        reply_markup=get_subscribe_keyboard()
                                     )
-                                    break
-                                except Exception as e:
-                                    if attempt == 1:
-                                        raise e
-                                    await asyncio.sleep(1)
-                        finally:
-                            upload_task.cancel()
-                            animation_task.cancel()
+                                    return
 
-                        try:
-                            await status.delete()
-                        except:
-                            pass
-
-                        keyboard = InlineKeyboardMarkup([
-                            [
-                                InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
-                                InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
-                            ],
-                            [
-                                InlineKeyboardButton("❌ Закончить", callback_data="finish")
-                            ]
-                        ])
-
-                        await msg.reply_photo(photo=result, reply_markup=keyboard)
-
-                        # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ГЕНЕРАЦИИ
-                        async with db_pool.acquire() as conn:
-                            await conn.execute(
-                                """
-                                UPDATE users
-                                SET image_count = image_count + 1
-                                WHERE user_id=$1
-                                """,
-                                user_id
-                            )
-
-                        USER_CACHE.pop(user_id, None)
-
-                        async with db_pool.acquire() as conn:
-
-                            ref_data = await conn.fetchrow(
-                                "SELECT ref_by, ref_rewarded FROM users WHERE user_id=$1",
-                                user_id
-                            )
-
-                            if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
-
-                                await conn.execute(
-                                    """
-                                    UPDATE users
-                                    SET ref_rewarded = 1
-                                    WHERE user_id=$1
-                                    """,
-                                    user_id
-                                )
-
-                                await conn.execute(
-                                    """
-                                    UPDATE users
-                                    SET bonus_images = bonus_images + 1
-                                    WHERE user_id=$1
-                                    """,
-                                    ref_data["ref_by"]
-                                )
-
-                        context.user_data["last_prompt"] = prompt
-                        context.user_data["last_images"] = images_local
-
-                    # ================= VIDEO / CARTOON =================
-                    elif mode in ["video", "cartoon"]:
-
-                        import random
-
-                        async def progress_updater():
-                            steps = [
-                                "🎬 Анализ промпта...",
-                                "֎ Подготовка модели...",
-                                "🎥 Генерация сцен...",
-                                "🎞 Рендеринг кадров...",
-                                "🧙 Просим волшебника помочь...",
-                                "🦄 Происходит магия...",
-                                "✩°｡⋆⸜(˙꒳​˙ )...",
-                                "🍕 Перерыв на обед...",
-                                "👨🏻‍💻 Рендеринг кадров...",
-                                "🐇 Кролик попал в кадр...",
-                                "🕵🏼 Ищем кролика...",
-                                "🧹 Убираем лишнее...",
-                                "✨ Постобработка...",
-                                "🦕 Шедевр почти готов...",
-                                "😱 Осталось совсем немного...",
-                                "📦 Финальная сборка..."
-                            ]
-
-                            idx = 0
-                            last_text = ""
-
-                            try:
-                                while idx < len(steps):
-                                    new_text = steps[idx]
-
-                                    if new_text != last_text:
-                                        try:
-                                            await safe_edit(status, new_text)
-                                            last_text = new_text
-                                        except:
-                                            pass
-
-                                    await asyncio.sleep(random.randint(5, 10))
-                                    idx += 1
-
-                                try:
-                                    await status.edit_text("🚀 Завершение обработки...")
-                                except:
-                                    pass
-
-                            except asyncio.CancelledError:
-                                pass
-
-                        progress_task = asyncio.create_task(progress_updater())
-
-                        try:
-                            result_bytes = await asyncio.wait_for(
-                                fal_video_generate(prompt, images_local),
-                                timeout=600
-                            )
-                        finally:
-                            progress_task.cancel()
-
-                        try:
-                            await status.delete()
-                        except:
-                            pass
-
-                        result_file = io.BytesIO(result_bytes)
-                        result_file.name = "video.mp4"
-                        result_file.seek(0)
-
-                        try:
-                            await context.bot.send_video(
-                                chat_id=update.effective_chat.id,
-                                video=result_file
-                            )
-                        except:
-                            result_file.seek(0)
-                            await context.bot.send_document(
-                                chat_id=update.effective_chat.id,
-                                document=result_file
-                            )
-
-                        # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ОТПРАВКИ
-                        async with db_pool.acquire() as conn:
+                            logging.info(f"🎬 START VIDEO FLOW user={user_id}")
 
                             user = await conn.fetchrow(
-                                "SELECT paid_video, video_count FROM users WHERE user_id=$1",
+                                "SELECT * FROM users WHERE user_id=$1",
                                 user_id
                             )
+
+                            premium = is_premium(user)
+
+                            logging.info(f"USER BEFORE CHECK: {dict(user)}")
 
                             paid_video = user.get("paid_video") or 0
                             video_count = user.get("video_count") or 0
 
-                            if paid_video > 0:
-                                await conn.execute(
-                                    """
-                                    UPDATE users
-                                    SET paid_video = paid_video - 1
-                                    WHERE user_id=$1
-                                    """,
-                                    user_id
-                                )
-                            else:
-                                await conn.execute(
-                                    """
-                                    UPDATE users
-                                    SET video_count = video_count + 1
-                                    WHERE user_id=$1
-                                    """,
-                                    user_id
-                                )
-
-                        USER_CACHE.pop(user_id, None)            
-
-
-                    # ================= REMIX =================
-                    elif mode == "remix":
-
-                        import random
-                        import tempfile
-                        import subprocess
-
-                        async def progress_updater():
-                            steps = [
-                                "👨🏻‍🏫 Анализ видео...",
-                                "🌐 Ищем материал в интернете...",
-                                "🎬 Подготовка KLING модели...",
-                                "✂️ Настраиваем видео по размеру...",
-                                "🎥 Обработка видео...",
-                                "👽 В кадр попал пришелец...",
-                                "🚀 Убираем лишнее из кадра...",
-                                "🎥 Обработка видео...",
-                                "✨ Применение эффектов...",
-                                "🧠 AI думает как TikTok...",
-                                "🦄 Добавляем магию...",
-                                "🌠 Падающая звезда...",
-                                "⭐ Загадайте желание...",
-                                "🎞 Рендеринг кадров...",
-                                "🦕 Почти готово...",
-                                "🔌 Кто то выключил свет...",
-                                "🐘 Слоник задел шнур питания...",
-                                "💾 Проверка сохранения видео...",
-                                "🏁 Видео почти готово...",
-                                "🤩 Я посмотрел, это шедевр...",
-                                "🥳 Осталось немного...",
-                                "🦥 О смотри кого нашел...",
-                                "(∩｀-´)⊃━☆ﾟ.*･｡ﾟ Ускоряю процесс...",
-                                "🍿 Думаю уже финал...",
-                                "📦 Финальная сборка..."
-                            ]
-
-                            idx = 0
-                            last_text = ""
-
-                            try:
-                                while True:
-                                    new_text = steps[idx % len(steps)]
-
-                                    if new_text != last_text:
-                                        try:
-                                            await safe_edit(status, new_text)
-                                            last_text = new_text
-                                        except:
-                                            pass
-
-                                    await asyncio.sleep(random.randint(4, 8))
-                                    idx += 1
-
-                            except asyncio.CancelledError:
-                                pass
-
-                        video_bytes = job.get("video")
-                        images = job.get("images", [])
-
-                        # 🔥 HARD FALLBACK
-                        if not video_bytes:
-                            video_bytes = (
-                                context.user_data.get("input_video")
-                                or context.user_data.get("input_video_bytes")
+                            logging.info(
+                                f"🎯 DECISION user={user_id} "
+                                f"paid={paid_video} video_count={video_count} premium={premium}"
                             )
 
-                        if not images:
-                            images = context.user_data.get("input_images", [])
-
-                        if not video_bytes:
-                            if msg:
-                                await msg.reply_text("⚠️ Сначала отправьте видео")
-                            return
-
-                        # ================= AUTO RESIZE 720x720 =================
-                        try:
-                            with tempfile.NamedTemporaryFile(suffix=".mp4") as inp, \
-                                 tempfile.NamedTemporaryFile(suffix=".mp4") as out:
-
-                                inp.write(video_bytes)
-                                inp.flush()
-
-                                cmd = [
-                                    "ffmpeg",
-                                    "-y",
-                                    "-i", inp.name,
-                                    "-vf", "scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2",
-                                    "-c:v", "libx264",
-                                    "-preset", "veryfast",
-                                    "-crf", "23",
-                                    "-pix_fmt", "yuv420p",
-                                    "-movflags", "+faststart",
-                                    "-c:a", "aac",
-                                    "-b:a", "128k",
-                                    out.name
-                                ]
-
-                                subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-                                with open(out.name, "rb") as f:
-                                    video_bytes = f.read()
-
-                        except Exception as e:
-                            print("⚠️ RESIZE ERROR:", e)
-
-                        # 🔥 Kling limit
-                        if len(images) > 4:
-                            images = images[:4]
-
-                        # 🔥 prompt fix
-                        if images and "@Image" not in prompt:
-                            prompt = prompt + " Use @Image1 for style reference"
-
-                        # 🔥 FIX: convert images bytes -> base64 urls
-                        image_urls = []
-
-                        if images:
-                            for img in images:
-                                try:
-                                    img_b64 = base64.b64encode(img).decode("utf-8")
-                                    image_urls.append(f"data:image/jpeg;base64,{img_b64}")
-                                except Exception as e:
-                                    print("⚠️ IMAGE BASE64 ERROR:", e)
-
-                        progress_task = asyncio.create_task(progress_updater())
-
-                        result_bytes = None
-                        video_url = None
-
-                        try:
-                            # ================= REQUEST =================
-                            video_b64 = base64.b64encode(video_bytes).decode("utf-8")
-                            video_url = f"data:video/mp4;base64,{video_b64}"
-
-                            async with aiohttp.ClientSession() as session:
-
-                                async with session.post(
-                                    "https://queue.fal.run/fal-ai/kling-video/o1/standard/video-to-video/edit",
-                                    json={
-                                        "prompt": prompt,
-                                        "video_url": video_url,
-                                        "image_urls": image_urls
-                                    },
-                                    headers={
-                                        "Authorization": f"Key {FAL_KEY}",
-                                        "Content-Type": "application/json"
-                                    }
-                                ) as resp:
-
-                                    text = await resp.text()
-
-                                    try:
-                                        data = await resp.json()
-                                    except:
-                                        raise Exception(f"Kling not JSON: {text}")
-
-                                    request_id = data.get("request_id")
-
-                                    if not request_id:
-                                        raise Exception(f"No request_id: {data}")
-
-                            # ================= POLL =================
-                            status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
-                            result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
-
-                            async with aiohttp.ClientSession() as session:
-
-                                for _ in range(300):
-
-                                    async with session.get(status_url) as s:
-
-                                        status_json = await s.json()
-                                        state = status_json.get("status")
-
-                                        if state == "COMPLETED":
-
-                                            async with session.get(result_url) as r:
-                                                result = await r.json()
-
-                                                video_file_url = result.get("video", {}).get("url")
-
-                                                if not video_file_url:
-                                                    raise Exception(f"Bad result: {result}")
-
-                                                async with session.get(video_file_url) as v:
-                                                    result_bytes = await v.read()
-
-                                            break
-
-                                        if state == "FAILED":
-                                            raise Exception(f"FAL failed: {status_json}")
-
-                                    await asyncio.sleep(2)
-
-                        except Exception as e:
-
-                            err = traceback.format_exc()
-
-                            try:
-                                await safe_edit(status, f"⚠️ Ошибка remix:\n{e}")
-                            except:
-                                pass
-
-                            print("❌ REMIX ERROR:", err)
-                            return
-
-                        finally:
-                            progress_task.cancel()
-                            try:
-                                await progress_task
-                            except:
-                                pass
-
-                        try:
-                            if status:
-                                await status.delete()
-                        except:
-                            pass
-
-                        if not result_bytes:
-                            if msg:
-                                await msg.reply_text("⚠️ FAL не вернул видео")
-                            return
-
-                        result_file = io.BytesIO(result_bytes)
-                        result_file.name = "remix.mp4"
-                        result_file.seek(0)
-
-                        try:
-                            await context.bot.send_video(
-                                chat_id=update.effective_chat.id,
-                                video=result_file,
-                                supports_streaming=True,
-                                filename="video.mp4"
-                            )
-                        except:
-                            result_file.seek(0)
-                            await context.bot.send_document(
-                                chat_id=update.effective_chat.id,
-                                document=result_file
-                            )
-
-                        # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
-                        async with db_pool.acquire() as conn:
+                            # ===== ТОЛЬКО ПРОВЕРКА (БЕЗ СПИСАНИЯ) =====
 
                             if paid_video > 0:
-                                await conn.execute(
-                                    "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
-                                    user_id
-                                )
+                                logging.info(f"💰 PAID VIDEO AVAILABLE user={user_id}")
+
+                            elif premium:
+                                logging.info(f"🍩 USING PREMIUM LIMIT user={user_id}")
+
+                                if video_count >= PREMIUM_VIDEO_LIMIT:
+                                    await msg.reply_text("⚠️ Лимит видео исчерпан (Premium)")
+                                    return
+
                             else:
-                                await conn.execute(
-                                    "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
-                                    user_id
+                                logging.info(f"🆓 USING FREE LIMIT user={user_id}")
+
+                                if video_count >= FREE_VIDEO_LIMIT:
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить 1 видео", callback_data="buy_video")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
+
+                                    await msg.reply_text(
+                                        "🎬 Лимит видео исчерпан",
+                                        reply_markup=keyboard
+                                    )
+                                    return
+
+
+                        model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
+
+                        text_map = {
+                            "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
+                            "video": "<pre>🎬 Генерация видео... 0%</pre>",
+                            "cartoon": "<pre>🎬 Генерация мультфильма... 0%</pre>",
+                            "remix": "<pre>🔥 Создание тренда (Remix)... 0%</pre>",
+                            "music": "<pre>🎵 Генерация музыки... 0%</pre>"
+                        }
+
+                        if status:
+                            try:
+                                await status.edit_text(
+                                    text_map.get(mode, "⏳ Генерация..."),
+                                    reply_markup=cancel_button,
+                                    parse_mode="HTML"
                                 )
+                            except:
+                                pass
+                        else:
+                            status = await msg.reply_text(
+                                text_map.get(mode, "⏳ Генерация..."),
+                                reply_markup=cancel_button,
+                                parse_mode="HTML"
+                            )
 
-                        USER_CACHE.pop(user_id, None)
-                
-                    # ================= MUSIC =================
-                    elif mode == "music":
-                        premium = is_premium(user)
+                        images_local = images[:MAX_INPUT_IMAGES]
 
-                        if not premium:
-                            paid_music = user.get("paid_music", 0)
-                            if paid_music <= 0:
-                                keyboard = InlineKeyboardMarkup([
-                                    [InlineKeyboardButton("💳 Купить трек (100₽)", callback_data="buy_music")],
-                                    [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
-                                ])
-                                await msg.reply_text(
-                                    "🎵 Нужна оплата для генерации музыки",
-                                    reply_markup=keyboard
-                                )
-                                return
+                        style = ""
+                        if model == "banana1":
+                            style = "cinematic lighting ultra realistic 8k"
+                        elif model == "banana2":
+                            style = "hyper detailed masterpiece artstation quality"
 
-                        cached_audio_url = await get_cached_music(prompt)
-                        chat_id = update.effective_chat.id
+                        cartoon_style = context.user_data.get("cartoon_style")
 
-                        if cached_audio_url:
+                        if prompt:
+                            if mode == "image" and style:
+                                prompt = f"{style} {prompt}"
+                            elif mode in ["cartoon", "video", "remix"] and cartoon_style:
+                                prompt = f"{cartoon_style}, {prompt}"
+
+                        if prompt:
+                            prompt = clean_prompt(prompt)
+
+                        cache_key = f"{prompt}_{model}_{size}" if prompt else None
+                        cached = generation_cache.get(cache_key) if cache_key else None
+
+                        if cached and time.time() - cached["time"] < CACHE_TIME and mode not in ["video", "music"]:
                             try:
                                 if status:
                                     await status.delete()
                             except:
                                 pass
+                            await msg.reply_photo(photo=cached["image"])
+                            return
+                        # ================= IMAGE =================
+                        if mode == "image":
 
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(cached_audio_url) as resp:
-                                    audio_bytes = await resp.read()
+                            async def dots_animation():
+                                dots_list = ["", ".", "..", "..."]
+                                i = 0
 
-                            audio_file = io.BytesIO(audio_bytes)
-                            ext = cached_audio_url.split(".")[-1]
-                            audio_file.name = f"song.{ext}"
-                            audio_file.seek(0)
-
-                            try:
-                                await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
-
-                                # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
-                                if not premium:
-                                    async with db_pool.acquire() as conn:
-                                        await conn.execute(
-                                            "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
-                                            user_id
-                                        )
-                                        USER_CACHE.pop(user_id, None)
-
-                            except:
-                                audio_file.seek(0)
-                                await context.bot.send_document(chat_id=chat_id, document=audio_file)
-
-                                # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА (fallback)
-                                if not premium:
-                                    async with db_pool.acquire() as conn:
-                                        await conn.execute(
-                                            "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
-                                            user_id
-                                        )
-                                        USER_CACHE.pop(user_id, None)
-
-                        else:
-
-                            async def progress_updater():
-                                pct = 0
-                                last_text = ""
                                 try:
                                     while True:
-                                        await asyncio.sleep(3)
-                                        pct = min(pct + 2, 100)
-                                        new_text = f"🎵 Генерация музыки... {pct}%"
+                                        dots = dots_list[i % len(dots_list)]
+                                        text = f"<pre>🦕 Пожалуйста ожидайте,шедевр создает {model_name}{dots}</pre>"
+                                        try:
+                                            await safe_edit(status, text, parse_mode="HTML")
+                                        except:
+                                            pass
+                                        i += 1
+                                        await asyncio.sleep(1.5)
+                                except asyncio.CancelledError:
+                                    pass
+
+                            animation_task = asyncio.create_task(dots_animation())
+
+                            upload_task = asyncio.create_task(
+                                fake_photo_upload(context.bot, update.effective_chat.id)
+                            )
+
+                            try:
+                                for attempt in range(2):
+                                    try:
+                                        result = await asyncio.wait_for(
+                                            fal_generate(model, prompt, images_local),
+                                            timeout=300
+                                        )
+                                        break
+                                    except Exception as e:
+                                        if attempt == 1:
+                                            raise e
+                                        await asyncio.sleep(1)
+                            finally:
+                                upload_task.cancel()
+                                animation_task.cancel()
+
+                            try:
+                                await status.delete()
+                            except:
+                                pass
+
+                            keyboard = InlineKeyboardMarkup([
+                                [
+                                    InlineKeyboardButton("🔁 Повторить", callback_data="repeat"),
+                                    InlineKeyboardButton("🆕 Начать заново", callback_data="restart")
+                                ],
+                                [
+                                    InlineKeyboardButton("❌ Закончить", callback_data="finish")
+                                ]
+                            ])
+
+                            await msg.reply_photo(photo=result, reply_markup=keyboard)
+
+                            # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ГЕНЕРАЦИИ
+                            async with db_pool.acquire() as conn:
+                                await conn.execute(
+                                    """
+                                    UPDATE users
+                                    SET image_count = image_count + 1
+                                    WHERE user_id=$1
+                                    """,
+                                    user_id
+                                )
+
+                            USER_CACHE.pop(user_id, None)
+
+                            async with db_pool.acquire() as conn:
+
+                                ref_data = await conn.fetchrow(
+                                    "SELECT ref_by, ref_rewarded FROM users WHERE user_id=$1",
+                                    user_id
+                                )
+
+                                if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
+
+                                    await conn.execute(
+                                        """
+                                        UPDATE users
+                                        SET ref_rewarded = 1
+                                        WHERE user_id=$1
+                                        """,
+                                        user_id
+                                    )
+
+                                    await conn.execute(
+                                        """
+                                        UPDATE users
+                                        SET bonus_images = bonus_images + 1
+                                        WHERE user_id=$1
+                                        """,
+                                        ref_data["ref_by"]
+                                    )
+
+                            context.user_data["last_prompt"] = prompt
+                            context.user_data["last_images"] = images_local
+
+                        # ================= VIDEO / CARTOON =================
+                        elif mode in ["video", "cartoon"]:
+
+                            import random
+
+                            async def progress_updater():
+                                steps = [
+                                    "🎬 Анализ промпта...",
+                                    "֎ Подготовка модели...",
+                                    "🎥 Генерация сцен...",
+                                    "🎞 Рендеринг кадров...",
+                                    "🧙 Просим волшебника помочь...",
+                                    "🦄 Происходит магия...",
+                                    "✩°｡⋆⸜(˙꒳​˙ )...",
+                                    "🍕 Перерыв на обед...",
+                                    "👨🏻‍💻 Рендеринг кадров...",
+                                    "🐇 Кролик попал в кадр...",
+                                    "🕵🏼 Ищем кролика...",
+                                    "🧹 Убираем лишнее...",
+                                    "✨ Постобработка...",
+                                    "🦕 Шедевр почти готов...",
+                                    "😱 Осталось совсем немного...",
+                                    "📦 Финальная сборка..."
+                                ]
+
+                                idx = 0
+                                last_text = ""
+
+                                try:
+                                    while idx < len(steps):
+                                        new_text = steps[idx]
+
                                         if new_text != last_text:
                                             try:
                                                 await safe_edit(status, new_text)
                                                 last_text = new_text
                                             except:
                                                 pass
+
+                                        await asyncio.sleep(random.randint(5, 10))
+                                        idx += 1
+
+                                    try:
+                                        await status.edit_text("🚀 Завершение обработки...")
+                                    except:
+                                        pass
+
                                 except asyncio.CancelledError:
                                     pass
 
                             progress_task = asyncio.create_task(progress_updater())
 
                             try:
-                                result = await asyncio.wait_for(
-                                    fal_music_generate(prompt),
-                                    timeout=360
+                                result_bytes = await asyncio.wait_for(
+                                    fal_video_generate(prompt, images_local),
+                                    timeout=600
                                 )
                             finally:
                                 progress_task.cancel()
 
                             try:
+                                await status.delete()
+                            except:
+                                pass
+
+                            result_file = io.BytesIO(result_bytes)
+                            result_file.name = "video.mp4"
+                            result_file.seek(0)
+
+                            try:
+                                await context.bot.send_video(
+                                    chat_id=update.effective_chat.id,
+                                    video=result_file
+                                )
+                            except:
+                                result_file.seek(0)
+                                await context.bot.send_document(
+                                    chat_id=update.effective_chat.id,
+                                    document=result_file
+                                )
+
+                            # ✅ СПИСАНИЕ ТОЛЬКО ПОСЛЕ УСПЕШНОЙ ОТПРАВКИ
+                            async with db_pool.acquire() as conn:
+
+                                user = await conn.fetchrow(
+                                    "SELECT paid_video, video_count FROM users WHERE user_id=$1",
+                                    user_id
+                                )
+
+                                paid_video = user.get("paid_video") or 0
+                                video_count = user.get("video_count") or 0
+
+                                if paid_video > 0:
+                                    await conn.execute(
+                                        """
+                                        UPDATE users
+                                        SET paid_video = paid_video - 1
+                                        WHERE user_id=$1
+                                        """,
+                                        user_id
+                                    )
+                                else:
+                                    await conn.execute(
+                                        """
+                                        UPDATE users
+                                        SET video_count = video_count + 1
+                                        WHERE user_id=$1
+                                        """,
+                                        user_id
+                                    )
+
+                            USER_CACHE.pop(user_id, None)
+
+
+                        # ================= REMIX =================
+                        elif mode == "remix":
+
+                            import random
+                            import tempfile
+                            import subprocess
+
+                            async def progress_updater():
+                                steps = [
+                                    "👨🏻‍🏫 Анализ видео...",
+                                    "🌐 Ищем материал в интернете...",
+                                    "🎬 Подготовка KLING модели...",
+                                    "✂️ Настраиваем видео по размеру...",
+                                    "🎥 Обработка видео...",
+                                    "👽 В кадр попал пришелец...",
+                                    "🚀 Убираем лишнее из кадра...",
+                                    "🎥 Обработка видео...",
+                                    "✨ Применение эффектов...",
+                                    "🧠 AI думает как TikTok...",
+                                    "🦄 Добавляем магию...",
+                                    "🌠 Падающая звезда...",
+                                    "⭐ Загадайте желание...",
+                                    "🎞 Рендеринг кадров...",
+                                    "🦕 Почти готово...",
+                                    "🔌 Кто то выключил свет...",
+                                    "🐘 Слоник задел шнур питания...",
+                                    "💾 Проверка сохранения видео...",
+                                    "🏁 Видео почти готово...",
+                                    "🤩 Я посмотрел, это шедевр...",
+                                    "🥳 Осталось немного...",
+                                    "🦥 О смотри кого нашел...",
+                                    "(∩｀-´)⊃━☆ﾟ.*･｡ﾟ Ускоряю процесс...",
+                                    "🍿 Думаю уже финал...",
+                                    "📦 Финальная сборка..."
+                                ]
+
+                                idx = 0
+                                last_text = ""
+
+                                try:
+                                    while True:
+                                        new_text = steps[idx % len(steps)]
+
+                                        if new_text != last_text:
+                                            try:
+                                                await safe_edit(status, new_text)
+                                                last_text = new_text
+                                            except:
+                                                pass
+
+                                        await asyncio.sleep(random.randint(4, 8))
+                                        idx += 1
+
+                                except asyncio.CancelledError:
+                                    pass
+
+                            video_bytes = job.get("video")
+                            images = job.get("images", [])
+
+                            # 🔥 HARD FALLBACK
+                            if not video_bytes:
+                                video_bytes = (
+                                    context.user_data.get("input_video")
+                                    or context.user_data.get("input_video_bytes")
+                                )
+
+                            if not images:
+                                images = context.user_data.get("input_images", [])
+
+                            if not video_bytes:
+                                if msg:
+                                    await msg.reply_text("⚠️ Сначала отправьте видео")
+                                return
+
+                            # ================= AUTO RESIZE 720x720 =================
+                            try:
+                                with tempfile.NamedTemporaryFile(suffix=".mp4") as inp, \
+                                     tempfile.NamedTemporaryFile(suffix=".mp4") as out:
+
+                                    inp.write(video_bytes)
+                                    inp.flush()
+
+                                    cmd = [
+                                        "ffmpeg",
+                                        "-y",
+                                        "-i", inp.name,
+                                        "-vf", "scale=720:720:force_original_aspect_ratio=decrease,pad=720:720:(ow-iw)/2:(oh-ih)/2",
+                                        "-c:v", "libx264",
+                                        "-preset", "veryfast",
+                                        "-crf", "23",
+                                        "-pix_fmt", "yuv420p",
+                                        "-movflags", "+faststart",
+                                        "-c:a", "aac",
+                                        "-b:a", "128k",
+                                        out.name
+                                    ]
+
+                                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                                    with open(out.name, "rb") as f:
+                                        video_bytes = f.read()
+
+                            except Exception as e:
+                                print("⚠️ RESIZE ERROR:", e)
+
+                            # 🔥 Kling limit
+                            if len(images) > 4:
+                                images = images[:4]
+
+                            # 🔥 prompt fix
+                            if images and "@Image" not in prompt:
+                                prompt = prompt + " Use @Image1 for style reference"
+
+                            # 🔥 FIX: convert images bytes -> base64 urls
+                            image_urls = []
+
+                            if images:
+                                for img in images:
+                                    try:
+                                        img_b64 = base64.b64encode(img).decode("utf-8")
+                                        image_urls.append(f"data:image/jpeg;base64,{img_b64}")
+                                    except Exception as e:
+                                        print("⚠️ IMAGE BASE64 ERROR:", e)
+
+                            progress_task = asyncio.create_task(progress_updater())
+
+                            result_bytes = None
+                            video_url = None
+
+                            try:
+                                # ================= REQUEST =================
+                                video_b64 = base64.b64encode(video_bytes).decode("utf-8")
+                                video_url = f"data:video/mp4;base64,{video_b64}"
+
+                                async with aiohttp.ClientSession() as session:
+
+                                    async with session.post(
+                                        "https://queue.fal.run/fal-ai/kling-video/o1/standard/video-to-video/edit",
+                                        json={
+                                            "prompt": prompt,
+                                            "video_url": video_url,
+                                            "image_urls": image_urls
+                                        },
+                                        headers={
+                                            "Authorization": f"Key {FAL_KEY}",
+                                            "Content-Type": "application/json"
+                                        }
+                                    ) as resp:
+
+                                        text = await resp.text()
+
+                                        try:
+                                            data = await resp.json()
+                                        except:
+                                            raise Exception(f"Kling not JSON: {text}")
+
+                                        request_id = data.get("request_id")
+
+                                        if not request_id:
+                                            raise Exception(f"No request_id: {data}")
+
+                                # ================= POLL =================
+                                status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
+                                result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
+
+                                async with aiohttp.ClientSession() as session:
+
+                                    for _ in range(300):
+
+                                        async with session.get(status_url) as s:
+
+                                            status_json = await s.json()
+                                            state = status_json.get("status")
+
+                                            if state == "COMPLETED":
+
+                                                async with session.get(result_url) as r:
+                                                    result = await r.json()
+
+                                                    video_file_url = result.get("video", {}).get("url")
+
+                                                    if not video_file_url:
+                                                        raise Exception(f"Bad result: {result}")
+
+                                                    async with session.get(video_file_url) as v:
+                                                        result_bytes = await v.read()
+
+                                                break
+
+                                            if state == "FAILED":
+                                                raise Exception(f"FAL failed: {status_json}")
+
+                                        await asyncio.sleep(2)
+
+                            except Exception as e:
+
+                                err = traceback.format_exc()
+
+                                try:
+                                    await safe_edit(status, f"⚠️ Ошибка remix:\n{e}")
+                                except:
+                                    pass
+
+                                print("❌ REMIX ERROR:", err)
+                                return
+
+                            finally:
+                                progress_task.cancel()
+                                try:
+                                    await progress_task
+                                except:
+                                    pass
+
+                            try:
                                 if status:
-                                    await status.edit_text("✅ Готово 100%")
                                     await status.delete()
                             except:
                                 pass
 
-                            async with aiohttp.ClientSession() as session:
-                                async with session.get(result) as resp:
-                                    audio_bytes = await resp.read()
+                            if not result_bytes:
+                                if msg:
+                                    await msg.reply_text("⚠️ FAL не вернул видео")
+                                return
 
-                            await save_music_cache(prompt, result)
-
-                            audio_file = io.BytesIO(audio_bytes)
-                            ext = result.split(".")[-1]
-                            audio_file.name = f"song.{ext}"
-                            audio_file.seek(0)
+                            result_file = io.BytesIO(result_bytes)
+                            result_file.name = "remix.mp4"
+                            result_file.seek(0)
 
                             try:
-                                await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
-
-                                # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
-                                if not premium:
-                                    async with db_pool.acquire() as conn:
-                                        await conn.execute(
-                                            "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
-                                            user_id
-                                        )
-                                        USER_CACHE.pop(user_id, None)
-
+                                await context.bot.send_video(
+                                    chat_id=update.effective_chat.id,
+                                    video=result_file,
+                                    supports_streaming=True,
+                                    filename="video.mp4"
+                                )
                             except:
-                                audio_file.seek(0)
-                                await context.bot.send_document(chat_id=chat_id, document=audio_file)
+                                result_file.seek(0)
+                                await context.bot.send_document(
+                                    chat_id=update.effective_chat.id,
+                                    document=result_file
+                                )
 
-                                # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА (fallback)
-                                if not premium:
-                                    async with db_pool.acquire() as conn:
-                                        await conn.execute(
-                                            "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
-                                            user_id
-                                        )
-                                        USER_CACHE.pop(user_id, None)
+                            # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
+                            async with db_pool.acquire() as conn:
+
+                                if paid_video > 0:
+                                    await conn.execute(
+                                        "UPDATE users SET paid_video = paid_video - 1 WHERE user_id=$1",
+                                        user_id
+                                    )
+                                else:
+                                    await conn.execute(
+                                        "UPDATE users SET video_count = video_count + 1 WHERE user_id=$1",
+                                        user_id
+                                    )
+
+                            USER_CACHE.pop(user_id, None)
+                
+                        # ================= MUSIC =================
+                        elif mode == "music":
+                            premium = is_premium(user)
+
+                            if not premium:
+                                paid_music = user.get("paid_music", 0)
+                                if paid_music <= 0:
+                                    keyboard = InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("💳 Купить трек (100₽)", callback_data="buy_music")],
+                                        [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
+                                    ])
+                                    await msg.reply_text(
+                                        "🎵 Нужна оплата для генерации музыки",
+                                        reply_markup=keyboard
+                                    )
+                                    return
+
+                            cached_audio_url = await get_cached_music(prompt)
+                            chat_id = update.effective_chat.id
+
+                            if cached_audio_url:
+                                try:
+                                    if status:
+                                        await status.delete()
+                                except:
+                                    pass
+
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(cached_audio_url) as resp:
+                                        audio_bytes = await resp.read()
+
+                                audio_file = io.BytesIO(audio_bytes)
+                                ext = cached_audio_url.split(".")[-1]
+                                audio_file.name = f"song.{ext}"
+                                audio_file.seek(0)
+
+                                try:
+                                    await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+
+                                    # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
+                                    if not premium:
+                                        async with db_pool.acquire() as conn:
+                                            await conn.execute(
+                                                "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                                user_id
+                                            )
+                                            USER_CACHE.pop(user_id, None)
+
+                                except:
+                                    audio_file.seek(0)
+                                    await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
+                                    # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА (fallback)
+                                    if not premium:
+                                        async with db_pool.acquire() as conn:
+                                            await conn.execute(
+                                                "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                                user_id
+                                            )
+                                            USER_CACHE.pop(user_id, None)
+
+                            else:
+
+                                async def progress_updater():
+                                    pct = 0
+                                    last_text = ""
+                                    try:
+                                        while True:
+                                            await asyncio.sleep(3)
+                                            pct = min(pct + 2, 100)
+                                            new_text = f"🎵 Генерация музыки... {pct}%"
+                                            if new_text != last_text:
+                                                try:
+                                                    await safe_edit(status, new_text)
+                                                    last_text = new_text
+                                                except:
+                                                    pass
+                                    except asyncio.CancelledError:
+                                        pass
+
+                                progress_task = asyncio.create_task(progress_updater())
+
+                                try:
+                                    result = await asyncio.wait_for(
+                                        fal_music_generate(prompt),
+                                        timeout=360
+                                    )
+                                finally:
+                                    progress_task.cancel()
+
+                                try:
+                                    if status:
+                                        await status.edit_text("✅ Готово 100%")
+                                        await status.delete()
+                                except:
+                                    pass
+
+                                async with aiohttp.ClientSession() as session:
+                                    async with session.get(result) as resp:
+                                        audio_bytes = await resp.read()
+
+                                await save_music_cache(prompt, result)
+
+                                audio_file = io.BytesIO(audio_bytes)
+                                ext = result.split(".")[-1]
+                                audio_file.name = f"song.{ext}"
+                                audio_file.seek(0)
+
+                                try:
+                                    await context.bot.send_audio(chat_id=chat_id, audio=audio_file)
+
+                                    # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
+                                    if not premium:
+                                        async with db_pool.acquire() as conn:
+                                            await conn.execute(
+                                                "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                                user_id
+                                            )
+                                            USER_CACHE.pop(user_id, None)
+
+                                except:
+                                    audio_file.seek(0)
+                                    await context.bot.send_document(chat_id=chat_id, document=audio_file)
+
+                                    # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА (fallback)
+                                    if not premium:
+                                        async with db_pool.acquire() as conn:
+                                            await conn.execute(
+                                                "UPDATE users SET paid_music = paid_music - 1 WHERE user_id=$1",
+                                                user_id
+                                            )
+                                            USER_CACHE.pop(user_id, None)
 
                 except Exception as e:
                     logging.error(f"❌ HANDLE ERROR: {e}")
