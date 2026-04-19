@@ -3163,40 +3163,42 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-# ================= REPEAT (ИСПРАВЛЕН + ЗАЩИТА ОТ ГОНКИ) =================
-elif data == "repeat":
-
-    # ===== 🔥 DOUBLE CLICK PROTECTION =====
-    if context.user_data.get("repeat_lock"):
-        await query.message.reply_text("⏳ Уже выполняется повторная генерация")
-        return
-
-    context.user_data["repeat_lock"] = True
-
-    try:
-
+    # ================= REPEAT (ИСПРАВЛЕН) =================
+    elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
         mode = context.user_data.get("mode", "image")
 
         # 🔥 ДОБАВЛЕНО: защита от пустой задачи
         if not prompt and not images:
-            await query.message.reply_text("⚠️ Нет данных для повторной генерации")
+            try:
+                await query.message.reply_text("⚠️ Нет данных для повторной генерации")
+            except:
+                pass
             return
 
         if user_id in active_generations:
-            await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+            try:
+                await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
+            except:
+                pass
             return
 
         # 🔥 ДОБАВЛЕНО: проверка лимита
         allowed, msg = check_user_generation_limit(user_id)
         if not allowed:
-            await query.message.reply_text(msg)
+            try:
+                await query.message.reply_text(msg)
+            except:
+                pass
             return
 
         # 🔥 ДОБАВЛЕНО: защита от перегрузки
         if get_queue_position() > 1000:
-            await query.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
+            try:
+                await query.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
+            except:
+                pass
             return
 
         # 🔥 ДОБАВЛЕНО: блокировка
@@ -3204,12 +3206,12 @@ elif data == "repeat":
 
         position = get_queue_position() + 1
 
+        status = None
         try:
             status = await query.message.reply_text(
                 f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
             )
-        except Exception as e:
-            logging.warning(f"STATUS SEND ERROR: {e}")
+        except:
             status = None
 
         queue_map = {
@@ -3242,17 +3244,13 @@ elif data == "repeat":
             except:
                 pass
 
-            try:
-                if status:
+            if status:
+                try:
                     await status.edit_text("❌ Ошибка очереди. Попробуйте позже.")
-            except:
-                pass
+                except:
+                    pass
 
             return
-
-    finally:
-        # ===== 🔓 ALWAYS CLEAN LOCK =====
-        context.user_data.pop("repeat_lock", None)
 
     # ================= CLEAR OLD STYLES =================
     if context.user_data.get("mode") not in ["cartoon"]:
