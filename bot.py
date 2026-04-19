@@ -1494,7 +1494,6 @@ async def handle_generation_job(job):
     user_id = job["user_id"]
     status = job.get("status")
     mode = job.get("mode", "image")
-    video_allowed = False
 
     msg = getattr(update, "message", None)
     if not msg and getattr(update, "callback_query", None):
@@ -1515,10 +1514,9 @@ async def handle_generation_job(job):
     async with lock:
         try:
 
-            # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ НА ВСЮ ЗАДАЧУ =====
             await asyncio.wait_for(
                 _handle_generation_inner(job),
-                timeout=600  # 10 минут максимум
+                timeout=600
             )
 
         except asyncio.TimeoutError:
@@ -1526,7 +1524,7 @@ async def handle_generation_job(job):
 
             try:
                 if status:
-                    await status.edit_text("⏰ Генерация заняла слишком много времени и была остановлена")
+                    await status.edit_text("⏰ Генерация заняла слишком много времени")
             except:
                 pass
 
@@ -1535,44 +1533,51 @@ async def handle_generation_job(job):
 
             try:
                 if msg:
-                    await msg.reply_text("⚠️ Ошибка генерации. Попробуйте позже.")
+                    await msg.reply_text("⚠️ Ошибка генерации")
             except:
                 pass
 
         finally:
-            # ================= 🔓 UNLOCK =================
+            # ===== ✅ ACTIVE GENERATIONS CLEAN =====
+            try:
+                active_generations.pop(user_id, None)
+            except Exception as e:
+                logging.error(f"ACTIVE GENERATIONS CLEAN ERROR: {e}")
+
+            # ===== ✅ ЕДИНСТВЕННОЕ МЕСТО UNLOCK =====
             try:
                 unlock_user_generation(user_id)
             except Exception as e:
                 logging.error(f"UNLOCK ERROR: {e}")
 
-            # ================= 🔐 LOCK CLEAN =================
-            try:
-                if user_id in user_locks:
-                    user_locks.pop(user_id, None)
-            except Exception as e:
-                logging.error(f"LOCK CLEAN ERROR: {e}")
-
-            # ================= ⚠️ ВАЖНО =================
-            # ❌ НЕ ЧИСТИ last_prompt / last_images здесь
-            # иначе repeat перестанет работать
-
-            # ================= 🧠 CLEAN ONLY TEMP DATA =================
+            # ===== ✅ ЧИСТИМ ТОЛЬКО ВРЕМЕННОЕ =====
             try:
                 if context and hasattr(context, "user_data"):
 
                     context.user_data.pop("input_video", None)
                     context.user_data.pop("input_video_bytes", None)
 
-                    # ❌ НЕ ТРОГАТЬ:
+                    # ❗ НЕ ТРОГАЕМ repeat
                     # last_prompt
                     # last_images
 
             except Exception as e:
                 logging.error(f"USER_DATA CLEAN ERROR: {e}")
 
-            logging.info(f"🧹 CLEANUP user {user_id}")
+            # ===== LOCK CLEAN =====
+            try:
+                user_locks.pop(user_id, None)
+            except Exception as e:
+                logging.error(f"LOCK CLEAN ERROR: {e}")
 
+            # ===== 🧠 GC (ОПЦИОНАЛЬНО) =====
+            try:
+                import gc
+                gc.collect()
+            except:
+                pass
+
+            logging.info(f"🧹 CLEANUP user {user_id}")
 
 # ================= ВНУТРЕННЯЯ ЛОГИКА =================
 
@@ -2403,58 +2408,7 @@ async def _handle_generation_inner(job):
                             pass
 
 
-                finally:
-                    try:
-                        # ================= 🔥 ACTIVE GENERATIONS =================
-                        if isinstance(active_generations, dict):
-                            active_generations.pop(user_id, None)
-                        else:
-                            active_generations.pop(user_id, None)
 
-                        # ================= 🔓 UNLOCK =================
-                        try:
-                            unlock_user_generation(user_id)
-                        except Exception as e:
-                            logging.error(f"UNLOCK ERROR: {e}")
-
-                        # ================= 🧹 USER DATA CLEAN =================
-                        try:
-                            if context and hasattr(context, "user_data"):
-
-                                context.user_data.pop("input_video", None)
-                                context.user_data.pop("input_video_bytes", None)
-                                context.user_data.pop("input_images", None)
-
-                                context.user_data.pop("last_images", None)
-                                context.user_data.pop("last_prompt", None)
-
-                                context.user_data.pop("pending_video", None)
-                                context.user_data.pop("input_video_ready", None)
-
-                        except Exception as e:
-                            logging.error(f"USER_DATA CLEAN ERROR: {e}")
-
-                        # ================= 🔐 LOCK CLEAN =================
-                        try:
-                            if isinstance(user_locks, dict):
-                                user_locks.pop(user_id, None)
-                            else:
-                                user_locks.pop(user_id, None)
-
-                        except Exception as e:
-                            logging.error(f"LOCK CLEAN ERROR: {e}")
-
-                        # ================= 🧠 GC =================
-                        try:
-                            import gc
-                            gc.collect()
-                        except:
-                            pass
-
-                        logging.info(f"🧹 CLEANUP user {user_id}")
-
-                    except Exception as e:
-                        logging.error(f"FINAL CLEANUP ERROR: {e}")
 # ================== WORKERS ==================
 async def image_worker():
     while True:
@@ -3419,6 +3373,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 🔥 СОХРАНЯЕМ КАРТИНКИ (ВАЖНО ДЛЯ KLING)
     context.user_data.setdefault("input_images", []).append(image_bytes)
+    context.user_data["input_images"] = context.user_data["input_images"][-4:]
 
     caption = update.message.caption
 
@@ -3487,8 +3442,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ===== SUPPORT =====
     if context.user_data.get("support_mode"):
 
-        if not message:
-            return
+        
 
         user = update.effective_user
         text = message.text
@@ -3603,7 +3557,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await context.bot.send_message(u["user_id"], text)
                 sent += 1
-                await asyncio.sleep(0.03)  # анти-флуд Telegram
+                await asyncio.sleep(0.05)  # анти-флуд Telegram
             except:
                 failed += 1
 
