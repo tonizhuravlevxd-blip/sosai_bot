@@ -1472,24 +1472,10 @@ async def handle_generation_job(job):
         return
 
     # ================= 🔥 LOCK =================
-    lock = user_locks.setdefault(user_id, asyncio.Lock())
-    now = time.time()
-
-    # 🔥 TTL marker для watchdog
-    if not hasattr(lock, "last_used"):
-        lock.last_used = now
-
-    # ================= 🔥 ANTI DOUBLE RUN (SAFE TTL CHECK) =================
-    if lock.locked() and (now - getattr(lock, "last_used", 0) < 30):
-        if msg:
-            await msg.reply_text("⏳ Генерация уже выполняется.")
-        return
+    lock = get_user_lock(user_id)
 
     async with lock:
         try:
-
-            # 🔥 heartbeat
-            lock.last_used = time.time()
 
             # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ =====
             await asyncio.wait_for(
