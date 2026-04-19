@@ -157,7 +157,7 @@ no_mode_cooldown = {}
 NO_MODE_COOLDOWN_TIME = 10
 
 # защита генераций
-active_generations = set()
+active_generations = {}
 user_generation_count = {}
 
 MAX_USER_GENERATIONS = 2
@@ -172,24 +172,41 @@ def check_user_generation_limit(user_id):
 
 
 def lock_user_generation(user_id):
-    # увеличиваем счётчик
+
     count = user_generation_count.get(user_id, 0) + 1
     user_generation_count[user_id] = count
 
-    # если это первая задача — фиксируем время
-    if count == 1:
-        active_generations[user_id] = time.time()
+    # фиксируем время первой активности
+    active_generations[user_id] = time.time()
     
 def unlock_user_generation(user_id):
+
     count = user_generation_count.get(user_id, 0)
 
     if count <= 1:
         user_generation_count.pop(user_id, None)
-        active_generations.pop(user_id, None)  # 🔥 важно
+        active_generations.pop(user_id, None)
     else:
         user_generation_count[user_id] = count - 1
     
+async def generation_cleanup_worker():
+    while True:
+        try:
+            now = time.time()
 
+            for user_id in list(active_generations.keys()):
+                if now - active_generations[user_id] > 600:
+                    
+                    active_generations.pop(user_id, None)
+                    user_generation_count.pop(user_id, None)
+
+                    logging.warning(f"🧹 AUTO CLEAN USER: {user_id}")
+
+            await asyncio.sleep(60)
+
+        except Exception as e:
+            logging.error(f"❌ CLEANER ERROR: {e}")
+            await asyncio.sleep(5)
 
 # ================= CACHE CLEANER =================
 MAX_CACHE_SIZE = 500
@@ -3985,6 +4002,7 @@ async def post_init(app):
     asyncio.create_task(user_cache_cleaner())
     asyncio.create_task(cache_cleaner())
     asyncio.create_task(worker_watchdog())
+    asyncio.create_task(generation_cleanup_worker())
 
     # ================= КОМАНДЫ =================
     await set_commands(app)
