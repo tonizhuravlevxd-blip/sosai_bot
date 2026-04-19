@@ -3163,8 +3163,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ================= REPEAT (ИСПРАВЛЕН) =================
-    elif data == "repeat":
+# ================= REPEAT (ИСПРАВЛЕН + ЗАЩИТА ОТ ГОНКИ) =================
+elif data == "repeat":
+
+    # ===== 🔥 DOUBLE CLICK PROTECTION =====
+    if context.user_data.get("repeat_lock"):
+        await query.message.reply_text("⏳ Уже выполняется повторная генерация")
+        return
+
+    context.user_data["repeat_lock"] = True
+
+    try:
+
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
         mode = context.user_data.get("mode", "image")
@@ -3193,9 +3203,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         lock_user_generation(user_id)
 
         position = get_queue_position() + 1
-        status = await query.message.reply_text(
-            f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
-        )
+
+        try:
+            status = await query.message.reply_text(
+                f"⏳ Вы в очереди: {position}\n🦕 Шедевр создается, немного надо подождать..."
+            )
+        except Exception as e:
+            logging.warning(f"STATUS SEND ERROR: {e}")
+            status = None
 
         queue_map = {
             "image": generation_queue_image,
@@ -3222,14 +3237,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logging.error(f"❌ QUEUE PUT ERROR: {e}")
 
-            unlock_user_generation(user_id)
+            try:
+                unlock_user_generation(user_id)
+            except:
+                pass
 
             try:
-                await status.edit_text("❌ Ошибка очереди. Попробуйте позже.")
+                if status:
+                    await status.edit_text("❌ Ошибка очереди. Попробуйте позже.")
             except:
                 pass
 
             return
+
+    finally:
+        # ===== 🔓 ALWAYS CLEAN LOCK =====
+        context.user_data.pop("repeat_lock", None)
 
     # ================= CLEAR OLD STYLES =================
     if context.user_data.get("mode") not in ["cartoon"]:
