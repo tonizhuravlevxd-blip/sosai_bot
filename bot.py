@@ -1483,6 +1483,62 @@ semaphore_image = asyncio.Semaphore(30)
 semaphore_video = asyncio.Semaphore(10)
 semaphore_music = asyncio.Semaphore(5)
 
+async def handle_generation_job(job):
+
+    update = job["update"]
+    context = job["context"]
+    prompt = job.get("prompt")
+    size = job.get("size", "1024x1024")
+    model = job.get("model", "banana2")
+    images = job.get("images", [])
+    user_id = job["user_id"]
+    status = job.get("status")
+    mode = job.get("mode", "image")
+    video_allowed = False
+
+    msg = getattr(update, "message", None)
+    if not msg and getattr(update, "callback_query", None):
+        msg = update.callback_query.message
+
+    if not prompt and not images:
+        logging.warning(f"⚠ ПУСТАЯ ЗАДАЧА user={user_id} mode={mode}")
+        return
+
+    # ===== 🔥 LOCK =====
+    lock = user_locks.setdefault(user_id, asyncio.Lock())
+
+    if lock.locked():
+        if msg:
+            await msg.reply_text("⏳ Генерация уже выполняется.")
+        return
+
+    async with lock:
+        try:
+
+            # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ НА ВСЮ ЗАДАЧУ =====
+            await asyncio.wait_for(
+                _handle_generation_inner(job),
+                timeout=600  # 10 минут максимум
+            )
+
+        except asyncio.TimeoutError:
+            logging.error(f"⏰ TIMEOUT user={user_id} mode={mode}")
+
+            try:
+                if status:
+                    await status.edit_text("⏰ Генерация заняла слишком много времени и была остановлена")
+            except:
+                pass
+
+        except Exception as e:
+            logging.error(f"❌ HANDLE ERROR: {e}")
+
+            try:
+                if msg:
+                    await msg.reply_text("⚠️ Ошибка генерации. Попробуйте позже.")
+            except:
+                pass
+
         finally:
             # ================= 🔓 UNLOCK =================
             try:
