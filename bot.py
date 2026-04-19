@@ -1483,70 +1483,39 @@ semaphore_image = asyncio.Semaphore(30)
 semaphore_video = asyncio.Semaphore(10)
 semaphore_music = asyncio.Semaphore(5)
 
-async def handle_generation_job(job):
-
-    update = job["update"]
-    context = job["context"]
-    prompt = job.get("prompt")
-    size = job.get("size", "1024x1024")
-    model = job.get("model", "banana2")
-    images = job.get("images", [])
-    user_id = job["user_id"]
-    status = job.get("status")
-    mode = job.get("mode", "image")
-    video_allowed = False
-
-    msg = getattr(update, "message", None)
-    if not msg and getattr(update, "callback_query", None):
-        msg = update.callback_query.message
-
-    if not prompt and not images:
-        logging.warning(f"⚠ ПУСТАЯ ЗАДАЧА user={user_id} mode={mode}")
-        return
-
-    # ===== 🔥 LOCK =====
-    lock = user_locks.setdefault(user_id, asyncio.Lock())
-
-    if lock.locked():
-        if msg:
-            await msg.reply_text("⏳ Генерация уже выполняется.")
-        return
-
-    async with lock:
-        try:
-
-            # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ НА ВСЮ ЗАДАЧУ =====
-            await asyncio.wait_for(
-                _handle_generation_inner(job),
-                timeout=600  # 10 минут максимум
-            )
-
-        except asyncio.TimeoutError:
-            logging.error(f"⏰ TIMEOUT user={user_id} mode={mode}")
-
-            try:
-                if status:
-                    await status.edit_text("⏰ Генерация заняла слишком много времени и была остановлена")
-            except:
-                pass
-
-        except Exception as e:
-            logging.error(f"❌ HANDLE ERROR: {e}")
-
-            try:
-                if msg:
-                    await msg.reply_text("⚠️ Ошибка генерации. Попробуйте позже.")
-            except:
-                pass
-
         finally:
-            # 🔥 ГАРАНТИЯ РАЗЛОКА
+            # ================= 🔓 UNLOCK =================
             try:
                 unlock_user_generation(user_id)
-            except:
-                pass
+            except Exception as e:
+                logging.error(f"UNLOCK ERROR: {e}")
 
-            active_generations.pop(user_id, None)
+            # ================= 🔐 LOCK CLEAN =================
+            try:
+                if user_id in user_locks:
+                    user_locks.pop(user_id, None)
+            except Exception as e:
+                logging.error(f"LOCK CLEAN ERROR: {e}")
+
+            # ================= ⚠️ ВАЖНО =================
+            # ❌ НЕ ЧИСТИ last_prompt / last_images здесь
+            # иначе repeat перестанет работать
+
+            # ================= 🧠 CLEAN ONLY TEMP DATA =================
+            try:
+                if context and hasattr(context, "user_data"):
+
+                    context.user_data.pop("input_video", None)
+                    context.user_data.pop("input_video_bytes", None)
+
+                    # ❌ НЕ ТРОГАТЬ:
+                    # last_prompt
+                    # last_images
+
+            except Exception as e:
+                logging.error(f"USER_DATA CLEAN ERROR: {e}")
+
+            logging.info(f"🧹 CLEANUP user {user_id}")
 
 
 # ================= ВНУТРЕННЯЯ ЛОГИКА =================
