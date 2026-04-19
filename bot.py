@@ -2411,13 +2411,30 @@ async def image_worker():
         try:
             job = await generation_queue_image.get()
 
+            user_id = job.get("user_id")
+
             try:
-                await handle_generation_job(job)
+                # ===== TTL ЗАЩИТА =====
+                if time.time() - job.get("created_at", 0) > 300:
+                    logging.warning(f"⏳ IMAGE JOB EXPIRED: {user_id}")
+                    continue
+
+                # ===== TIMEOUT =====
+                await asyncio.wait_for(
+                    handle_generation_job(job),
+                    timeout=300
+                )
+
+            except asyncio.TimeoutError:
+                logging.error(f"⏰ IMAGE TIMEOUT: {user_id}")
+
             except Exception as e:
                 logging.error(f"❌ IMAGE WORKER ERROR: {e}")
 
             finally:
-                unlock_user_generation(user_id)
+                if user_id:
+                    unlock_user_generation(user_id)
+
                 generation_queue_image.task_done()
 
         except Exception as e:
@@ -2430,13 +2447,30 @@ async def video_worker():
         try:
             job = await generation_queue_video.get()
 
+            user_id = job.get("user_id")
+
             try:
-                await handle_generation_job(job)
+                # ===== TTL =====
+                if time.time() - job.get("created_at", 0) > 300:
+                    logging.warning(f"⏳ VIDEO JOB EXPIRED: {user_id}")
+                    continue
+
+                # ===== TIMEOUT (видео дольше) =====
+                await asyncio.wait_for(
+                    handle_generation_job(job),
+                    timeout=600
+                )
+
+            except asyncio.TimeoutError:
+                logging.error(f"⏰ VIDEO TIMEOUT: {user_id}")
+
             except Exception as e:
                 logging.error(f"❌ VIDEO WORKER ERROR: {e}")
 
             finally:
-                unlock_user_generation(user_id)
+                if user_id:
+                    unlock_user_generation(user_id)
+
                 generation_queue_video.task_done()
 
         except Exception as e:
@@ -2449,21 +2483,30 @@ async def music_worker():
         try:
             job = await generation_queue_music.get()
 
+            user_id = job.get("user_id")
+
             try:
-                # 🔥 защита от зависания генерации
+                # ===== TTL =====
+                if time.time() - job.get("created_at", 0) > 300:
+                    logging.warning(f"⏳ MUSIC JOB EXPIRED: {user_id}")
+                    continue
+
+                # ===== TIMEOUT =====
                 await asyncio.wait_for(
                     handle_generation_job(job),
                     timeout=420
                 )
 
             except asyncio.TimeoutError:
-                logging.error("⏰ MUSIC TIMEOUT (job завис)")
+                logging.error(f"⏰ MUSIC TIMEOUT: {user_id}")
 
             except Exception as e:
                 logging.error(f"❌ MUSIC WORKER ERROR: {e}")
 
             finally:
-                unlock_user_generation(user_id)
+                if user_id:
+                    unlock_user_generation(user_id)
+
                 generation_queue_music.task_done()
 
         except Exception as e:
@@ -3168,13 +3211,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "images": images,
                 "user_id": user_id,
                 "mode": mode,
-                "status": status
+                "status": status,
+                "created_at": time.time()
             })
-        except:
-            unlock_user_generation(user_id)
-            raise
 
-        return
+        except Exception as e:
+            logging.error(f"❌ QUEUE PUT ERROR: {e}")
+
+            unlock_user_generation(user_id)
+
+            try:
+                await status.edit_text("❌ Ошибка очереди. Попробуйте позже.")
+            except:
+                pass
+
+            return
 
     # ================= CLEAR OLD STYLES =================
     if context.user_data.get("mode") not in ["cartoon"]:
@@ -3369,7 +3420,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "video_ready": context.user_data.get("input_video_ready"),
             "user_id": user_id,
             "mode": mode,
-            "status": status
+            "status": status,
+            "created_at": time.time()
         })
         
 
@@ -3653,7 +3705,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "video_ready": context.user_data.get("input_video_ready"),
         "user_id": user_id,
         "mode": mode,
-        "status": status
+        "status": status,
+        "created_at": time.time()
     })
     
 
