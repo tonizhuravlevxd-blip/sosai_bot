@@ -2409,7 +2409,7 @@ async def _handle_generation_inner(job):
                         if isinstance(active_generations, dict):
                             active_generations.pop(user_id, None)
                         else:
-                            active_generations.discard(user_id)
+                            active_generations.pop(user_id, None)
 
                         # ================= 🔓 UNLOCK =================
                         try:
@@ -2439,7 +2439,7 @@ async def _handle_generation_inner(job):
                             if isinstance(user_locks, dict):
                                 user_locks.pop(user_id, None)
                             else:
-                                user_locks.discard(user_id)
+                                user_locks.pop(user_id, None)
 
                         except Exception as e:
                             logging.error(f"LOCK CLEAN ERROR: {e}")
