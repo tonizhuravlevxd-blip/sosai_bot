@@ -1546,7 +1546,7 @@ async def handle_generation_job(job):
             except:
                 pass
 
-            active_generations.discard(user_id)
+            active_generations.pop(user_id, None)
 
 
 # ================= ВНУТРЕННЯЯ ЛОГИКА =================
@@ -2381,7 +2381,7 @@ async def _handle_generation_inner(job):
                     try:
                         # ================= 🔥 ACTIVE GENERATIONS =================
                         if user_id in active_generations:
-                            active_generations.discard(user_id)
+                            active_generations.pop(user_id, None)
 
                         # ================= 🔓 UNLOCK =================
                         try:
