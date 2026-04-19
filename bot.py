@@ -1162,6 +1162,7 @@ generation_queue_image = asyncio.Queue(maxsize=5000)
 generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
+ACTIVE_TASKS = set()
 
 
 def get_user_lock(user_id):
@@ -2418,6 +2419,13 @@ async def _handle_generation_inner(job):
                     except Exception as e:
                         logging.error(f"FINAL CLEANUP ERROR: {e}")
 # ================== WORKERS ==================
+
+def get_user_lock(user_id):
+    if user_id not in user_locks:
+        user_locks[user_id] = asyncio.Lock()
+    return user_locks[user_id]
+
+
 async def image_worker():
     while True:
         try:
@@ -2426,14 +2434,21 @@ async def image_worker():
 
             lock = get_user_lock(user_id)
 
-            async with lock:
-                try:
-                    await handle_generation_job(job)
+            try:
+                async with lock:  # 🔒 ЛОК ТОЛЬКО ТУТ
+                    await asyncio.wait_for(
+                        handle_generation_job(job),
+                        timeout=180  # ⏱ защита от зависаний
+                    )
 
-                except Exception as e:
-                    logging.error(f"❌ IMAGE WORKER ERROR: {e}")
+            except asyncio.TimeoutError:
+                logging.error(f"⏰ IMAGE TIMEOUT user={user_id}")
 
-            generation_queue_image.task_done()
+            except Exception as e:
+                logging.error(f"❌ IMAGE WORKER ERROR: {e}")
+
+            finally:
+                generation_queue_image.task_done()
 
         except Exception as e:
             logging.critical(f"💀 IMAGE WORKER CRASH: {e}")
@@ -2448,14 +2463,21 @@ async def video_worker():
 
             lock = get_user_lock(user_id)
 
-            async with lock:
-                try:
-                    await handle_generation_job(job)
+            try:
+                async with lock:
+                    await asyncio.wait_for(
+                        handle_generation_job(job),
+                        timeout=300  # видео дольше
+                    )
 
-                except Exception as e:
-                    logging.error(f"❌ VIDEO WORKER ERROR: {e}")
+            except asyncio.TimeoutError:
+                logging.error(f"⏰ VIDEO TIMEOUT user={user_id}")
 
-            generation_queue_video.task_done()
+            except Exception as e:
+                logging.error(f"❌ VIDEO WORKER ERROR: {e}")
+
+            finally:
+                generation_queue_video.task_done()
 
         except Exception as e:
             logging.critical(f"💀 VIDEO WORKER CRASH: {e}")
@@ -2470,25 +2492,25 @@ async def music_worker():
 
             lock = get_user_lock(user_id)
 
-            async with lock:
-                try:
+            try:
+                async with lock:
                     await asyncio.wait_for(
                         handle_generation_job(job),
                         timeout=420
                     )
 
-                except asyncio.TimeoutError:
-                    logging.error("⏰ MUSIC TIMEOUT")
+            except asyncio.TimeoutError:
+                logging.error(f"⏰ MUSIC TIMEOUT user={user_id}")
 
-                except Exception as e:
-                    logging.error(f"❌ MUSIC WORKER ERROR: {e}")
+            except Exception as e:
+                logging.error(f"❌ MUSIC WORKER ERROR: {e}")
 
-            generation_queue_music.task_done()
+            finally:
+                generation_queue_music.task_done()
 
         except Exception as e:
             logging.critical(f"💀 MUSIC WORKER CRASH: {e}")
             await asyncio.sleep(1)
-
 async def worker_watchdog():
 
     CHECK_INTERVAL = 15
@@ -3159,13 +3181,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("⚠️ Нет данных для повторной генерации")
             return
 
-        # ================= 🔥 LOCK =================
-        lock = user_locks.setdefault(user_id, asyncio.Lock())
+        # ================= 🔥 LOCK (FIX) =================
+        lock = user_locks.get(user_id)
 
-        if lock.locked():
+        if lock and lock.locked():
             await query.message.reply_text("⏳ Ваша генерация уже выполняется")
             return
-
         # 🔥 ДОБАВЛЕНО: проверка лимита
         allowed, msg = check_user_generation_limit(user_id)
         if not allowed:
@@ -3358,10 +3379,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_prompt"] = caption
         context.user_data["last_images"] = context.user_data["input_images"]
 
-        # ================= 🔥 LOCK =================
-        lock = user_locks.setdefault(user_id, asyncio.Lock())
+        # ================= 🔥 LOCK (FIX) =================
+        lock = user_locks.get(user_id)
 
-        if lock.locked():
+        if lock and lock.locked():
             await update.message.reply_text("⏳ Ваша генерация уже выполняется")
             return
 
@@ -3582,10 +3603,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-  # ================= 🔥 LOCK (НОВАЯ ЛОГИКА) =================
-    lock = user_locks.setdefault(user_id, asyncio.Lock())
+    # ================= 🔥 LOCK (НОВАЯ ЛОГИКА) =================
+    lock = user_locks.get(user_id)
 
-    if lock.locked():
+    if lock and lock.locked():
         await message.reply_text(await t(user_id, "already_generating"))
         return
 
