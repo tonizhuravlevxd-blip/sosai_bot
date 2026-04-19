@@ -2377,11 +2377,14 @@ async def _handle_generation_inner(job):
                         except:
                             pass
 
+
                 finally:
                     try:
                         # ================= 🔥 ACTIVE GENERATIONS =================
-                        if user_id in active_generations:
+                        if isinstance(active_generations, dict):
                             active_generations.pop(user_id, None)
+                        else:
+                            active_generations.discard(user_id)
 
                         # ================= 🔓 UNLOCK =================
                         try:
@@ -2393,16 +2396,13 @@ async def _handle_generation_inner(job):
                         try:
                             if context and hasattr(context, "user_data"):
 
-                                # 🔥 удаляем ТЯЖЕЛЫЕ объекты
                                 context.user_data.pop("input_video", None)
                                 context.user_data.pop("input_video_bytes", None)
                                 context.user_data.pop("input_images", None)
 
-                                # 🔥 чистим кэш генерации
                                 context.user_data.pop("last_images", None)
                                 context.user_data.pop("last_prompt", None)
 
-                                # 🔥 чистим временные флаги
                                 context.user_data.pop("pending_video", None)
                                 context.user_data.pop("input_video_ready", None)
 
@@ -2411,8 +2411,10 @@ async def _handle_generation_inner(job):
 
                         # ================= 🔐 LOCK CLEAN =================
                         try:
-                            if user_id in user_locks:
+                            if isinstance(user_locks, dict):
                                 user_locks.pop(user_id, None)
+                            else:
+                                user_locks.discard(user_id)
 
                         except Exception as e:
                             logging.error(f"LOCK CLEAN ERROR: {e}")
