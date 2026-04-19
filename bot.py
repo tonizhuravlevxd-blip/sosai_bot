@@ -157,6 +157,7 @@ no_mode_cooldown = {}
 NO_MODE_COOLDOWN_TIME = 10
 
 # защита генераций
+active_generations = set()
 user_generation_count = {}
 
 MAX_USER_GENERATIONS = 2
@@ -168,6 +169,27 @@ def check_user_generation_limit(user_id):
         return False, "⚠️ Подождите завершения текущих генераций"
 
     return True, None
+
+
+def lock_user_generation(user_id):
+    # увеличиваем счётчик
+    count = user_generation_count.get(user_id, 0) + 1
+    user_generation_count[user_id] = count
+
+    # если это первая задача — фиксируем время
+    if count == 1:
+        active_generations[user_id] = time.time()
+    
+def unlock_user_generation(user_id):
+    count = user_generation_count.get(user_id, 0)
+
+    if count <= 1:
+        user_generation_count.pop(user_id, None)
+        active_generations.pop(user_id, None)  # 🔥 важно
+    else:
+        user_generation_count[user_id] = count - 1
+    
+
 
 # ================= CACHE CLEANER =================
 MAX_CACHE_SIZE = 500
@@ -1162,18 +1184,7 @@ generation_queue_image = asyncio.Queue(maxsize=5000)
 generation_queue_video = asyncio.Queue(maxsize=2000)
 generation_queue_music = asyncio.Queue(maxsize=2000)
 user_locks = {}
-ACTIVE_TASKS = set()
 
-
-def get_user_lock(user_id):
-    lock = user_locks.get(user_id)
-
-    if lock is None:
-        lock = asyncio.Lock()
-        lock.last_used = time.time()
-        user_locks[user_id] = lock
-
-    return lock
 # ================= HANDLE IMAGE (REMIX) =================
 async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -1221,6 +1232,11 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logging.warning(f"🚫 SPAM BLOCK user={user_id}")
         return
 
+    if user_id in active_generations:
+        logging.warning(f"⏳ ALREADY GENERATING user={user_id}")
+        await update.message.reply_text("⏳ Дождитесь завершения текущей генерации")
+        return
+
     mode = context.user_data.get("mode")
     logging.info(f"📌 MODE={mode} user={user_id}")
 
@@ -1232,14 +1248,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not video:
         logging.warning(f"❌ NO VIDEO user={user_id}")
-        return
-
-    # ================= 🔥 LOCK (НОВАЯ ЛОГИКА) =================
-    lock = user_locks.setdefault(user_id, asyncio.Lock())
-
-    if lock.locked():
-        logging.warning(f"⏳ LOCKED user={user_id}")
-        await update.message.reply_text("⏳ Дождитесь завершения текущей генерации")
         return
 
     # ================= VALIDATION =================
@@ -1444,6 +1452,7 @@ ADMIN_REPLY_STATE = {}
 SUPPORT_REPLY_MAP = {}
 ONLINE_USERS = {}
 ONLINE_TTL = 300
+active_generations = set()
 GLOBAL_RATE_LIMIT = asyncio.Semaphore(300)
 GLOBAL_SEMAPHORE = asyncio.Semaphore(300)
 
@@ -1462,6 +1471,7 @@ async def handle_generation_job(job):
     user_id = job["user_id"]
     status = job.get("status")
     mode = job.get("mode", "image")
+    video_allowed = False
 
     msg = getattr(update, "message", None)
     if not msg and getattr(update, "callback_query", None):
@@ -1471,16 +1481,21 @@ async def handle_generation_job(job):
         logging.warning(f"⚠ ПУСТАЯ ЗАДАЧА user={user_id} mode={mode}")
         return
 
-    # ================= 🔥 LOCK =================
-    lock = get_user_lock(user_id)
+    # ===== 🔥 LOCK =====
+    lock = user_locks.setdefault(user_id, asyncio.Lock())
+
+    if lock.locked():
+        if msg:
+            await msg.reply_text("⏳ Генерация уже выполняется.")
+        return
 
     async with lock:
         try:
 
-            # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ =====
+            # ===== 🔥 ЖЁСТКИЙ ТАЙМАУТ НА ВСЮ ЗАДАЧУ =====
             await asyncio.wait_for(
                 _handle_generation_inner(job),
-                timeout=600
+                timeout=600  # 10 минут максимум
             )
 
         except asyncio.TimeoutError:
@@ -1488,9 +1503,7 @@ async def handle_generation_job(job):
 
             try:
                 if status:
-                    await status.edit_text(
-                        "⏰ Генерация заняла слишком много времени и была остановлена"
-                    )
+                    await status.edit_text("⏰ Генерация заняла слишком много времени и была остановлена")
             except:
                 pass
 
@@ -1504,32 +1517,14 @@ async def handle_generation_job(job):
                 pass
 
         finally:
-
-            # ================= 🧹 USER DATA CLEAN =================
+            # 🔥 ГАРАНТИЯ РАЗЛОКА
             try:
-                if context and hasattr(context, "user_data"):
-
-                    context.user_data.pop("input_video", None)
-                    context.user_data.pop("input_video_bytes", None)
-                    context.user_data.pop("input_images", None)
-
-                    context.user_data.pop("last_images", None)
-                    context.user_data.pop("last_prompt", None)
-
-                    context.user_data.pop("pending_video", None)
-                    context.user_data.pop("input_video_ready", None)
-
-            except Exception as e:
-                logging.error(f"USER_DATA CLEAN ERROR: {e}")
-
-            # ================= 🧠 GC =================
-            try:
-                import gc
-                gc.collect()
+                unlock_user_generation(user_id)
             except:
                 pass
 
-            logging.info(f"🧹 CLEANUP user {user_id}")
+            active_generations.discard(user_id)
+
 
 # ================= ВНУТРЕННЯЯ ЛОГИКА =================
 
@@ -2361,6 +2356,15 @@ async def _handle_generation_inner(job):
 
                 finally:
                     try:
+                        # ================= 🔥 ACTIVE GENERATIONS =================
+                        if user_id in active_generations:
+                            active_generations.discard(user_id)
+
+                        # ================= 🔓 UNLOCK =================
+                        try:
+                            unlock_user_generation(user_id)
+                        except Exception as e:
+                            logging.error(f"UNLOCK ERROR: {e}")
 
                         # ================= 🧹 USER DATA CLEAN =================
                         try:
@@ -2382,6 +2386,14 @@ async def _handle_generation_inner(job):
                         except Exception as e:
                             logging.error(f"USER_DATA CLEAN ERROR: {e}")
 
+                        # ================= 🔐 LOCK CLEAN =================
+                        try:
+                            if user_id in user_locks:
+                                user_locks.pop(user_id, None)
+
+                        except Exception as e:
+                            logging.error(f"LOCK CLEAN ERROR: {e}")
+
                         # ================= 🧠 GC =================
                         try:
                             import gc
@@ -2389,51 +2401,23 @@ async def _handle_generation_inner(job):
                         except:
                             pass
 
-                        # ================= 🔥 LOCK HEARTBEAT =================
-                        try:
-                            lock = user_locks.get(user_id)
-
-                            if lock:
-                                # 🔥 обновляем время активности (для watchdog TTL)
-                                lock.last_used = time.time()
-
-                        except Exception as e:
-                            logging.error(f"LOCK HEARTBEAT ERROR: {e}")
-
                         logging.info(f"🧹 CLEANUP user {user_id}")
 
                     except Exception as e:
                         logging.error(f"FINAL CLEANUP ERROR: {e}")
 # ================== WORKERS ==================
-
-def get_user_lock(user_id):
-    if user_id not in user_locks:
-        user_locks[user_id] = asyncio.Lock()
-    return user_locks[user_id]
-
-
 async def image_worker():
     while True:
         try:
             job = await generation_queue_image.get()
-            user_id = job.get("user_id")
-
-            lock = get_user_lock(user_id)
 
             try:
-                async with lock:  # 🔒 ЛОК ТОЛЬКО ТУТ
-                    await asyncio.wait_for(
-                        handle_generation_job(job),
-                        timeout=180  # ⏱ защита от зависаний
-                    )
-
-            except asyncio.TimeoutError:
-                logging.error(f"⏰ IMAGE TIMEOUT user={user_id}")
-
+                await handle_generation_job(job)
             except Exception as e:
                 logging.error(f"❌ IMAGE WORKER ERROR: {e}")
 
             finally:
+                unlock_user_generation(user_id)
                 generation_queue_image.task_done()
 
         except Exception as e:
@@ -2445,24 +2429,14 @@ async def video_worker():
     while True:
         try:
             job = await generation_queue_video.get()
-            user_id = job.get("user_id")
-
-            lock = get_user_lock(user_id)
 
             try:
-                async with lock:
-                    await asyncio.wait_for(
-                        handle_generation_job(job),
-                        timeout=300  # видео дольше
-                    )
-
-            except asyncio.TimeoutError:
-                logging.error(f"⏰ VIDEO TIMEOUT user={user_id}")
-
+                await handle_generation_job(job)
             except Exception as e:
                 logging.error(f"❌ VIDEO WORKER ERROR: {e}")
 
             finally:
+                unlock_user_generation(user_id)
                 generation_queue_video.task_done()
 
         except Exception as e:
@@ -2474,112 +2448,98 @@ async def music_worker():
     while True:
         try:
             job = await generation_queue_music.get()
-            user_id = job.get("user_id")
-
-            lock = get_user_lock(user_id)
 
             try:
-                async with lock:
-                    await asyncio.wait_for(
-                        handle_generation_job(job),
-                        timeout=420
-                    )
+                # 🔥 защита от зависания генерации
+                await asyncio.wait_for(
+                    handle_generation_job(job),
+                    timeout=420
+                )
 
             except asyncio.TimeoutError:
-                logging.error(f"⏰ MUSIC TIMEOUT user={user_id}")
+                logging.error("⏰ MUSIC TIMEOUT (job завис)")
 
             except Exception as e:
                 logging.error(f"❌ MUSIC WORKER ERROR: {e}")
 
             finally:
+                unlock_user_generation(user_id)
                 generation_queue_music.task_done()
 
         except Exception as e:
             logging.critical(f"💀 MUSIC WORKER CRASH: {e}")
             await asyncio.sleep(1)
-async def worker_watchdog():
 
-    CHECK_INTERVAL = 15
-    MAX_QUEUE_WARN = 200
-    LOCK_TTL = 600  # 10 минут без активности
+async def worker_watchdog():
+    CHECK_INTERVAL = 15          # как часто проверяем
+    MAX_JOB_TIME = 180           # 3 минуты максимум на генерацию
+    MAX_QUEUE_WARN = 200         # предупреждение по очереди
 
     while True:
         await asyncio.sleep(CHECK_INTERVAL)
 
+        now = time.time()
+
+        # ================= 🔍 ОПРЕДЕЛЯЕМ ТИП =================
+        is_dict = isinstance(active_generations, dict)
+        is_set = isinstance(active_generations, set)
+
+        if not is_dict and not is_set:
+            logging.error(f"💀 active_generations сломан: {type(active_generations)}")
+            continue
+
+        # ================= 🔓 РАЗБЛОКИРОВКА =================
+        unlocked = 0
+
         try:
+            if is_dict:
+                # ✅ нормальный режим (с таймингами)
+                for user_id, start_time in list(active_generations.items()):
+                    if now - start_time > MAX_JOB_TIME:
+                        logging.warning(f"🚨 FORCE UNLOCK user={user_id} (>{MAX_JOB_TIME}s)")
+                        unlock_user_generation(user_id)
+                        unlocked += 1
 
-            # ================= 📊 ОЧЕРЕДИ =================
-            img_q = generation_queue_image.qsize()
-            vid_q = generation_queue_video.qsize()
-            mus_q = generation_queue_music.qsize()
-            total = img_q + vid_q + mus_q
-
-            if total > 0:
-                logging.info(
-                    f"📊 Очередь | IMG: {img_q} | VID: {vid_q} | MUS: {mus_q} | TOTAL: {total}"
-                )
-
-            # ================= 🚨 ПЕРЕГРУЗКА =================
-            if total > MAX_QUEUE_WARN:
-                logging.warning(f"🔥 СЕРВЕР ПЕРЕГРУЖЕН: {total} задач в очереди")
-
-            # ================= 🧠 LOCK MONITOR =================
-            stuck_users = 0
-            now = time.time()
-
-            for user_id, lock in list(user_locks.items()):
-                try:
-
-                    # ================= 🔥 SAFE LOCK CHECK =================
-                    is_locked = False
-                    try:
-                        is_locked = lock.locked()
-                    except:
-                        # если lock сломан — считаем его мусором
-                        user_locks.pop(user_id, None)
-                        continue
-
-                    if is_locked:
-                        stuck_users += 1
-
-                    # ================= 🧹 TTL CLEAN =================
-                    last_used = getattr(lock, "last_used", None)
-
-                    # 🔥 если нет активности — чистим
-                    if last_used is not None:
-
-                        # ⚠️ защита от NaN/битых значений
-                        try:
-                            age = now - last_used
-                        except:
-                            age = 0
-
-                        if age > LOCK_TTL:
-
-                            # важно: не трогаем активный lock
-                            if not is_locked:
-                                logging.warning(f"🧹 CLEAN OLD LOCK user={user_id}")
-                                user_locks.pop(user_id, None)
-
-                except Exception as e:
-                    logging.error(f"LOCK WATCHDOG ERROR user={user_id}: {e}")
-
-            if stuck_users:
-                logging.warning(f"⚠️ Заблокированных пользователей: {stuck_users}")
-
-            # ================= 💀 СИСТЕМА ВОРКЕРОВ =================
-            if total > 0 and (img_q + vid_q + mus_q) == 0:
-                logging.error(
-                    "💀 Очередь есть, но задачи не распределяются — воркеры могут быть мертвы"
-                )
-
-            # ================= 🧹 ЖЁСТКАЯ ЧИСТКА =================
-            if len(user_locks) > 10000:
-                logging.warning(f"🧹 Очистка user_locks ({len(user_locks)})")
-                user_locks.clear()
+            elif is_set:
+                # ⚠️ fallback режим (нет времени)
+                if active_generations:
+                    logging.error("⚠️ active_generations = set → нет таймингов, watchdog ограничен")
 
         except Exception as e:
             logging.error(f"❌ WATCHDOG ERROR: {e}")
+
+        if unlocked:
+            logging.warning(f"🔓 Разблокировано пользователей: {unlocked}")
+
+        # ================= 📊 ОЧЕРЕДИ =================
+        img_q = generation_queue_image.qsize()
+        vid_q = generation_queue_video.qsize()
+        mus_q = generation_queue_music.qsize()
+        total = img_q + vid_q + mus_q
+
+        if total > 0:
+            logging.info(
+                f"📊 Очередь | IMG: {img_q} | VID: {vid_q} | MUS: {mus_q} | TOTAL: {total}"
+            )
+
+        # ================= 🚨 ПЕРЕГРУЗКА =================
+        if total > MAX_QUEUE_WARN:
+            logging.warning(f"🔥 СЕРВЕР ПЕРЕГРУЖЕН: {total} задач в очереди")
+
+        # ================= 💀 ВОРКЕРЫ УМЕРЛИ =================
+        if total > 0:
+            if is_dict and not active_generations:
+                logging.error("💀 Очередь есть, но нет активных генераций — воркеры умерли?")
+            elif is_set and len(active_generations) == 0:
+                logging.error("💀 Очередь есть, но set пуст — воркеры умерли?")
+
+        # ================= 🧹 ЧИСТКА =================
+        size = len(active_generations)
+
+        if size > 10000:
+            logging.error(f"💀 Слишком много active_generations ({size}) — чистим")
+            active_generations.clear()
+
 
 # ================= START =================
 
@@ -3156,7 +3116,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ================= REPEAT (НОВАЯ ЛОГИКА) =================
+    # ================= REPEAT (ИСПРАВЛЕН) =================
     elif data == "repeat":
         prompt = context.user_data.get("last_prompt")
         images = context.user_data.get("last_images", [])
@@ -3167,12 +3127,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("⚠️ Нет данных для повторной генерации")
             return
 
-        # ================= 🔥 LOCK (FIX) =================
-        lock = user_locks.get(user_id)
-
-        if lock and lock.locked():
-            await query.message.reply_text("⏳ Ваша генерация уже выполняется")
+        if user_id in active_generations:
+            await query.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
             return
+
         # 🔥 ДОБАВЛЕНО: проверка лимита
         allowed, msg = check_user_generation_limit(user_id)
         if not allowed:
@@ -3183,6 +3141,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if get_queue_position() > 1000:
             await query.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
             return
+
+        # 🔥 ДОБАВЛЕНО: блокировка
+        lock_user_generation(user_id)
 
         position = get_queue_position() + 1
         status = await query.message.reply_text(
@@ -3209,10 +3170,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "mode": mode,
                 "status": status
             })
-        except Exception as e:
-            logging.error(f"QUEUE ERROR repeat: {e}")
-            await query.message.reply_text("⚠️ Ошибка постановки в очередь")
-            return
+        except:
+            unlock_user_generation(user_id)
+            raise
 
         return
 
@@ -3307,13 +3267,13 @@ async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
+    
     user_id = update.effective_user.id
     ONLINE_USERS[user_id] = time.time()
-
+   
     if not check_global_spam(user_id):
         return
-
+        
     mode = context.user_data.get("mode")
 
     if mode not in ["video", "cartoon", "image", "remix"]:
@@ -3333,7 +3293,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if mode in ["image", "cartoon"] and "model" not in context.user_data:
-        context.user_data["model"] = "banana2"
+        context.user_data["model"] = "banana2"  # ✅ Автоустановка модели для мультфильмов
 
     if "input_images" not in context.user_data:
         context.user_data["input_images"] = []
@@ -3356,7 +3316,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Ошибка загрузки фото, попробуйте снова")
         return
 
-    # ================= 🔥 SAVE IMAGES =================
+    # 🔥 СОХРАНЯЕМ КАРТИНКИ (ВАЖНО ДЛЯ KLING)
     context.user_data.setdefault("input_images", []).append(image_bytes)
 
     caption = update.message.caption
@@ -3365,34 +3325,30 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_prompt"] = caption
         context.user_data["last_images"] = context.user_data["input_images"]
 
-        # ================= 🔥 LOCK (FIX) =================
-        lock = user_locks.get(user_id)
-
-        if lock and lock.locked():
-            await update.message.reply_text("⏳ Ваша генерация уже выполняется")
+        if user_id in active_generations:
+            await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
             return
 
-        # ================= 🔥 QUEUE LIMIT =================
         if get_queue_position() > 1000:
             await update.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
             return
 
-        # ================= 🔥 REMIX CHECK =================
+        # 🔥 FIX: для remix проверяем видео
         if mode == "remix" and not context.user_data.get("input_video_ready"):
             await update.message.reply_text("⚠️ Для Remix сначала отправьте видео")
             return
 
         position = get_queue_position() + 1
-
         status = await update.message.reply_text(
             f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
         )
 
-        # ================= 🔥 LIMIT =================
         allowed, msg = check_user_generation_limit(user_id)
         if not allowed:
             await update.message.reply_text(msg or "⚠️ Лимит генераций достигнут")
             return
+
+        lock_user_generation(user_id)
 
         queue_map = {
             "image": generation_queue_image,
@@ -3402,27 +3358,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "music": generation_queue_music
         }
 
-        queue = queue_map.get(mode, generation_queue_image)
-
-        try:
-            await queue.put({
-                "update": update,
-                "context": context,
-                "prompt": caption,
-                "size": context.user_data.get("size", "1024x1024"),
-                "model": context.user_data.get("model", "banana2"),
-                "images": context.user_data.get("input_images", []),
-                "video": context.user_data.get("input_video"),
-                "video_ready": context.user_data.get("input_video_ready"),
-                "user_id": user_id,
-                "mode": mode,
-                "status": status
-            })
-
-        except Exception as e:
-            logging.error(f"PHOTO QUEUE ERROR: {e}")
-            await update.message.reply_text("⚠️ Ошибка постановки в очередь")
-            return
+        await queue_map.get(mode, generation_queue_image).put({
+            "update": update,
+            "context": context,
+            "prompt": caption,
+            "size": context.user_data.get("size", "1024x1024"),
+            "model": context.user_data.get("model", "banana2"),
+            "images": context.user_data.get("input_images", []),
+            "video": context.user_data.get("input_video"),
+            "video_ready": context.user_data.get("input_video_ready"),
+            "user_id": user_id,
+            "mode": mode,
+            "status": status
+        })
         
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3589,13 +3537,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 
-    # ================= 🔥 LOCK (НОВАЯ ЛОГИКА) =================
-    lock = user_locks.get(user_id)
-
-    if lock and lock.locked():
+    if user_id in active_generations:
         await message.reply_text(await t(user_id, "already_generating"))
         return
 
+    count = user_generation_count.get(user_id, 0)
+    if count >= MAX_USER_GENERATIONS:
+        await message.reply_text("⚠️ Подождите завершения текущих генераций")
+        return
 
     if not check_rate_limit(user_id):
         await message.reply_text("⏳ Не так быстро. Подождите 2 секунды.")
@@ -3691,7 +3640,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await message.reply_text(
         f"⏳ Вы в очереди: {position}\n🦕 Генерация создается, немного надо подождать..."
     )
-   
+    lock_user_generation(user_id)
+
     await queue_map.get(mode, generation_queue_image).put({
         "update": update,
         "context": context,
