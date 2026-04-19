@@ -195,8 +195,14 @@ async def generation_cleanup_worker():
             now = time.time()
 
             for user_id in list(active_generations.keys()):
-                if now - active_generations[user_id] > 600:
-                    
+
+                start_time = active_generations.get(user_id)
+
+                if not start_time:
+                    continue
+
+                if now - start_time > 600:
+
                     active_generations.pop(user_id, None)
                     user_generation_count.pop(user_id, None)
 
@@ -1469,7 +1475,7 @@ ADMIN_REPLY_STATE = {}
 SUPPORT_REPLY_MAP = {}
 ONLINE_USERS = {}
 ONLINE_TTL = 300
-active_generations = set()
+active_generations = {}
 GLOBAL_RATE_LIMIT = asyncio.Semaphore(300)
 GLOBAL_SEMAPHORE = asyncio.Semaphore(300)
 
