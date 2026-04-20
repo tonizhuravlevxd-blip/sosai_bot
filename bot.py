@@ -1804,17 +1804,19 @@ async def _handle_generation_inner(job):
                             )
 
                             try:
-                                for attempt in range(2):
-                                    try:
-                                        result = await asyncio.wait_for(
-                                            fal_generate(model, prompt, images_local),
-                                            timeout=300
-                                        )
-                                        break
-                                    except Exception as e:
-                                        if attempt == 1:
-                                            raise e
-                                        await asyncio.sleep(1)
+                                async def generate():
+                                    return await asyncio.wait_for(
+                                        fal_generate(model, prompt, images_local),
+                                        timeout=300
+                                    )
+
+                                result = await smart_retry(
+                                    generate,
+                                    retries=4,
+                                    base_delay=1,
+                                    max_delay=8
+                                )
+
                             finally:
                                 upload_task.cancel()
                                 animation_task.cancel()
@@ -1932,10 +1934,19 @@ async def _handle_generation_inner(job):
                             progress_task = asyncio.create_task(progress_updater())
 
                             try:
-                                result_bytes = await asyncio.wait_for(
-                                    fal_video_generate(prompt, images_local),
-                                    timeout=600
+                                async def generate_video():
+                                    return await asyncio.wait_for(
+                                        fal_video_generate(prompt, images_local),
+                                        timeout=600
+                                    )
+
+                                result_bytes = await smart_retry(
+                                    generate_video,
+                                    retries=3,
+                                    base_delay=2,
+                                    max_delay=10
                                 )
+
                             finally:
                                 progress_task.cancel()
 
@@ -2334,9 +2345,17 @@ async def _handle_generation_inner(job):
                                 progress_task = asyncio.create_task(progress_updater())
 
                                 try:
-                                    result = await asyncio.wait_for(
-                                        fal_music_generate(prompt),
-                                        timeout=360
+                                    async def generate_music():
+                                        return await asyncio.wait_for(
+                                            fal_music_generate(prompt),
+                                            timeout=360
+                                        )
+
+                                    result = await smart_retry(
+                                        generate_music,
+                                        retries=3,
+                                        base_delay=2,
+                                        max_delay=10
                                     )
                                 finally:
                                     progress_task.cancel()
@@ -2408,6 +2427,19 @@ async def _handle_generation_inner(job):
                             pass
 
 
+async def smart_retry(coro, retries=3, base_delay=1, max_delay=10):
+    for attempt in range(retries):
+        try:
+            return await coro()
+        except Exception as e:
+            if attempt == retries - 1:
+                raise e
+
+            delay = min(base_delay * (2 ** attempt), max_delay)
+
+            logging.warning(f"🔁 RETRY {attempt+1}/{retries} after {delay}s: {e}")
+
+            await asyncio.sleep(delay)
 
 # ================== WORKERS ==================
 async def image_worker():
