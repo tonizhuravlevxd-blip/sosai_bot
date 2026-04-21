@@ -2580,7 +2580,7 @@ async def music_worker():
 
 async def worker_watchdog():
     CHECK_INTERVAL = 15          # как часто проверяем
-    MAX_JOB_TIME = 180           # 3 минуты максимум на генерацию
+    MAX_JOB_TIME = 600           # 3 минуты максимум на генерацию
     MAX_QUEUE_WARN = 200         # предупреждение по очереди
 
     while True:
