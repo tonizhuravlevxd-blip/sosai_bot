@@ -1246,9 +1246,6 @@ async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import subprocess
     import os
 
-    if not update or not update.effective_user:
-        return    
-
     user_id = update.effective_user.id
     ONLINE_USERS[user_id] = time.time()
 
@@ -3428,9 +3425,6 @@ async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not update or not update.effective_user:
-        return    
-    
     user_id = update.effective_user.id
     ONLINE_USERS[user_id] = time.time()
    
@@ -3539,8 +3533,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update or not update.effective_user:
-        return
     
     user_id = update.effective_user.id
     ONLINE_USERS[user_id] = time.time()
