@@ -679,12 +679,12 @@ def clean_prompt(prompt: str, mode: str = "image"):
 FAL_MODELS = {
 
     "banana1": {
-        "url": "https://queue.fal.run/fal-ai/nano-banana-pro/edit",
+        "url": "https://queue.fal.run/fal-ai/nano-banana-pro",
         "edit": True
     },
 
     "banana2": {
-        "url": "https://queue.fal.run/fal-ai/nano-banana-2/edit",
+        "url": "https://queue.fal.run/fal-ai/nano-banana-2",
         "edit": True
     }
 
