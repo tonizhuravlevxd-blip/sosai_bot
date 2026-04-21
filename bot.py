@@ -118,7 +118,7 @@ if not OPENAI_API_KEY:
 client = OpenAI(api_key=OPENAI_API_KEY)
 
 FREE_CHAT_LIMIT = 8
-FREE_LIMIT = 3
+FREE_LIMIT = 2
 FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
@@ -128,9 +128,9 @@ PRICE_VIDEO = "99.00"
 PRICE_MUSIC = "98.00"
 PRICE_CARTOON = "99.00"
 
-PREMIUM_IMAGE_LIMIT = 20
+PREMIUM_IMAGE_LIMIT = 12
 PREMIUM_VIDEO_LIMIT = 3
-PREMIUM_MUSIC_LIMIT = 3
+PREMIUM_MUSIC_LIMIT = 2
 
 REQUIRED_CHANNEL = "@sosai_ai"
 
@@ -1636,7 +1636,7 @@ async def _handle_generation_inner(job):
                         if mode == "image":
 
                             if not premium:
-                                free_limit = 2
+                                free_limit = 1
 
                                 if user["image_count"] >= free_limit:
 
