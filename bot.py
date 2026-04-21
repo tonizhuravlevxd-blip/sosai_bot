@@ -30,7 +30,7 @@ async def t(user_id, key, **kwargs):
 
 import uuid
 
-async def create_payment(user_id: int, payment_type="premium", price=100):
+async def create_payment(user_id: int, payment_type="premium", price=499):
 
     price = float(price)  
 
@@ -2283,7 +2283,7 @@ async def _handle_generation_inner(job):
                                 paid_music = user.get("paid_music", 0)
                                 if paid_music <= 0:
                                     keyboard = InlineKeyboardMarkup([
-                                        [InlineKeyboardButton("💳 Купить трек (100₽)", callback_data="buy_music")],
+                                        [InlineKeyboardButton("💳 Купить трек (98₽)", callback_data="buy_music")],
                                         [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
                                     ])
                                     await msg.reply_text(
