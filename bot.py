@@ -2210,7 +2210,7 @@ async def _handle_generation_inner(job):
                                                         raise Exception(f"Bad result: {result}")
 
                                                     # 🔥 увеличенный timeout на скачивание видео
-                                                    async with session.get(video_file_url, timeout=300) as v:
+                                                    async with session.get(video_file_url, timeout=600) as v:
                                                         result_bytes = await v.read()
 
                                                 break
