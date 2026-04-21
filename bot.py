@@ -1810,10 +1810,18 @@ async def _handle_generation_inner(job):
 
                             try:
                                 async def generate():
-                                    return await asyncio.wait_for(
-                                        fal_generate(model, prompt, images_local),
-                                        timeout=300
+                                    gen_task = asyncio.create_task(
+                                        fal_generate(model, prompt, images_local)
                                     )
+
+                                    try:
+                                        return await asyncio.wait_for(
+                                            asyncio.shield(gen_task),
+                                            timeout=300
+                                        )
+                                    except asyncio.TimeoutError:
+                                        logging.warning(f"⏰ FAL TIMEOUT (but task continues) user={user_id}")
+                                        return await gen_task
 
                                 result = await smart_retry(
                                     generate,
