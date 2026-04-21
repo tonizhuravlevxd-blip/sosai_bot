@@ -1948,16 +1948,24 @@ async def _handle_generation_inner(job):
 
                             try:
                                 async def generate_video():
-                                    return await asyncio.wait_for(
-                                        fal_video_generate(prompt, images_local),
-                                        timeout=600
-                                    )
+
+                                    start_time = time.time()
+
+                                    result = await fal_video_generate(prompt, images_local)
+
+                                    elapsed = time.time() - start_time
+
+                                    if elapsed > 900:
+                                        logging.warning(f"⚠️ Долгая генерация видео: {elapsed:.1f}s")
+
+                                    return result
+
 
                                 result_bytes = await smart_retry(
                                     generate_video,
-                                    retries=3,
-                                    base_delay=2,
-                                    max_delay=10
+                                    retries=2,
+                                    base_delay=5,
+                                    max_delay=20
                                 )
 
                             finally:
@@ -2182,18 +2190,18 @@ async def _handle_generation_inner(job):
                                 status_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}/status"
                                 result_url = f"https://queue.fal.run/fal-ai/kling-video/requests/{request_id}"
 
-                                async with aiohttp.ClientSession() as session:
+                                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=600)) as session:
 
-                                    for _ in range(300):
+                                    for _ in range(600):  # 🔥 было 300 → стало 600 (до 20 минут)
 
-                                        async with session.get(status_url) as s:
+                                        async with session.get(status_url, timeout=60) as s:
 
                                             status_json = await s.json()
                                             state = status_json.get("status")
 
                                             if state == "COMPLETED":
 
-                                                async with session.get(result_url) as r:
+                                                async with session.get(result_url, timeout=60) as r:
                                                     result = await r.json()
 
                                                     video_file_url = result.get("video", {}).get("url")
@@ -2201,7 +2209,8 @@ async def _handle_generation_inner(job):
                                                     if not video_file_url:
                                                         raise Exception(f"Bad result: {result}")
 
-                                                    async with session.get(video_file_url) as v:
+                                                    # 🔥 увеличенный timeout на скачивание видео
+                                                    async with session.get(video_file_url, timeout=300) as v:
                                                         result_bytes = await v.read()
 
                                                 break
@@ -2250,15 +2259,21 @@ async def _handle_generation_inner(job):
                                     chat_id=update.effective_chat.id,
                                     video=result_file,
                                     supports_streaming=True,
-                                    filename="video.mp4"
+                                    filename="video.mp4",
+                                    read_timeout=120,     # 🔥 ВАЖНО
+                                    write_timeout=120     # 🔥 ВАЖНО
                                 )
-                            except:
+                            except Exception as e:
+                                logging.error(f"❌ SEND VIDEO ERROR: {e}")
+
                                 result_file.seek(0)
+
                                 await context.bot.send_document(
                                     chat_id=update.effective_chat.id,
-                                    document=result_file
+                                    document=result_file,
+                                    read_timeout=120,
+                                    write_timeout=120
                                 )
-
                             # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
                             async with db_pool.acquire() as conn:
 
