@@ -117,19 +117,19 @@ if not OPENAI_API_KEY:
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-FREE_CHAT_LIMIT = 4
-FREE_LIMIT = 5
+FREE_CHAT_LIMIT = 8
+FREE_LIMIT = 3
 FREE_VIDEO_LIMIT = 1
 WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
 # ================= PRICES =================
-PRICE_VIDEO = "28.00"
-PRICE_MUSIC = "50.00"
-PRICE_CARTOON = "29.00"
+PRICE_VIDEO = "99.00"
+PRICE_MUSIC = "98.00"
+PRICE_CARTOON = "99.00"
 
 PREMIUM_IMAGE_LIMIT = 20
-PREMIUM_VIDEO_LIMIT = 5
+PREMIUM_VIDEO_LIMIT = 3
 PREMIUM_MUSIC_LIMIT = 3
 
 REQUIRED_CHANNEL = "@sosai_ai"
@@ -1646,7 +1646,7 @@ async def _handle_generation_inner(job):
 
                                         if not subscribed:
                                             await msg.reply_text(
-                                                "📢 Бесплатный лимит (2 фото) исчерпан.\n\n"
+                                                "🙈 Бесплатный лимит исчерпан.\n\n"
                                                 "Подпишитесь на канал и нажмите проверить 👇",
                                                 reply_markup=get_subscribe_keyboard()
                                             )
@@ -1662,7 +1662,7 @@ async def _handle_generation_inner(job):
 
                             if user["image_count"] >= limit:
                                 await msg.reply_text(
-                                    "⚠️ Лимит изображений исчерпан",
+                                    "⚠️ Лимит изображений исчерпан,он скоро обновится",
                                     reply_markup=InlineKeyboardMarkup([
                                         [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
                                     ])
@@ -2424,6 +2424,7 @@ async def _handle_generation_inner(job):
                         try:
                             await msg.reply_text(
                                 "⚠️ Не удалось сгенерировать результат.\n\n"
+                                "🔻 Напишите в поддержку если повторится\n"
                                 "💡 Возможные причины:\n"
                                 "• промпт заблокирован системой безопасности\n"
                                 "• слишком сложное или чувствительное описание\n"
@@ -2432,7 +2433,7 @@ async def _handle_generation_inner(job):
                                 "• упростите описание\n"
                                 "• уберите чувствительные слова\n"
                                 "• используйте более общий стиль\n\n"
-                                "📌 Пример:\n"
+                                "📌 Пример для мультика:\n"
                                 "`Пусть ест пончик и скажет : Всем привет`",
                                 parse_mode="Markdown"
                             )
@@ -2779,7 +2780,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🍩 Пончик-статус Premium\n\n"
         "Что входит:\n"
         "🐢 20 генераций изображений\n"
-        "🎬 5 видео / мультфильмов\n"
+        "🎬 3 видео / мультфильмов\n"
         "🎵 3 генераций музыки\n\n"
         "499 рублей через СПБ\n\n"
         "⏳ действует 30 дней\n\n"
@@ -3713,7 +3714,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not premium_active and chat_count >= FREE_CHAT_LIMIT:
             await message.reply_text(
-                "⚠️ Бесплатный лимит ChatGPT (4 запроса) исчерпан.\n\nКупите Premium 👇",
+                "⚠️ Бесплатный лимит ChatGPT исчерпан.\n\nКупите Premium 👇",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
                 ])
