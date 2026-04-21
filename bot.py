@@ -1755,10 +1755,6 @@ async def _handle_generation_inner(job):
                         images_local = images[:MAX_INPUT_IMAGES]
 
                         style = ""
-                        if model == "banana1":
-                            style = "cinematic lighting ultra realistic 8k"
-                        elif model == "banana2":
-                            style = "hyper detailed masterpiece artstation quality"
 
                         cartoon_style = context.user_data.get("cartoon_style")
 
