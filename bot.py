@@ -1514,10 +1514,18 @@ async def handle_generation_job(job):
     async with lock:
         try:
 
-            await asyncio.wait_for(
-                _handle_generation_inner(job),
-                timeout=600
+            task = asyncio.create_task(
+                _handle_generation_inner(job)
             )
+
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(task),
+                    timeout=600
+                )
+            except asyncio.TimeoutError:
+                logging.warning(f"⏰ GLOBAL TIMEOUT (task continues) user={user_id}")
+                await task
 
         except asyncio.TimeoutError:
             logging.error(f"⏰ TIMEOUT user={user_id} mode={mode}")
