@@ -679,12 +679,12 @@ def clean_prompt(prompt: str, mode: str = "image"):
 FAL_MODELS = {
 
     "banana1": {
-        "url": "https://queue.fal.run/fal-ai/nano-banana",
+        "url": "https://queue.fal.run/fal-ai/nano-banana-pro/edit",
         "edit": True
     },
 
     "banana2": {
-        "url": "https://queue.fal.run/fal-ai/nano-banana-pro",
+        "url": "https://queue.fal.run/fal-ai/nano-banana-2/edit",
         "edit": True
     }
 
@@ -1726,7 +1726,7 @@ async def _handle_generation_inner(job):
                                     return
 
 
-                        model_name = "NanoBanana 1" if model == "banana1" else "NanoBanana 2"
+                        model_name = "NanoBanana 2" if model == "banana1" else "NanoBanana 3(NEW)"
 
                         text_map = {
                             "image": f"<pre>🎨 Шедевр создает {model_name}</pre>",
@@ -3080,8 +3080,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if not user or not is_premium(user):
                 await query.message.reply_text(
-                    "🍌 Nano Banana 2 доступна только для Premium\n\n"
-                    "💎 Оформите подписку, чтобы использовать эту модель",
+                    "🍌 Nano Banana 3 (NEW) доступна только для Premium\n\n"
+                    "🦕 Оформите подписку, чтобы использовать эту модель",
                     reply_markup=InlineKeyboardMarkup([
                         [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
                     ])
@@ -3095,7 +3095,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["last_images"] = []
 
         await query.message.reply_text(
-            f"✅ Выбрана модель: {'🍌 Nano Banana 1' if data=='model_banana1' else '🍌 Nano Banana 2'}\n\n"
+            f"✅ Выбрана модель: {'🍌 Nano Banana 2' if data=='model_banana1' else '🍌 Nano Banana 3'}\n\n"
             "✏ Сначала напишите текст или отправьте 1-4 фото"
         )
         return
@@ -3955,8 +3955,8 @@ async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         
-        [InlineKeyboardButton("🍌 Nano Banana 1", callback_data="model_banana1")],
-        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_banana2")],
+        [InlineKeyboardButton("🍌 Nano Banana 2", callback_data="model_banana1")],
+        [InlineKeyboardButton("🍌 Nano Banana 3(NEW)", callback_data="model_banana2")],
         [
             InlineKeyboardButton("⬜ 1:1", callback_data="size_square"),
             InlineKeyboardButton("🖥 16:9", callback_data="size_wide"),
