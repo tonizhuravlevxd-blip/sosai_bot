@@ -1653,7 +1653,12 @@ async def _handle_generation_inner(job):
                                 limit = PREMIUM_IMAGE_LIMIT
 
                             if user["image_count"] >= limit:
-                                await msg.reply_text("⚠️ Лимит изображений исчерпан")
+                                await msg.reply_text(
+                                    "⚠️ Лимит изображений исчерпан",
+                                    reply_markup=InlineKeyboardMarkup([
+                                        [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
+                                    ])
+                                )
                                 return
 
                         # ================= VIDEO / CARTOON =================
@@ -3063,6 +3068,26 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ================= MODE / MODEL =================
     elif data in ["model_banana1", "model_banana2"]:
+
+        if data == "model_banana2":
+            user_id = query.from_user.id
+
+            async with db_pool.acquire() as conn:
+                user = await conn.fetchrow(
+                    "SELECT * FROM users WHERE user_id=$1",
+                    user_id
+                )
+
+            if not user or not is_premium(user):
+                await query.message.reply_text(
+                    "🍌 Nano Banana 2 доступна только для Premium\n\n"
+                    "💎 Оформите подписку, чтобы использовать эту модель",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("🍩 Купить Premium", callback_data="buy_spb")]
+                    ])
+                )
+                return
+
         context.user_data["model"] = "banana1" if data == "model_banana1" else "banana2"
         context.user_data["mode"] = "image"
         context.user_data["cartoon_style"] = None
