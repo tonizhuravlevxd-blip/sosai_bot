@@ -1754,14 +1754,10 @@ async def _handle_generation_inner(job):
 
                         images_local = images[:MAX_INPUT_IMAGES]
 
-                        style = ""
-
                         cartoon_style = context.user_data.get("cartoon_style")
 
                         if prompt:
-                            if mode == "image" and style:
-                                prompt = f"{style} {prompt}"
-                            elif mode in ["cartoon", "video", "remix"] and cartoon_style:
+                            if mode in ["cartoon", "video", "remix"] and cartoon_style:
                                 prompt = f"{cartoon_style}, {prompt}"
 
                         if prompt:
