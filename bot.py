@@ -124,9 +124,9 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
 # ================= PRICES =================
-PRICE_VIDEO = "99.00"
-PRICE_MUSIC = "98.00"
-PRICE_CARTOON = "99.00"
+PRICE_VIDEO = "30.00"
+PRICE_MUSIC = "30.00"
+PRICE_CARTOON = "30.00"
 
 PREMIUM_IMAGE_LIMIT = 12
 PREMIUM_VIDEO_LIMIT = 3
@@ -2209,11 +2209,8 @@ async def _handle_generation_inner(job):
                                                     if not video_file_url:
                                                         raise Exception(f"Bad result: {result}")
 
-                                                    # 🔥 увеличенный timeout на скачивание видео
-                                                    async with session.get(video_file_url, timeout=600) as v:
-                                                        result_bytes = await v.read()
-
-                                                break
+                                                    # 🔥 НЕ качаем сразу — сначала попробуем отправить по URL
+                                                    break
 
                                             if state == "FAILED":
                                                 raise Exception(f"FAL failed: {status_json}")
@@ -2245,35 +2242,62 @@ async def _handle_generation_inner(job):
                             except:
                                 pass
 
-                            if not result_bytes:
+                            if not video_file_url:
                                 if msg:
                                     await msg.reply_text("⚠️ FAL не вернул видео")
                                 return
 
-                            result_file = io.BytesIO(result_bytes)
-                            result_file.name = "remix.mp4"
-                            result_file.seek(0)
-
+                            # ================= SEND VIDEO =================
                             try:
+                                # 🔥 1. ПЫТАЕМСЯ отправить напрямую по URL (ЛУЧШИЙ ВАРИАНТ)
                                 await context.bot.send_video(
                                     chat_id=update.effective_chat.id,
-                                    video=result_file,
+                                    video=video_file_url,
                                     supports_streaming=True,
                                     filename="video.mp4",
-                                    read_timeout=120,     # 🔥 ВАЖНО
-                                    write_timeout=120     # 🔥 ВАЖНО
-                                )
-                            except Exception as e:
-                                logging.error(f"❌ SEND VIDEO ERROR: {e}")
-
-                                result_file.seek(0)
-
-                                await context.bot.send_document(
-                                    chat_id=update.effective_chat.id,
-                                    document=result_file,
                                     read_timeout=120,
                                     write_timeout=120
                                 )
+
+                            except Exception as e:
+                                logging.error(f"❌ SEND URL VIDEO ERROR: {e}")
+
+                                # 🔥 2. ЕСЛИ НЕ ПОЛУЧИЛОСЬ — скачиваем
+                                try:
+                                    async with aiohttp.ClientSession() as session:
+                                        async with session.get(video_file_url, timeout=600) as v:
+                                            result_bytes = await v.read()
+
+                                    if not result_bytes:
+                                        raise Exception("Empty video bytes")
+
+                                    result_file = io.BytesIO(result_bytes)
+                                    result_file.name = "video.mp4"
+                                    result_file.seek(0)
+
+                                    await context.bot.send_video(
+                                        chat_id=update.effective_chat.id,
+                                        video=result_file,
+                                        supports_streaming=True,
+                                        filename="video.mp4",
+                                        read_timeout=120,
+                                        write_timeout=120
+                                    )
+
+                                except Exception as e2:
+                                    logging.error(f"❌ SEND DOWNLOADED VIDEO ERROR: {e2}")
+
+                                    # 🔥 3. ФИНАЛЬНЫЙ ФОЛБЭК — отправляем ССЫЛКУ (а не document)
+                                    try:
+                                        await context.bot.send_message(
+                                            chat_id=update.effective_chat.id,
+                                            text=(
+                                                "⚠️ Видео слишком большое для отправки\n\n"
+                                                f"🎬 Скачать:\n{video_file_url}"
+                                            )
+                                        )
+                                    except:
+                                        pass
                             # ✅ СПИСАНИЕ ПОСЛЕ УСПЕХА
                             async with db_pool.acquire() as conn:
 
@@ -2358,15 +2382,35 @@ async def _handle_generation_inner(job):
                                     last_text = ""
                                     try:
                                         while True:
-                                            await asyncio.sleep(3)
-                                            pct = min(pct + 2, 100)
-                                            new_text = f"🎵 Генерация музыки... {pct}%"
+                                            await asyncio.sleep(3)  # 🔥 медленнее обновление
+
+                                            # 🔥 замедленный рост
+                                            if pct < 30:
+                                                pct += 1
+                                            elif pct < 70:
+                                                pct += 2
+                                            else:
+                                                pct += 1
+
+                                            if pct > 100:
+                                                pct = 0  # 🔥 зацикливание
+
+                                            bars = pct // 10
+                                            bar = "🟩" * bars + "⬜" * (10 - bars)
+
+                                            new_text = (
+                                                f"🎵 Генерация музыки...\n\n"
+                                                f"{bar} {pct}%\n"
+                                                f"⏳ Обработка..."
+                                            )
+
                                             if new_text != last_text:
                                                 try:
                                                     await safe_edit(status, new_text)
                                                     last_text = new_text
                                                 except:
                                                     pass
+
                                     except asyncio.CancelledError:
                                         pass
 
