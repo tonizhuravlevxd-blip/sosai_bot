@@ -124,9 +124,9 @@ WEEK_SECONDS = 7 * 24 * 60 * 60
 MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
 # ================= PRICES =================
-PRICE_VIDEO = "30.00"
-PRICE_MUSIC = "30.00"
-PRICE_CARTOON = "30.00"
+PRICE_VIDEO = "99.00"
+PRICE_MUSIC = "69.00"
+PRICE_CARTOON = "99.00"
 
 PREMIUM_IMAGE_LIMIT = 12
 PREMIUM_VIDEO_LIMIT = 3
@@ -844,7 +844,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         prompt = "Сделай популярную песню с вокалом"
 
     # 🔥 усиливаем prompt для стабильной генерации
-    enhanced_prompt = prompt + ", full song with vocals, high quality"
+    enhanced_prompt = prompt 
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
@@ -2327,7 +2327,7 @@ async def _handle_generation_inner(job):
                                 paid_music = user.get("paid_music", 0)
                                 if paid_music <= 0:
                                     keyboard = InlineKeyboardMarkup([
-                                        [InlineKeyboardButton("💳 Купить трек (98₽)", callback_data="buy_music")],
+                                        [InlineKeyboardButton("💳 Купить трек (69₽)", callback_data="buy_music")],
                                         [InlineKeyboardButton("🍩 Premium", callback_data="buy_spb")]
                                     ])
                                     await msg.reply_text(
@@ -2843,7 +2843,7 @@ async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🍩 Пончик-статус Premium\n\n"
         "Что входит:\n"
-        "🐢 20 генераций изображений\n"
+        "🐢 12 генераций изображений\n"
         "🎬 3 видео / мультфильмов\n"
         "🎵 3 генераций музыки\n\n"
         "499 рублей через СПБ\n\n"
@@ -3229,8 +3229,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "🎵 Напишите тему песни и выберите жанр\n\n"
+            "🎙️Сейчас временно стоит другая модель\n"
+            "Поэтому пишите сразу слова песни\n"
             "Пример:\n"
-            "Сделай веселую песню в жанре Рэп про мою сестру Вику"
+            "Мои красивые сестры любят дорогие розы"
         )
         return
 
