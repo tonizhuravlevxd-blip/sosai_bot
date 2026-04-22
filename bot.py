@@ -867,10 +867,10 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         "payload": {
             "prompt": enhanced_prompt,
             "lyrics": f"""
-Куплет:
+
 {enhanced_prompt}
 
-Припев:
+
 {prompt}
 """,
             "duration": duration,
