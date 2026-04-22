@@ -3058,7 +3058,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("✅ Подписка подтверждена!")
 
             # ================= REMIX MODE =================
-            if context.user_data.get("mode") == "remix" or context.user_data.get("pending_video"):
+            if context.user_data.get("mode") == "remix":
 
                 context.user_data.pop("pending_video", None)
 
@@ -3194,7 +3194,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         subscribed = await is_user_subscribed(context.bot, user_id)
 
         if not subscribed:
-            context.user_data["pending_video"] = True
+            context.user_data["pending_video"] = "remix"
 
             await query.message.reply_text(
                 "📢 Перед использованием Kling нужно подписаться 👇",
@@ -3324,7 +3324,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         # 🔥 ДОБАВЛЕНО: защита от перегрузки
-        if get_queue_position() > 1000:
+        if get_queue_position() > 300:
             try:
                 await query.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
             except:
@@ -3543,7 +3543,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⏳ Ваша генерация уже в очереди или выполняется")
             return
 
-        if get_queue_position() > 1000:
+        if get_queue_position() > 300:
             await update.message.reply_text("🚫 Сервер перегружен, попробуйте позже")
             return
 
@@ -3836,9 +3836,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # 🔥 FIX: проверка видео для remix
-    if mode == "remix" and not context.user_data.get("input_video"):
-        await message.reply_text("⚠️ Сначала отправьте видео для Remix")
-        return
+    if mode == "remix":
+        if not context.user_data.get("input_video"):
+            await message.reply_text("⚠️ Сначала отправьте видео для Remix")
+            return
     
     await reset_week_if_needed(user)
 
@@ -3853,7 +3854,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["last_prompt"] = prompt
     context.user_data["last_images"] = images
     
-    if get_queue_position() > 1000:
+    if get_queue_position() > 300:
         await message.reply_text("🚫 Сервер перегружен, попробуйте позже")
         return
 
@@ -3883,8 +3884,14 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
+
+    # 🔥 ЖЕСТКО СБРАСЫВАЕМ ВСЕ СВЯЗАННОЕ С REMIX
     context.user_data["mode"] = "video"
-    context.user_data["cartoon_style"] = None  # ✅ сброс старого стиля мультфильма
+    context.user_data["pending_video"] = False
+    context.user_data["input_video"] = None
+    context.user_data["input_video_ready"] = False
+
+    context.user_data["cartoon_style"] = None
 
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("✳️ Сделать замену (KLING)", callback_data="video_remix")]
