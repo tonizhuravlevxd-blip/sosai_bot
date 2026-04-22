@@ -1240,17 +1240,22 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ================= HANDLE VIDEO =================
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    
     import logging
     import tempfile
     import subprocess
     import os
 
-    user_id = update.effective_user.id
+    # 🔥 FIX: защита от каналов и системных апдейтов
+    user = update.effective_user
+    message = update.message
+
+    if not user or not message:
+        return
+
+    user_id = user.id
     ONLINE_USERS[user_id] = time.time()
 
     logging.info(f"🎬 HANDLE VIDEO START user={user_id}")
-
     if not check_global_spam(user_id):
         logging.warning(f"🚫 SPAM BLOCK user={user_id}")
         return
@@ -3469,7 +3474,14 @@ async def sos_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    user_id = update.effective_user.id
+    user = update.effective_user
+    message = update.message
+
+    # 🔥 FIX: защита от каналов и системных апдейтов
+    if not user or not message:
+        return
+
+    user_id = user.id
     ONLINE_USERS[user_id] = time.time()
    
     if not check_global_spam(user_id):
@@ -3578,12 +3590,19 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
-    user_id = update.effective_user.id
-    ONLINE_USERS[user_id] = time.time()
     message = update.message
 
     if not message:
         return
+
+    user = update.effective_user
+
+  
+    if not user:
+        return
+
+    user_id = user.id
+    ONLINE_USERS[user_id] = time.time()
 
         # ===== SUPPORT =====
     if context.user_data.get("support_mode"):
