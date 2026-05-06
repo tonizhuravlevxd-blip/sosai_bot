@@ -835,28 +835,27 @@ import json
 import logging
 
 
-async def fal_music_generate(prompt, duration=30, max_wait=300):
+async def fal_music_generate(prompt, duration=30, max_wait=420):
     """
     Priority mode:
-    1. Sonauto (main, waits, monitors queue)
-    2. Ace-Step (fallback if stuck/slow)
+    1. Lyria2 дольше пытается создать трек
+    2. Ace-Step включается только если Lyria2 долго не отвечает или упала
     """
 
     prompt = clean_prompt(prompt)
 
-    # 🔥 FIX: защита от короткого prompt (иначе 422)
+    # 🔥 FIX: защита от короткого prompt
     if not prompt or len(prompt) < 10:
         prompt = "Сделай популярную песню с вокалом"
 
-    # 🔥 усиливаем prompt для стабильной генерации
-    enhanced_prompt = prompt 
+    enhanced_prompt = prompt
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
     }
 
-    sonauto = {
+    lyria = {
         "name": "lyria2",
         "url": "https://queue.fal.run/fal-ai/lyria2",
         "payload": {
@@ -883,7 +882,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
         }
     }
 
-    async def run_model(model, detect_stuck=False):
+    async def run_model(model, detect_stuck=False, model_max_wait=None, stuck_seconds=120):
         try:
             async with aiohttp.ClientSession() as session:
 
@@ -903,21 +902,22 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                     raise Exception(f"{model['name']} no status_url")
 
                 start_time = time.time()
+                wait_limit = model_max_wait or max_wait
 
-                # для детекта "залипания"
                 last_position = None
                 last_change_time = time.time()
 
                 while True:
                     await asyncio.sleep(2)
 
-                    if time.time() - start_time > max_wait:
+                    if time.time() - start_time > wait_limit:
                         raise Exception(f"{model['name']} timeout")
 
                     # ===== STATUS =====
                     async with session.get(status_url, headers=headers) as r:
                         if r.status != 200:
                             continue
+
                         status_data = json.loads(await r.text())
 
                     status = status_data.get("status")
@@ -929,7 +929,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
                     if detect_stuck:
                         if queue_pos is not None:
                             if queue_pos == last_position:
-                                if time.time() - last_change_time > 20:
+                                if time.time() - last_change_time > stuck_seconds:
                                     raise Exception("QUEUE_STUCK")
                             else:
                                 last_position = queue_pos
@@ -937,6 +937,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
                     # ===== RESULT =====
                     result = None
+
                     if result_url:
                         async with session.get(result_url, headers=headers) as r:
                             if r.status == 200:
@@ -981,47 +982,73 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
 
     # ================= PRIORITY FLOW =================
 
-    # 🚀 1. запускаем Sona
-    sona_task = asyncio.create_task(run_model(sonauto, detect_stuck=True))
+    # 🚀 1. Сначала запускаем Lyria2
+    lyria_task = asyncio.create_task(
+        run_model(
+            lyria,
+            detect_stuck=True,
+            model_max_wait=300,
+            stuck_seconds=120
+        )
+    )
 
     try:
-        # ⏳ даем ей шанс
+        # ⏳ Даём Lyria2 180 секунд до fallback
         done, pending = await asyncio.wait(
-            [sona_task],
-            timeout=25
+            [lyria_task],
+            timeout=180
         )
 
         if done:
             result = list(done)[0].result()
+
             if "url" in result:
-                logging.info(f"🎧 SONA WIN: {result['url']}")
+                logging.info(f"🎧 LYRIA2 WIN: {result['url']}")
                 return result["url"]
 
+            logging.warning(f"⚠️ LYRIA2 ERROR: {result.get('error')}")
+
     except Exception as e:
-        if "QUEUE_STUCK" not in str(e):
-            logging.warning(f"Sona issue: {e}")
+        logging.warning(f"Lyria2 issue: {e}")
 
-    # 🔄 2. fallback
-    logging.info("⚡ Switching to ACE fallback")
+    # 🔄 2. Только теперь подключаем Ace-Step
+    logging.info("⚡ Lyria2 долго генерирует, подключаем ACE fallback")
 
-    ace_task = asyncio.create_task(run_model(ace))
-
-    done, pending = await asyncio.wait(
-        [sona_task, ace_task],
-        return_when=asyncio.FIRST_COMPLETED
+    ace_task = asyncio.create_task(
+        run_model(
+            ace,
+            detect_stuck=False,
+            model_max_wait=240
+        )
     )
 
-    # ❌ отменяем оставшиеся
-    for task in pending:
-        task.cancel()
+    tasks = [lyria_task, ace_task]
 
-    for task in done:
-        result = task.result()
-        if "url" in result:
-            logging.info(f"🎧 WINNER: {result['model']} -> {result['url']}")
-            return result["url"]
+    while tasks:
 
-    raise Exception("All models failed")
+        done, pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_COMPLETED
+        )
+
+        for task in done:
+            result = task.result()
+
+            if "url" in result:
+                logging.info(f"🎧 WINNER: {result['model']} -> {result['url']}")
+
+                for pending_task in pending:
+                    pending_task.cancel()
+
+                return result["url"]
+
+            logging.warning(
+                f"⚠️ MODEL FAILED: {result.get('model')} | {result.get('error')}"
+            )
+
+        tasks = list(pending)
+
+    raise Exception("All music models failed")
 
 
 # ================= FAL VIDEO GENERATOR =================
@@ -2464,7 +2491,7 @@ async def _handle_generation_inner(job):
                                     async def generate_music():
                                         return await asyncio.wait_for(
                                             fal_music_generate(prompt),
-                                            timeout=360
+                                            timeout=480
                                         )
 
                                     result = await smart_retry(
@@ -2647,7 +2674,7 @@ async def music_worker():
                 # ===== TIMEOUT =====
                 await asyncio.wait_for(
                     handle_generation_job(job),
-                    timeout=420
+                    timeout=540
                 )
 
             except asyncio.TimeoutError:
