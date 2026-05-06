@@ -125,7 +125,7 @@ MAX_INPUT_IMAGES = 4
 # ===== PREMIUM LIMITS =====
 # ================= PRICES =================
 PRICE_VIDEO = "99.00"
-PRICE_MUSIC = "69.00"
+PRICE_MUSIC = "6.00"
 PRICE_CARTOON = "99.00"
 
 PREMIUM_IMAGE_LIMIT = 12
