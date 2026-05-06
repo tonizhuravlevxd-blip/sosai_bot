@@ -1874,67 +1874,67 @@ async def _handle_generation_inner(job):
 
                             USER_CACHE.pop(user_id, None)
 
-async with db_pool.acquire() as conn:
-    async with conn.transaction():
+                            async with db_pool.acquire() as conn:
+                                async with conn.transaction():
 
-        ref_data = await conn.fetchrow(
-            """
-            SELECT ref_by, ref_rewarded
-            FROM users
-            WHERE user_id = $1
-            FOR UPDATE
-            """,
-            user_id
-        )
+                                    ref_data = await conn.fetchrow(
+                                        """
+                                        SELECT ref_by, ref_rewarded
+                                        FROM users
+                                        WHERE user_id = $1
+                                        FOR UPDATE
+                                        """,
+                                        user_id
+                                    )
 
-        if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
+                                    if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
 
-            referrer_id = ref_data["ref_by"]
+                                        referrer_id = ref_data["ref_by"]
 
-            rewarded_count = await conn.fetchval(
-                """
-                SELECT COUNT(*)
-                FROM users
-                WHERE ref_by = $1
-                  AND ref_rewarded = 1
-                """,
-                referrer_id
-            )
+                                        rewarded_count = await conn.fetchval(
+                                            """
+                                            SELECT COUNT(*)
+                                            FROM users
+                                            WHERE ref_by = $1
+                                              AND ref_rewarded = 1
+                                            """,
+                                            referrer_id
+                                        )
 
-            if rewarded_count < MAX_REFERRALS_PER_USER:
+                                        if rewarded_count < MAX_REFERRALS_PER_USER:
 
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET bonus_images = bonus_images + 1
-                    WHERE user_id = $1
-                    """,
-                    referrer_id
-                )
+                                            await conn.execute(
+                                                """
+                                                UPDATE users
+                                                SET bonus_images = bonus_images + 1
+                                                WHERE user_id = $1
+                                                """,
+                                                referrer_id
+                                            )
 
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET ref_rewarded = 1
-                    WHERE user_id = $1
-                    """,
-                    user_id
-                )
+                                            await conn.execute(
+                                                """
+                                                UPDATE users
+                                                SET ref_rewarded = 1
+                                                WHERE user_id = $1
+                                                """,
+                                                user_id
+                                            )
 
-                USER_CACHE.pop(referrer_id, None)
+                                            USER_CACHE.pop(referrer_id, None)
 
-            else:
-                # 2 = реферал обработан, но бонус не выдан из-за лимита
-                await conn.execute(
-                    """
-                    UPDATE users
-                    SET ref_rewarded = 2
-                    WHERE user_id = $1
-                    """,
-                    user_id
-                )
+                                        else:
+                                            await conn.execute(
+                                                """
+                                                UPDATE users
+                                                SET ref_rewarded = 2
+                                                WHERE user_id = $1
+                                                """,
+                                                user_id
+                                            )
 
-USER_CACHE.pop(user_id, None)
+                            USER_CACHE.pop(user_id, None)
+
                             context.user_data["last_prompt"] = prompt
                             context.user_data["last_images"] = images_local
 
