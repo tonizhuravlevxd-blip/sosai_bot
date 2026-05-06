@@ -131,6 +131,7 @@ PRICE_CARTOON = "99.00"
 PREMIUM_IMAGE_LIMIT = 12
 PREMIUM_VIDEO_LIMIT = 3
 PREMIUM_MUSIC_LIMIT = 2
+MAX_REFERRALS_PER_USER = 10
 
 REQUIRED_CHANNEL = "@sosai_ai"
 
@@ -407,6 +408,10 @@ async def init_db():
 
         await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_users_last_active ON users(last_active)
+        """)
+
+        await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_users_ref_by ON users(ref_by)
         """)
 
         await conn.execute("""
@@ -1869,33 +1874,67 @@ async def _handle_generation_inner(job):
 
                             USER_CACHE.pop(user_id, None)
 
-                            async with db_pool.acquire() as conn:
+async with db_pool.acquire() as conn:
+    async with conn.transaction():
 
-                                ref_data = await conn.fetchrow(
-                                    "SELECT ref_by, ref_rewarded FROM users WHERE user_id=$1",
-                                    user_id
-                                )
+        ref_data = await conn.fetchrow(
+            """
+            SELECT ref_by, ref_rewarded
+            FROM users
+            WHERE user_id = $1
+            FOR UPDATE
+            """,
+            user_id
+        )
 
-                                if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
+        if ref_data and ref_data["ref_by"] and ref_data["ref_rewarded"] == 0:
 
-                                    await conn.execute(
-                                        """
-                                        UPDATE users
-                                        SET ref_rewarded = 1
-                                        WHERE user_id=$1
-                                        """,
-                                        user_id
-                                    )
+            referrer_id = ref_data["ref_by"]
 
-                                    await conn.execute(
-                                        """
-                                        UPDATE users
-                                        SET bonus_images = bonus_images + 1
-                                        WHERE user_id=$1
-                                        """,
-                                        ref_data["ref_by"]
-                                    )
+            rewarded_count = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM users
+                WHERE ref_by = $1
+                  AND ref_rewarded = 1
+                """,
+                referrer_id
+            )
 
+            if rewarded_count < MAX_REFERRALS_PER_USER:
+
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET bonus_images = bonus_images + 1
+                    WHERE user_id = $1
+                    """,
+                    referrer_id
+                )
+
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET ref_rewarded = 1
+                    WHERE user_id = $1
+                    """,
+                    user_id
+                )
+
+                USER_CACHE.pop(referrer_id, None)
+
+            else:
+                # 2 = реферал обработан, но бонус не выдан из-за лимита
+                await conn.execute(
+                    """
+                    UPDATE users
+                    SET ref_rewarded = 2
+                    WHERE user_id = $1
+                    """,
+                    user_id
+                )
+
+USER_CACHE.pop(user_id, None)
                             context.user_data["last_prompt"] = prompt
                             context.user_data["last_images"] = images_local
 
@@ -2717,71 +2756,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except:
             pass
 
-    db_user = await get_user(user.id)
 
-    if not db_user:
-
-        now = int(time.time())
-
-        async with db_pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO users (
-                    user_id,
-                    week_start,
-                    accepted_terms,
-                    ref_by,
-                    created_at,
-                    last_active
-                )
-                VALUES ($1, $2, 0, $3, $4, $5)
-                """,
-                user.id, now, ref_by, now, now
-            )
-
-        if ref_by and ref_by != user.id:
-
-            async with db_pool.acquire() as conn:
-
-                # ❗ Проверяем, не был ли уже реферал привязан
-                existing = await conn.fetchval(
-                    "SELECT ref_by FROM users WHERE user_id=$1",
-                    user.id
-                )
-
-                if existing is None:
-
-                    # ❗ Проверка: существует ли реферер
-                    ref_exists = await conn.fetchval(
-                        "SELECT 1 FROM users WHERE user_id=$1",
-                        ref_by
-                    )
-
-                    if ref_exists:
-
-                        # 🔥 анти-абуз: не даем бонус сразу, только фиксируем реферала
-                        await conn.execute(
-                            """
-                            UPDATE users 
-                            SET referrals = referrals + 1
-                            WHERE user_id = $1
-                            """,
-                            ref_by
-                        )
-
-                        # 🔥 помечаем, что пользователь еще не дал награду
-                        await conn.execute(
-                            """
-                            UPDATE users
-                            SET ref_rewarded = 0
-                            WHERE user_id = $1
-                            """,
-                            user.id
-                        )
-
-                        USER_CACHE.pop(user.id, None)
-
-        db_user = await get_user(user.id)
 
     # 🔥 ОБНОВЛЯЕМ АКТИВНОСТЬ (ВАЖНО ДЛЯ /stats)
     await update_last_active(user.id)
