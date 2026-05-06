@@ -845,7 +845,7 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
     prompt = clean_prompt(prompt)
 
     # 🔥 FIX: защита от короткого prompt (иначе 422)
-    if not prompt or len(prompt) < 15:
+    if not prompt or len(prompt) < 10:
         prompt = "Сделай популярную песню с вокалом"
 
     # 🔥 усиливаем prompt для стабильной генерации
@@ -857,8 +857,8 @@ async def fal_music_generate(prompt, duration=30, max_wait=300):
     }
 
     sonauto = {
-        "name": "sonauto",
-        "url": "https://queue.fal.run/sonauto/v2/text-to-music",
+        "name": "lyria2",
+        "url": "https://queue.fal.run/fal-ai/lyria2",
         "payload": {
             "prompt": enhanced_prompt,
             "duration": duration,
