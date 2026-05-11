@@ -835,221 +835,104 @@ import json
 import logging
 
 
-async def fal_music_generate(prompt, duration=30, max_wait=420):
+async def fal_music_generate(prompt, duration=30, max_wait=600):
     """
-    Priority mode:
-    1. Lyria2 дольше пытается создать трек
-    2. Ace-Step включается только если Lyria2 долго не отвечает или упала
+    Генерация музыки только через Lyria2.
+    Ace-Step полностью отключен.
     """
 
     prompt = clean_prompt(prompt)
 
-    # 🔥 FIX: защита от короткого prompt
     if not prompt or len(prompt) < 10:
         prompt = "Сделай популярную песню с вокалом"
-
-    enhanced_prompt = prompt
 
     headers = {
         "Authorization": f"Key {FAL_KEY}",
         "Content-Type": "application/json"
     }
 
-    lyria = {
-        "name": "lyria2",
-        "url": "https://queue.fal.run/fal-ai/lyria2",
-        "payload": {
-            "prompt": enhanced_prompt,
-            "duration": duration,
-            "output_format": "mp3"
-        }
+    payload = {
+        "prompt": prompt,
+        "duration": duration,
+        "output_format": "mp3"
     }
 
-    ace = {
-        "name": "ace-step",
-        "url": "https://queue.fal.run/fal-ai/minimax-music/v2.6",
-        "payload": {
-            "prompt": enhanced_prompt,
-            "lyrics": f"""
+    timeout = aiohttp.ClientTimeout(total=max_wait + 60)
 
-{enhanced_prompt}
+    async with aiohttp.ClientSession(timeout=timeout) as session:
 
+        # ===== CREATE LYRIA2 JOB =====
+        async with session.post(
+            "https://queue.fal.run/fal-ai/lyria2",
+            json=payload,
+            headers=headers
+        ) as r:
+            text = await r.text()
 
-{prompt}
-""",
-            "duration": duration,
-            "output_format": "mp3"
-        }
-    }
+            if r.status not in (200, 202):
+                raise Exception(f"lyria2 create failed: {r.status} {text}")
 
-    async def run_model(model, detect_stuck=False, model_max_wait=None, stuck_seconds=120):
-        try:
-            async with aiohttp.ClientSession() as session:
+            data = json.loads(text)
 
-                # ===== CREATE JOB =====
-                async with session.post(model["url"], json=model["payload"], headers=headers) as r:
-                    text = await r.text()
+        status_url = data.get("status_url")
+        result_url = data.get("response_url")
 
-                    if r.status not in (200, 202):
-                        raise Exception(f"{model['name']} create failed: {r.status} {text}")
+        if not status_url or not result_url:
+            raise Exception(f"lyria2 bad create response: {data}")
 
-                    data = json.loads(text)
+        start_time = time.time()
 
-                status_url = data.get("status_url")
-                result_url = data.get("response_url")
+        # ===== WAIT LYRIA2 RESULT =====
+        while True:
+            if time.time() - start_time > max_wait:
+                raise Exception("lyria2 timeout")
 
-                if not status_url:
-                    raise Exception(f"{model['name']} no status_url")
-
-                start_time = time.time()
-                wait_limit = model_max_wait or max_wait
-
-                last_position = None
-                last_change_time = time.time()
-
-                while True:
+            async with session.get(status_url, headers=headers) as r:
+                if r.status != 200:
                     await asyncio.sleep(2)
+                    continue
 
-                    if time.time() - start_time > wait_limit:
-                        raise Exception(f"{model['name']} timeout")
+                status_data = json.loads(await r.text())
 
-                    # ===== STATUS =====
-                    async with session.get(status_url, headers=headers) as r:
-                        if r.status != 200:
-                            continue
+            status = status_data.get("status")
+            queue_pos = status_data.get("queue_position")
 
-                        status_data = json.loads(await r.text())
+            logging.info(f"🎵 lyria2 STATUS={status} POS={queue_pos}")
 
-                    status = status_data.get("status")
-                    queue_pos = status_data.get("queue_position")
+            if status == "FAILED":
+                raise Exception(f"lyria2 failed: {status_data}")
 
-                    logging.info(f"🎵 {model['name']} STATUS={status} POS={queue_pos}")
+            if status == "COMPLETED":
 
-                    # ===== DETECT STUCK =====
-                    if detect_stuck:
-                        if queue_pos is not None:
-                            if queue_pos == last_position:
-                                if time.time() - last_change_time > stuck_seconds:
-                                    raise Exception("QUEUE_STUCK")
-                            else:
-                                last_position = queue_pos
-                                last_change_time = time.time()
+                async with session.get(result_url, headers=headers) as r:
+                    result_text = await r.text()
 
-                    # ===== RESULT =====
-                    result = None
+                    if r.status != 200:
+                        raise Exception(f"lyria2 result failed: {r.status} {result_text}")
 
-                    if result_url:
-                        async with session.get(result_url, headers=headers) as r:
-                            if r.status == 200:
-                                try:
-                                    result = json.loads(await r.text())
-                                except:
-                                    pass
+                    result = json.loads(result_text)
 
-                    if result:
-                        status = "COMPLETED"
+                audio = result.get("audio")
 
-                    if status == "COMPLETED" and result:
+                if isinstance(audio, dict):
+                    audio_url = audio.get("url")
 
-                        audio = result.get("audio")
+                elif isinstance(audio, list) and audio:
+                    audio_url = audio[0].get("url")
 
-                        if isinstance(audio, dict):
-                            audio_url = audio.get("url")
-                        elif isinstance(audio, list) and audio:
-                            audio_url = audio[0].get("url")
-                        else:
-                            audio_url = (
-                                result.get("audio_url")
-                                or result.get("url")
-                            )
+                else:
+                    audio_url = (
+                        result.get("audio_url")
+                        or result.get("url")
+                    )
 
-                        if audio_url:
-                            return {
-                                "model": model["name"],
-                                "url": audio_url
-                            }
+                if not audio_url:
+                    raise Exception(f"lyria2 no audio url: {result}")
 
-                        raise Exception(f"{model['name']} no audio url")
+                logging.info(f"🎧 LYRIA2 DONE: {audio_url}")
+                return audio_url
 
-                    if status == "FAILED":
-                        raise Exception(f"{model['name']} failed")
-
-        except Exception as e:
-            return {
-                "model": model["name"],
-                "error": str(e)
-            }
-
-    # ================= PRIORITY FLOW =================
-
-    # 🚀 1. Сначала запускаем Lyria2
-    lyria_task = asyncio.create_task(
-        run_model(
-            lyria,
-            detect_stuck=True,
-            model_max_wait=300,
-            stuck_seconds=120
-        )
-    )
-
-    try:
-        # ⏳ Даём Lyria2 180 секунд до fallback
-        done, pending = await asyncio.wait(
-            [lyria_task],
-            timeout=180
-        )
-
-        if done:
-            result = list(done)[0].result()
-
-            if "url" in result:
-                logging.info(f"🎧 LYRIA2 WIN: {result['url']}")
-                return result["url"]
-
-            logging.warning(f"⚠️ LYRIA2 ERROR: {result.get('error')}")
-
-    except Exception as e:
-        logging.warning(f"Lyria2 issue: {e}")
-
-    # 🔄 2. Только теперь подключаем Ace-Step
-    logging.info("⚡ Lyria2 долго генерирует, подключаем ACE fallback")
-
-    ace_task = asyncio.create_task(
-        run_model(
-            ace,
-            detect_stuck=False,
-            model_max_wait=240
-        )
-    )
-
-    tasks = [lyria_task, ace_task]
-
-    while tasks:
-
-        done, pending = await asyncio.wait(
-            tasks,
-            return_when=asyncio.FIRST_COMPLETED
-        )
-
-        for task in done:
-            result = task.result()
-
-            if "url" in result:
-                logging.info(f"🎧 WINNER: {result['model']} -> {result['url']}")
-
-                for pending_task in pending:
-                    pending_task.cancel()
-
-                return result["url"]
-
-            logging.warning(
-                f"⚠️ MODEL FAILED: {result.get('model')} | {result.get('error')}"
-            )
-
-        tasks = list(pending)
-
-    raise Exception("All music models failed")
-
+            await asyncio.sleep(2)
 
 # ================= FAL VIDEO GENERATOR =================
 
@@ -2491,12 +2374,12 @@ async def _handle_generation_inner(job):
                                     async def generate_music():
                                         return await asyncio.wait_for(
                                             fal_music_generate(prompt),
-                                            timeout=480
+                                            timeout=600
                                         )
 
                                     result = await smart_retry(
                                         generate_music,
-                                        retries=3,
+                                        retries=1,
                                         base_delay=2,
                                         max_delay=10
                                     )
@@ -2638,7 +2521,7 @@ async def video_worker():
                 # ===== TIMEOUT (видео дольше) =====
                 await asyncio.wait_for(
                     handle_generation_job(job),
-                    timeout=600
+                    timeout=720
                 )
 
             except asyncio.TimeoutError:
@@ -2674,7 +2557,7 @@ async def music_worker():
                 # ===== TIMEOUT =====
                 await asyncio.wait_for(
                     handle_generation_job(job),
-                    timeout=540
+                    timeout=720
                 )
 
             except asyncio.TimeoutError:
@@ -3231,10 +3114,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.message.reply_text(
             "🎵 Напишите тему песни и выберите жанр\n\n"
-            "🎙️Сейчас временно стоит другая модель\n"
-            "Поэтому пишите сразу слова песни\n"
+            "🎙️ Музыка создается через Lyria2\n"
             "Пример:\n"
-            "Мои красивые сестры любят дорогие розы"
+            "сделай трек жанр хип хоп про Вику (Мои красивые сестры любят дорогие розы)"
         )
         return
 
